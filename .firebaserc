@@ -1,0 +1,14 @@
+{
+  "projects": {
+    "default": "tecstellar"
+  },
+  "targets": {
+    "tecstellar": {
+      "hosting": {
+        "tcc": [
+          "tecstellar-tcc"
+        ]
+      }
+    }
+  }
+}
