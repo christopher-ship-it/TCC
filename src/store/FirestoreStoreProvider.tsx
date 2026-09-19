@@ -128,6 +128,7 @@ export function FirestoreStoreProvider({ children }: { children: React.ReactNode
           status: action.status,
           outcome: action.outcome,
           comment: action.comment,
+          telephony: action.telephony,
         };
         const callHistory = [entry, ...user.callHistory];
 

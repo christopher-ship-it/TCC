@@ -42,6 +42,7 @@ function reducer(state: State, action: Action): State {
           status: action.status,
           outcome: action.outcome,
           comment: action.comment,
+          telephony: action.telephony,
         };
         const callHistory = [entry, ...u.callHistory];
         const next: CustomerUser = { ...u, callHistory };

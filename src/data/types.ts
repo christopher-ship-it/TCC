@@ -49,6 +49,8 @@ export interface AgentAccount {
   states: string[];
   dailyTarget: number;
   clickToDial: boolean;
+  /** Softphone login (TeleCMI user id, e.g. "101_33338836"). The password is never stored — the agent types it per session. */
+  telecmiUserId?: string;
   lastActiveLabel: string;
   todayCalls: number;
   todayConnected: number;
@@ -93,6 +95,15 @@ export const OUTCOME_LIST: { outcome: Outcome; key: string; note?: string }[] = 
   { outcome: 'Using competitor', key: 'i' },
 ];
 
+// Telephony details for calls placed through the in-app softphone (absent for calls logged by hand).
+export interface CallTelephony {
+  provider: string;
+  callId: string | null;
+  durationSec: number;
+  ringSec: number;
+  disposition: string;
+}
+
 export interface CallLogEntry {
   id: string;
   atLabel: string;
@@ -102,6 +113,7 @@ export interface CallLogEntry {
   outcome?: Outcome;
   comment: string;
   auto?: boolean;
+  telephony?: CallTelephony;
 }
 
 export interface TicketRecord {
