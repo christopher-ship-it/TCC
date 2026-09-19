@@ -4,6 +4,7 @@ import { StoreProvider, useStore } from './store/StoreContext';
 import LoginPage from './pages/LoginPage';
 import Launcher from './pages/agent/Launcher';
 import Workspace from './pages/agent/Workspace';
+import AgentTelephony from './components/agent/AgentTelephony';
 import TeamPerformance from './pages/supervisor/TeamPerformance';
 import TeamAccess from './pages/supervisor/TeamAccess';
 import Allocation from './pages/supervisor/Allocation';
@@ -33,7 +34,7 @@ function Routed() {
     <Routes>
       <Route path="/" element={<LoginPage />} />
       <Route path="/launcher" element={<RequireRole roles={['agent']}><Launcher /></RequireRole>} />
-      <Route path="/work/:appId" element={<RequireRole roles={['agent']}><Workspace /></RequireRole>} />
+      <Route path="/work/:appId" element={<RequireRole roles={['agent']}><AgentTelephony><Workspace /></AgentTelephony></RequireRole>} />
       <Route path="/supervisor" element={<RequireRole roles={['supervisor']}><TeamPerformance /></RequireRole>} />
       <Route path="/supervisor/team" element={<RequireRole roles={['supervisor']}><TeamAccess /></RequireRole>} />
       <Route path="/supervisor/allocation" element={<RequireRole roles={['supervisor']}><Allocation /></RequireRole>} />

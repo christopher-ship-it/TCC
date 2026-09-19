@@ -7,6 +7,9 @@ import { CALL_STATUS_LIST, OUTCOME_LIST, POSITIVE_OUTCOMES, QUEUES, type AppId, 
 import { tasksForQueue, queueCounts } from '../../lib/queue';
 import { APPS } from '../../data/seed';
 import MidCallModal from '../../components/agent/MidCallModal';
+import { TccCallPanel } from '../../components/agent/AgentTelephony';
+import { formatDuration, useTelephonyOptional, type CallResult } from '../../telephony';
+import { callMeta, suggestStatus, toCallTelephony } from '../../lib/telephony';
 
 export default function Workspace() {
   const { appId } = useParams<{ appId: AppId }>();
@@ -30,6 +33,13 @@ export default function Workspace() {
   const [sessionStart] = useState(Date.now());
   const [, forceTick] = useState(0);
   const totalAtQueueStart = useRef<Record<string, number>>({});
+  // Softphone (null when telephony isn't configured → plain tel: link below).
+  const telephony = useTelephonyOptional();
+  const controller = telephony?.controller;
+  const callActive = !!telephony?.snapshot.call;
+  const [lastCall, setLastCall] = useState<CallResult | null>(null);
+  const currentUserIdRef = useRef<string | null>(null);
+  const toggleCallRef = useRef<() => void>(() => {});
 
   useEffect(() => {
     const id = setInterval(() => forceTick((n) => n + 1), 30000);
@@ -67,7 +77,20 @@ export default function Workspace() {
   const focusId = searchParams.get('focus');
   const currentUser = (focusId && list.find((u) => u.id === focusId)) || list[0];
 
+  // When a softphone call ends, remember it (saved with the log entry) and pre-fill the cases the line already knows.
+  useEffect(() => {
+    if (!controller) return;
+    return controller.onCallEnded((r) => {
+      if (r.meta.customerId && r.meta.customerId !== currentUserIdRef.current) return;
+      setLastCall(r);
+      const suggested = suggestStatus(r);
+      if (suggested) setStatus((s) => s ?? suggested);
+    });
+  }, [controller]);
+
   function resetForm() {
+    setLastCall(null);
+    controller?.clearResult();
     setStatus(null);
     setOutcome(null);
     setComment('');
@@ -76,20 +99,21 @@ export default function Workspace() {
   }
 
   function save() {
-    if (!currentUser || !currentAgent || !status) return;
+    if (!currentUser || !currentAgent || !status || callActive) return;
     if (!comment.trim()) {
       setCommentError(true);
       return;
     }
     const finalOutcome = status.startsWith('Answered') && outcome ? outcome : undefined;
-    dispatch({ type: 'LOG_CALL', userId: currentUser.id, status, outcome: finalOutcome, comment, agentId: currentAgent.id });
+    const telephonyInfo = lastCall && lastCall.meta.customerId === currentUser.id ? toCallTelephony(lastCall) : undefined;
+    dispatch({ type: 'LOG_CALL', userId: currentUser.id, status, outcome: finalOutcome, comment, agentId: currentAgent.id, telephony: telephonyInfo });
     setDoneToday((d) => d + 1);
     if (finalOutcome && POSITIVE_OUTCOMES.includes(finalOutcome)) setPositiveToday((p) => p + 1);
     resetForm();
   }
 
   function skip() {
-    if (!currentUser) return;
+    if (!currentUser || callActive) return;
     setSkipped((s) => new Set(s).add(currentUser.id));
     resetForm();
   }
@@ -102,6 +126,7 @@ export default function Workspace() {
 
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
+      if (e.key === 'F1' && controller) { e.preventDefault(); toggleCallRef.current(); return; }
       const tag = (e.target as HTMLElement)?.tagName;
       if (tag === 'TEXTAREA' || tag === 'INPUT' || tag === 'SELECT') {
         if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); save(); }
@@ -118,7 +143,14 @@ export default function Workspace() {
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentUser, status, outcome, comment]);
+  }, [currentUser, status, outcome, comment, callActive]);
+
+  currentUserIdRef.current = currentUser?.id ?? null;
+  toggleCallRef.current = () => {
+    if (!controller || !currentUser || !currentAgent) return;
+    if (controller.getSnapshot().call) controller.hangup();
+    else controller.dial(currentUser.phone, callMeta(currentUser, currentAgent));
+  };
 
   if (!currentAgent || !app || !appId) return null;
 
@@ -160,6 +192,7 @@ export default function Workspace() {
           <button
             key={q.key}
             type="button"
+            disabled={callActive}
             onClick={() => { setSelectedQueue(q.key); resetForm(); }}
             style={{
               padding: '6px 12px', fontSize: 12, fontWeight: 600, border: '1px solid var(--color-divider)',
@@ -212,14 +245,18 @@ export default function Workspace() {
               <div style={{ fontFamily: 'var(--font-heading)', fontWeight: 800, fontSize: 26, marginTop: 'var(--space-3)', letterSpacing: '-.01em' }}>{currentUser.name}</div>
               <div style={{ fontSize: 13, color: 'var(--color-neutral-700)', marginBottom: 'var(--space-3)' }}>{currentUser.business} · {currentUser.city}, {currentUser.state ? currentUser.effectiveState.slice(0, 2).toUpperCase() : `${currentUser.effectiveState} (no state on file)`}</div>
               <div style={{ fontFamily: 'ui-monospace,Menlo,monospace', fontSize: 26, letterSpacing: '-.01em', padding: 'var(--space-2) 0', borderTop: '2px solid var(--color-divider)', borderBottom: '1px solid var(--color-divider)' }}>{currentUser.phone}</div>
-              <a className="btn btn-primary btn-block" href={`tel:${currentUser.phone.replace(/\s/g, '')}`} style={{ textDecoration: 'none' }}>Click to dial · F1</a>
+              {telephony ? (
+                <div style={{ marginTop: 'var(--space-2)' }}><TccCallPanel user={currentUser} agent={currentAgent} /></div>
+              ) : (
+                <a className="btn btn-primary btn-block" href={`tel:${currentUser.phone.replace(/\s/g, '')}`} style={{ textDecoration: 'none' }}>Click to dial · F1</a>
+              )}
               <button className="btn btn-secondary btn-block" type="button" style={{ justifyContent: 'flex-start' }} onClick={() => setMidCallOpen(true)}>I dialled from my mobile / reroute / escalate</button>
               <div style={{ marginTop: 'var(--space-4)', paddingTop: 'var(--space-3)', borderTop: '1px solid var(--color-divider)' }}>
                 <div className="eyebrow" style={{ marginBottom: 'var(--space-2)' }}>Attempt {currentUser.attempt} · no cap</div>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-2)', fontSize: 12 }}>
                   {currentUser.callHistory.slice(0, 3).map((c) => (
                     <div key={c.id} style={{ display: 'flex', justifyContent: 'space-between', paddingBottom: 'var(--space-2)', borderBottom: '1px solid var(--color-divider)' }}>
-                      <span>{c.atLabel}</span><span style={{ color: 'var(--color-neutral-700)' }}>{c.status}{c.outcome ? ` · ${c.outcome}` : ''} · {c.agentName}</span>
+                      <span>{c.atLabel}</span><span style={{ color: 'var(--color-neutral-700)' }}>{c.status}{c.outcome ? ` · ${c.outcome}` : ''}{c.telephony?.durationSec ? ` · ${formatDuration(c.telephony.durationSec)}` : ''} · {c.agentName}</span>
                     </div>
                   ))}
                   {currentUser.callHistory.length === 0 && <div style={{ color: 'var(--color-neutral-700)' }}>No previous attempts.</div>}
@@ -273,8 +310,8 @@ export default function Workspace() {
               )}
 
               <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)', marginTop: 'var(--space-4)', paddingTop: 'var(--space-3)', borderTop: '2px solid var(--color-divider)', flexWrap: 'wrap' }}>
-                <button className="btn btn-primary" type="button" disabled={!status} onClick={save}>Save &amp; serve next · ⏎</button>
-                <button className="btn btn-secondary" type="button" onClick={skip}>Skip · S</button>
+                <button className="btn btn-primary" type="button" disabled={!status || callActive} onClick={save}>Save &amp; serve next · ⏎</button>
+                <button className="btn btn-secondary" type="button" disabled={callActive} onClick={skip}>Skip · S</button>
                 <button className="btn btn-secondary" type="button" onClick={raiseTicket}>Raise ticket · T</button>
                 <span style={{ marginLeft: 'auto', fontSize: 11, color: 'var(--color-neutral-700)' }}>1–5 sets status · Q–I sets outcome · nothing saves without a comment</span>
               </div>
@@ -301,7 +338,7 @@ export default function Workspace() {
                 {currentUser.callHistory.map((c) => (
                   <div key={c.id}>
                     <div style={{ fontWeight: 600 }}>{c.status}{c.outcome ? ` · ${c.outcome}` : ''}</div>
-                    <div style={{ color: 'var(--color-neutral-700)' }}>{c.atLabel} · {c.agentName}</div>
+                    <div style={{ color: 'var(--color-neutral-700)' }}>{c.atLabel} · {c.agentName}{c.telephony ? ` · ${c.telephony.durationSec ? `${formatDuration(c.telephony.durationSec)} on call` : 'call did not connect'}` : ''}</div>
                   </div>
                 ))}
               </div>
