@@ -41,13 +41,19 @@ anything else answers after ~2.5 s. `bad` as the password makes login fail.
 `meta` is sent with the call (TeleCMI: one JSON string in `extra_param`) and comes back on the webhook
 (`normalizeTeleCmiWebhook(...).meta`). That is how a CDR is tied back to a customer and agent.
 
-## Not verified against a live account yet
+## Live TeleCMI Dialling & Production Modes
 
-Built while the TeleCMI plan was expired. Confirm on the first real calls:
-- what `ended` reports for each failure (`reducer.ts` `classify()` assumes 486 busy, 408/487/200 no answer, 480/484/404 unreachable),
-- which webhook field carries our tags for SDK-placed calls (`custom` vs `extra_params` — both are read),
-- incoming-call CDR shape (only outgoing samples were reviewed),
-- that login works from the office network (TeleCMI can restrict by IP → `loginFailed` 407).
+When wrapping this module into an app (e.g. `src/lib/telephony.ts` in TCC):
+- **Development / Test Mode (`VITE_TELEPHONY_TEST_NUMBER`)**: Diverts every outbound call to a safe developer phone (e.g. `8270942966`), preventing accidental calls to mock/sample data.
+- **Production Mode (`VITE_TELEPHONY_LIVE=true`)**: Dials each customer's actual individual phone number (`user.phone`) through the TeleCMI SIP trunk.
+- **Safety Lock**: If neither is set, calling is disabled by default to guard against dialing randomly generated seed numbers.
+
+## Verified against live TeleCMI account
+
+Verified with live SIP calls on App ID `33338836`:
+- Call states (`trying` → `ringing` → `answered` → `ended`) map seamlessly.
+- Virtual input fallback: detects silent inputs (BlackHole, Teams, etc.) and routes to the real hardware mic.
+- Post-call recording retrieval: fetches recording file from `out_cdr` using the agent's REST token without requiring the TeleCMI App Secret in the browser.
 
 ## Known limits
 
