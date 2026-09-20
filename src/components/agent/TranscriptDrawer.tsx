@@ -128,7 +128,7 @@ export default function TranscriptDrawer({ user, call, onClose }: TranscriptDraw
                   gap: 8,
                 }}
               >
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 6 }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                     <span
                       style={{
@@ -148,6 +148,43 @@ export default function TranscriptDrawer({ user, call, onClose }: TranscriptDraw
                       Sentiment score: {analytics.sentimentScore > 0 ? `+${analytics.sentimentScore.toFixed(2)}` : analytics.sentimentScore.toFixed(2)}
                     </span>
                   </div>
+
+                  {analytics.isLiveCaptured ? (
+                    <span
+                      style={{
+                        fontSize: 11,
+                        fontWeight: 600,
+                        padding: '2px 8px',
+                        borderRadius: 4,
+                        background: '#ecfdf5',
+                        color: '#065f46',
+                        border: '1px solid #a7f3d0',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 4,
+                      }}
+                    >
+                      🎙️ Live Captured Mic STT
+                    </span>
+                  ) : (
+                    <span
+                      style={{
+                        fontSize: 11,
+                        fontWeight: 500,
+                        padding: '2px 8px',
+                        borderRadius: 4,
+                        background: '#f1f5f9',
+                        color: '#475569',
+                        border: '1px solid #cbd5e1',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 4,
+                      }}
+                      title="Simulated post-call preview. Real telephony dual-channel STT requires TeleCMI CDR Webhook pipeline."
+                    >
+                      ⚡ Simulated AI Preview
+                    </span>
+                  )}
                 </div>
 
                 <div>
@@ -166,15 +203,21 @@ export default function TranscriptDrawer({ user, call, onClose }: TranscriptDraw
                         key={topic}
                         style={{
                           fontSize: 11,
-                          padding: '1px 6px',
+                          padding: '2px 8px',
                           borderRadius: 4,
-                          background: 'rgba(0,0,0,0.06)',
+                          background: 'rgba(0, 0, 0, 0.06)',
                           color: 'var(--color-text, #111)',
                         }}
                       >
                         #{topic}
                       </span>
                     ))}
+                  </div>
+                )}
+
+                {!analytics.isLiveCaptured && (
+                  <div style={{ fontSize: 11, color: 'var(--color-neutral-600, #4b5563)', background: 'rgba(255, 255, 255, 0.75)', border: '1px solid var(--color-divider, #e5e7eb)', borderRadius: 4, padding: '6px 8px', lineHeight: 1.4 }}>
+                    <strong>Note:</strong> TeleCMI WebRTC manages telecom routing and cloud recordings, but does not provide in-browser transcription. In production, TeleCMI CDR Webhooks forward audio to Whisper/Deepgram STT (see <code>docs/TELECMI_ENTERPRISE_SPEC.md</code>). Live agent speech is now also transcribed directly from your microphone via the browser Web Speech API during active calls.
                   </div>
                 )}
               </div>

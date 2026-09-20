@@ -129,6 +129,10 @@ export interface CallAnalytics {
   keyTopics: string[];
   actionItems: string[];
   transcript: TranscriptMessage[];
+  /** True when captured directly from agent's live microphone via browser Web Speech API. */
+  isLiveCaptured?: boolean;
+  /** Origin of the transcript/analytics. */
+  source?: 'live_stt' | 'simulation' | 'server_webhook';
 }
 
 // Telephony details for calls placed through the in-app softphone (absent for calls logged by hand).
