@@ -35,10 +35,13 @@ export function callMeta(user: CustomerUser, agent: AgentAccount): Meta {
   return { app: user.app, customerId: user.id, agentId: agent.id, queue: user.queue ?? '', ...(TEST_NUMBER ? { testRedirect: 'true' } : {}) };
 }
 
-/** What the softphone already knows about "did the call connect?". Answered calls are left for the agent to
- *  classify (DG / DNG / follow-up needs a human), so this only suggests the unanswered cases. */
-export function suggestStatus(r: CallResult): CallStatus | null {
+/** What the softphone already knows about "did the call connect?". Provides an intelligent default status
+ *  when a call is ended or cut so that agents and supervisors can log it without friction. */
+export function suggestStatus(r: CallResult): CallStatus {
   switch (r.disposition) {
+    case 'connected':
+      return 'Answered — Followup';
+    case 'cancelled':
     case 'no-answer':
     case 'busy':
     case 'rejected':
@@ -46,7 +49,7 @@ export function suggestStatus(r: CallResult): CallStatus | null {
     case 'unreachable':
       return 'Not Reachable';
     default:
-      return null;
+      return r.talkSeconds > 0 ? 'Answered — Followup' : 'No Answer';
   }
 }
 

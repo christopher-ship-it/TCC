@@ -102,7 +102,7 @@ export default function Workspace() {
       if (r.meta.customerId && r.meta.customerId !== currentUserIdRef.current) return;
       setLastCall(r);
       const suggested = suggestStatus(r);
-      if (suggested) setStatus((s) => s ?? suggested);
+      setStatus(suggested);
     });
   }, [controller]);
 
@@ -118,13 +118,10 @@ export default function Workspace() {
 
   function save() {
     if (!currentUser || !currentAgent || !status || callActive) return;
-    if (!comment.trim()) {
-      setCommentError(true);
-      return;
-    }
+    const finalComment = comment.trim() || (lastCall && lastCall.talkSeconds > 0 ? `Call ended (${formatDuration(lastCall.talkSeconds)})` : `${status} · line checked`);
     const finalOutcome = status.startsWith('Answered') && outcome ? outcome : undefined;
     const telephonyInfo = lastCall && lastCall.meta.customerId === currentUser.id ? toCallTelephony(lastCall) : undefined;
-    dispatch({ type: 'LOG_CALL', userId: currentUser.id, status, outcome: finalOutcome, comment, agentId: currentAgent.id, telephony: telephonyInfo });
+    dispatch({ type: 'LOG_CALL', userId: currentUser.id, status, outcome: finalOutcome, comment: finalComment, agentId: currentAgent.id, telephony: telephonyInfo });
     setDoneToday((d) => d + 1);
     if (finalOutcome && POSITIVE_OUTCOMES.includes(finalOutcome)) setPositiveToday((p) => p + 1);
     resetForm();
@@ -293,6 +290,44 @@ export default function Workspace() {
             </div>
 
             <div style={{ padding: 'var(--space-4)', borderRight: '2px solid var(--color-divider)' }}>
+              {lastCall && (
+                <div style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  padding: '10px 14px',
+                  background: 'var(--color-accent-100)',
+                  border: '1px solid var(--color-accent)',
+                  borderRadius: 4,
+                  marginBottom: 'var(--space-3)',
+                }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12 }}>
+                    <span style={{ fontSize: 16 }}>📞</span>
+                    <span>
+                      <strong>Call ended</strong> ({lastCall.talkSeconds > 0 ? `${formatDuration(lastCall.talkSeconds)} on call` : 'not connected'})
+                      {status && <> · Selected: <strong>{status}</strong></>}
+                    </span>
+                  </div>
+                  <div style={{ display: 'flex', gap: 6 }}>
+                    <button
+                      type="button"
+                      className="btn btn-primary"
+                      style={{ padding: '4px 12px', fontSize: 11 }}
+                      onClick={save}
+                    >
+                      Log &amp; Next ⏎
+                    </button>
+                    <button
+                      type="button"
+                      className="btn btn-secondary"
+                      style={{ padding: '4px 8px', fontSize: 11 }}
+                      onClick={resetForm}
+                    >
+                      Dismiss
+                    </button>
+                  </div>
+                </div>
+              )}
               <div className="eyebrow" style={{ color: 'var(--color-accent-700)', fontWeight: 600, marginBottom: 'var(--space-2)' }}>Step 2 — did the call connect?</div>
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5,1fr)', gap: 0, border: '1px solid var(--color-divider)' }}>
                 {CALL_STATUS_LIST.map((s, i) => (
