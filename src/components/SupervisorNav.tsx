@@ -4,6 +4,7 @@ import { useStore } from '../store/StoreContext';
 
 const TABS = [
   { to: '/supervisor', label: 'Team performance', end: true },
+  { to: '/supervisor/audits', label: 'Call audits & recordings', end: false },
   { to: '/supervisor/team', label: 'Team & access', end: false },
   { to: '/supervisor/allocation', label: 'Allocation', end: false },
   { to: '/supervisor/escalations', label: 'Escalations', end: false },
