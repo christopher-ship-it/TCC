@@ -256,7 +256,26 @@ export default function TranscriptDrawer({ user, call, onClose }: TranscriptDraw
                   </span>
                 </div>
 
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                {analytics.transcript.length === 0 ? (
+                  <div
+                    style={{
+                      padding: 20,
+                      textAlign: 'center',
+                      background: 'var(--color-neutral-100, #f8f9fa)',
+                      borderRadius: 6,
+                      border: '1px dashed var(--color-divider, #d1d5db)',
+                      display: 'grid',
+                      gap: 6,
+                    }}
+                  >
+                    <div style={{ fontSize: 20 }}>🎙️</div>
+                    <div style={{ fontWeight: 600, fontSize: 12 }}>No Live Speech Transcript Captured</div>
+                    <div style={{ fontSize: 11, color: 'var(--color-neutral-600, #6b7280)', maxWidth: 380, margin: '0 auto', lineHeight: 1.4 }}>
+                      The call audio is recorded above. To transcribe calls in real time, allow microphone access for Speech Recognition in Chrome, or configure the TeleCMI CDR Webhook with Whisper / Deepgram STT.
+                    </div>
+                  </div>
+                ) : (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
                   {analytics.transcript.map((msg, i) => {
                     const isAgent = msg.speaker === 'agent';
                     return (
@@ -299,6 +318,7 @@ export default function TranscriptDrawer({ user, call, onClose }: TranscriptDraw
                     );
                   })}
                 </div>
+                )}
               </div>
             </>
           ) : (

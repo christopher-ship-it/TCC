@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useReducer } from 'react';
 import { generateRealtimeAnalytics, generateSeed } from '../data/seed';
 import type { CustomerUser, EscalationRecord, QueueKey } from '../data/types';
-import { NEGATIVE_OUTCOMES } from '../data/types';
+import { NEGATIVE_OUTCOMES, POSITIVE_OUTCOMES } from '../data/types';
 import { fmtDay, fmtDayTime } from '../lib/dates';
 import { isReachable } from '../lib/queue';
 import { buildTeleCmiRecordingUrl } from '../lib/telephony';
@@ -48,8 +48,19 @@ function reducer(state: State, action: Action): State {
           recordingUrl: recFile ? buildTeleCmiRecordingUrl(recFile) : undefined,
         } : undefined);
 
+        const isRealCall = action.telephony?.provider === 'telecmi';
         const analytics = action.analytics ?? (isAnswered
-          ? generateRealtimeAnalytics(agent?.name ?? 'You', u.name, u.app, action.outcome, durationSec)
+          ? isRealCall
+            ? {
+                sentiment: action.outcome && POSITIVE_OUTCOMES.includes(action.outcome) ? 'positive' : 'neutral',
+                sentimentScore: action.outcome && POSITIVE_OUTCOMES.includes(action.outcome) ? 0.6 : 0.15,
+                summary: `Real call (${durationSec}s) with ${u.name}. Outcome: ${action.outcome || action.status}.`,
+                keyTopics: [u.app, 'live_call', action.outcome ? action.outcome.toLowerCase().replace(/\s+/g, '_') : 'telephony'],
+                actionItems: [action.comment || 'Follow up with customer'],
+                transcript: [],
+                source: 'server_webhook' as const,
+              }
+            : generateRealtimeAnalytics(agent?.name ?? 'You', u.name, u.app, action.outcome, durationSec)
           : undefined);
 
         const entry = {

@@ -16,7 +16,7 @@ import { agentDoc, agentsRef, clearedEscalationsRef, escalationDoc, escalationsR
 import { stripUndefined } from '../firebase/util';
 import { AGENTS, generateRealtimeAnalytics, generateSeed } from '../data/seed';
 import type { AgentAccount, CustomerOverlay, CustomerUser, EscalationRecord } from '../data/types';
-import { NEGATIVE_OUTCOMES } from '../data/types';
+import { NEGATIVE_OUTCOMES, POSITIVE_OUTCOMES } from '../data/types';
 import { fmtDay, fmtDayTime } from '../lib/dates';
 import { isReachable } from '../lib/queue';
 import { buildTeleCmiRecordingUrl } from '../lib/telephony';
@@ -134,8 +134,19 @@ export function FirestoreStoreProvider({ children }: { children: React.ReactNode
           recordingUrl: recFile ? buildTeleCmiRecordingUrl(recFile) : undefined,
         } : undefined);
 
+        const isRealCall = action.telephony?.provider === 'telecmi';
         const analytics = action.analytics ?? (isAnswered
-          ? generateRealtimeAnalytics(agent?.name ?? 'You', user.name, user.app, action.outcome, durationSec)
+          ? isRealCall
+            ? {
+                sentiment: action.outcome && POSITIVE_OUTCOMES.includes(action.outcome) ? 'positive' : 'neutral',
+                sentimentScore: action.outcome && POSITIVE_OUTCOMES.includes(action.outcome) ? 0.6 : 0.15,
+                summary: `Real call (${durationSec}s) with ${user.name}. Outcome: ${action.outcome || action.status}.`,
+                keyTopics: [user.app, 'live_call', action.outcome ? action.outcome.toLowerCase().replace(/\s+/g, '_') : 'telephony'],
+                actionItems: [action.comment || 'Follow up with customer'],
+                transcript: [],
+                source: 'server_webhook' as const,
+              }
+            : generateRealtimeAnalytics(agent?.name ?? 'You', user.name, user.app, action.outcome, durationSec)
           : undefined);
 
         const entry = {
