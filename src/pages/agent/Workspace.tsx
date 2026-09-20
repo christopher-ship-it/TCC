@@ -8,8 +8,10 @@ import { tasksForQueue, queueCounts } from '../../lib/queue';
 import { APPS } from '../../data/seed';
 import MidCallModal from '../../components/agent/MidCallModal';
 import { TccCallPanel } from '../../components/agent/AgentTelephony';
+import RecordingTranscript from '../../components/agent/RecordingTranscript';
 import { formatDuration, useTelephonyOptional, type CallResult } from '../../telephony';
-import { LIVE_DIAL_BLOCKED, callMeta, dialNumberFor, suggestStatus, toCallTelephony } from '../../lib/telephony';
+import { hasRealRecording } from '../../lib/attachRecording';
+import { LIVE_DIAL_BLOCKED, buildTeleCmiRecordingUrl, callMeta, dialNumberFor, suggestStatus, toCallTelephony } from '../../lib/telephony';
 import { telephonyQualitySummary } from '../../data/types';
 import AudioPlayer from '../../components/telephony/AudioPlayer';
 import TranscriptDrawer from '../../components/agent/TranscriptDrawer';
@@ -27,6 +29,8 @@ function sentimentBadgeStyle(sentiment: Sentiment): { bg: string; color: string;
       return { bg: '#f3f4f6', color: '#374151', label: 'Neutral' };
   }
 }
+
+const lookedUpEntries = new Set<string>();
 
 export default function Workspace() {
   const { appId } = useParams<{ appId: AppId }>();
@@ -107,6 +111,37 @@ export default function Workspace() {
       setStatus(suggested);
     });
   }, [controller]);
+
+  // TeleCMI announces the recording after hangup, usually before the agent has finished logging. If the call is still
+  // unsaved the file rides along into the log entry; if it was already saved, patch that entry.
+  // Saved calls that still have no recording (it wasn't ready when the agent logged them): ask TeleCMI once per entry per session.
+  const connection = telephony?.snapshot.connection;
+  useEffect(() => {
+    if (!controller || connection !== 'ready' || !currentUser) return;
+    for (const c of currentUser.callHistory) {
+      const t = c.telephony;
+      if (t?.provider !== 'telecmi' || !t.startedAt || !t.remote || t.durationSec <= 0 || hasRealRecording(t.recordingFile) || lookedUpEntries.has(c.id)) continue;
+      lookedUpEntries.add(c.id);
+      void controller.findRecording({ remote: t.remote, startedAt: t.startedAt, talkSeconds: t.durationSec }).then((file) => {
+        if (file) dispatch({ type: 'ATTACH_RECORDING', file, entryId: c.id });
+      });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [controller, connection, currentUser?.id, currentUser?.callHistory.length]);
+
+  const lastCallRef = useRef<CallResult | null>(null);
+  useEffect(() => {
+    lastCallRef.current = lastCall;
+  });
+  useEffect(() => {
+    if (!controller) return;
+    return controller.onRecording(({ file, callId, duringCall }) => {
+      if (duringCall) return; // rides along in the call result
+      const unsaved = lastCallRef.current;
+      if (unsaved) setLastCall({ ...unsaved, recordingFile: file });
+      else dispatch({ type: 'ATTACH_RECORDING', file, callId });
+    });
+  }, [controller, dispatch]);
 
   function resetForm() {
     setLastCall(null);
@@ -408,6 +443,9 @@ export default function Workspace() {
                 {currentUser.callHistory.length === 0 && <div style={{ color: 'var(--color-neutral-700)' }}>No calls logged yet.</div>}
                 {currentUser.callHistory.map((c) => {
                   const sBadge = c.analytics ? sentimentBadgeStyle(c.analytics.sentiment) : null;
+                  // Real recordings are played from their file name (older entries stored an invented `rec_…` name and an old URL — ignore those).
+                  const recFile = c.telephony?.provider === 'telecmi' && c.telephony.recordingFile && !c.telephony.recordingFile.startsWith('rec_') ? c.telephony.recordingFile : undefined;
+                  const recUrl = recFile ? buildTeleCmiRecordingUrl(recFile) : c.telephony?.provider === 'telecmi' ? undefined : c.telephony?.recordingUrl;
                   return (
                     <div key={c.id} style={{ display: 'flex', flexDirection: 'column', gap: 6, paddingBottom: 10, borderBottom: '1px solid var(--color-divider)' }}>
                       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 4 }}>
@@ -434,10 +472,18 @@ export default function Workspace() {
                         <div style={{ fontSize: 11, color: 'var(--color-neutral-700)' }}>media: {telephonyQualitySummary(c.telephony.quality)}</div>
                       )}
 
-                      {c.telephony?.recordingUrl && (
+                      {c.telephony && recUrl && (
                         <div style={{ marginTop: 2 }}>
-                          <AudioPlayer src={c.telephony.recordingUrl} durationSec={c.telephony.durationSec} label="Recording" />
+                          <AudioPlayer src={recUrl} durationSec={c.telephony.durationSec} label="Recording" />
                         </div>
+                      )}
+
+                      {recFile && (
+                        <RecordingTranscript entry={c} language={currentUser.language} onTranscript={(transcript) => dispatch({ type: 'SET_TRANSCRIPT', userId: currentUser.id, entryId: c.id, transcript })} />
+                      )}
+
+                      {c.telephony?.provider === 'telecmi' && c.telephony.durationSec > 0 && !recUrl && (
+                        <div style={{ fontSize: 11, color: 'var(--color-neutral-700)' }}>Recording: not linked yet — TeleCMI announces it shortly after the call ends.</div>
                       )}
 
                       {c.analytics && (

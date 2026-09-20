@@ -142,12 +142,25 @@ export interface CallTelephony {
   durationSec: number;
   ringSec: number;
   disposition: string;
+  /** When the call started (epoch ms) and the number dialled — what a recording lookup is matched on. */
+  startedAt?: number;
+  remote?: string;
   /** Audio recording filename as reported by TeleCMI (e.g. "rec_123456.wav"). */
   recordingFile?: string;
   /** Full streamable/downloadable URL for the call recording. */
   recordingUrl?: string;
   /** Last WebRTC media-quality sample before the call ended — which audio direction failed. Absent on older entries. */
   quality?: MediaStats;
+}
+
+/** A real speech-to-text transcript of a call recording (never simulated). The recording is mono, so speakers are not separated. */
+export interface CallTranscript {
+  text: string;
+  language?: string;
+  segments: { start: number; end: number; text: string }[];
+  model: string;
+  at: number;
+  source: 'whisper-local';
 }
 
 export interface CallLogEntry {
@@ -162,6 +175,8 @@ export interface CallLogEntry {
   telephony?: CallTelephony;
   /** AI speech-to-text transcription, sentiment score, and conversational analytics. */
   analytics?: CallAnalytics;
+  /** Real transcript of the call recording, when transcription has run. */
+  transcript?: CallTranscript;
 }
 
 export interface TicketRecord {

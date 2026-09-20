@@ -53,32 +53,39 @@ export function suggestStatus(r: CallResult): CallStatus {
   }
 }
 
-/** Build an authenticated audio URL for TeleCMI recordings (or sample audio for demo/mock mode). */
+/** Demo/dev only (mock provider or no telephony): nothing here is a real call, recording, or transcript. */
+export const SIMULATE_CALL_DATA = mode !== 'telecmi';
+
+const DEMO_AUDIO = 'https://actions.google.com/sounds/v1/ambiences/office_murmur.ogg';
+
+/**
+ * Playback URL for a TeleCMI recording — the same public file URL TeleCMI's own dashboard streams from, so no
+ * secret is involved. The host is per-account (`VITE_TELECMI_DASHBOARD_HOST`); `inet_no` is the account's App ID
+ * (public). Returns '' when it can't be built, so callers show "no recording" rather than a broken player.
+ */
 export function buildTeleCmiRecordingUrl(filename: string): string {
   if (!filename) return '';
-  if (filename.startsWith('http://') || filename.startsWith('https://')) return filename;
+  if (/^https?:\/\//i.test(filename)) return filename;
+  if (SIMULATE_CALL_DATA) return DEMO_AUDIO;
   const appId = (import.meta.env.VITE_TELECMI_APP_ID as string | undefined)?.trim();
-  const token = (import.meta.env.VITE_TELECMI_SECRET as string | undefined)?.trim() ||
-                (import.meta.env.VITE_TELECMI_TOKEN as string | undefined)?.trim();
-
-  if (appId && token) {
-    return `https://piopiy.telecmi.com/v1/play?appid=${encodeURIComponent(appId)}&token=${encodeURIComponent(token)}&file=${encodeURIComponent(filename)}`;
-  }
-  // Demo speech sample when no TeleCMI credentials configured
-  return 'https://actions.google.com/sounds/v1/ambiences/office_murmur.ogg';
+  const host = (import.meta.env.VITE_TELECMI_DASHBOARD_HOST as string | undefined)?.trim() || 'connle.telecmi.com';
+  return appId ? `https://${host}/connly_voice/download_music/${encodeURIComponent(filename)}?inet_no=${encodeURIComponent(appId)}` : '';
 }
 
 export function toCallTelephony(r: CallResult): CallTelephony {
-  const isAnswered = r.disposition === 'connected' || r.talkSeconds > 0;
-  const mockFile = isAnswered ? `rec_${r.providerCallId || Date.now()}.wav` : undefined;
+  const answered = r.disposition === 'connected' || r.talkSeconds > 0;
+  // Real calls only carry a recording once TeleCMI has announced one; the demo line fakes it so the player has something to show.
+  const recordingFile = r.recordingFile ?? (SIMULATE_CALL_DATA && answered ? `rec_${r.providerCallId || r.id}.wav` : undefined);
   return {
     provider: r.provider,
     callId: r.providerCallId,
     durationSec: r.talkSeconds,
     ringSec: r.ringSeconds,
     disposition: r.disposition,
-    recordingFile: mockFile,
-    recordingUrl: r.recordingBlobUrl || (mockFile ? buildTeleCmiRecordingUrl(mockFile) : undefined),
+    startedAt: r.startedAt,
+    remote: r.remote,
+    recordingFile,
+    recordingUrl: r.recordingBlobUrl || (recordingFile ? buildTeleCmiRecordingUrl(recordingFile) || undefined : undefined),
     quality: r.stats ?? undefined,
   };
 }

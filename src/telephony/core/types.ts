@@ -28,6 +28,14 @@ export type Disposition =
   | 'cancelled' // we hung up before it was answered
   | 'failed'; // technical failure (mic, network, provider error)
 
+export interface RecordingQuery {
+  /** Number that was dialled (any format — compared on its last 10 digits). */
+  remote: string;
+  /** When the call started, epoch ms. */
+  startedAt: number;
+  talkSeconds?: number;
+}
+
 export interface CallSession {
   /** Local id, stable for the life of the call. */
   id: string;
@@ -42,6 +50,8 @@ export interface CallSession {
   held: boolean;
   remoteHeld: boolean;
   hangupRequested: boolean;
+  /** Recording file name, if the provider announced one while the call was live. */
+  recordingFile?: string;
   meta: Meta;
   /** Latest media-quality sample; refreshed while the call is live. */
   stats: MediaStats | null;
@@ -67,6 +77,8 @@ export interface CallResult {
   stats: MediaStats | null;
   /** In-browser recorded audio blob URL of the actual call, available immediately. */
   recordingBlobUrl?: string;
+  /** Provider-side recording file name, when it was announced before the call ended. */
+  recordingFile?: string;
 }
 
 export interface CallSnapshot {
@@ -110,6 +122,10 @@ export interface MediaStats {
   remoteRoundTripSec?: number;
   /** Audio level from WebRTC media-source (0 to 1). 0 indicates silent mic input. */
   audioLevel?: number;
+  /** Name of the microphone the call is actually sending from (read off the live audio sender). */
+  micLabel?: string;
+  /** The browser reports the outgoing mic track as muted — no samples are arriving from the device. */
+  micMuted?: boolean;
 }
 
 /** Normalised events every provider adapter must emit. */
@@ -125,7 +141,9 @@ export type ProviderEvent =
   | { type: 'hold'; whom: 'self' | 'remote'; on: boolean }
   | { type: 'error'; code: number; message: string }
   | { type: 'mediaFailed'; message: string }
-  | { type: 'stats'; stats: MediaStats };
+  | { type: 'stats'; stats: MediaStats }
+  /** The provider says a recording of a call exists. Can arrive during the call or well after it ended. */
+  | { type: 'recording'; file: string; callId?: string };
 
 export interface TelephonyProvider {
   readonly name: string;
@@ -141,6 +159,10 @@ export interface TelephonyProvider {
   hold(on: boolean): void;
   sendDtmf(tone: string): void;
   transfer?(to: string): void;
+  /** Swap the microphone of the call in progress. null = pick the best real one. Resolves to the device now in use. */
+  setMicrophone?(deviceId: string | null): Promise<string | undefined>;
+  /** Look up the provider's recording for a call already made (matched on number + start time). Resolves to a file name. */
+  findRecording?(query: RecordingQuery): Promise<string | undefined>;
   getCallId(): string | null;
   subscribe(handler: (event: ProviderEvent) => void): () => void;
 }

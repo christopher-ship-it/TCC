@@ -1,4 +1,7 @@
 import type { Credentials, MediaStats, Meta, ProviderEvent, TelephonyProvider } from '../../core/types.ts';
+import { acquireMicrophone, isVirtualInput } from '../../core/microphone.ts';
+import type { RecordingQuery } from '../../core/types.ts';
+import { fetchOutgoingCdr, fetchUserToken, pickRecording } from './cdr.ts';
 
 /** Regional signalling hosts from TeleCMI's Browser SDK docs. */
 export const TELECMI_REGIONS = {
@@ -78,7 +81,7 @@ interface RtcStatLike {
   audioLevel?: number;
 }
 
-async function pollPeerStats(peer: { getStats: () => Promise<unknown> }): Promise<MediaStats | null> {
+async function pollPeerStats(peer: { getStats: () => Promise<unknown>; getSenders?: () => { track: MediaStreamTrack | null }[] }): Promise<MediaStats | null> {
   let report: unknown;
   try {
     report = await peer.getStats();
@@ -116,6 +119,12 @@ async function pollPeerStats(peer: { getStats: () => Promise<unknown> }): Promis
   });
   const mime = codec ?? [...sendCodecs.keys()][0];
   if (mime) out.codec = mime;
+  // What the call is REALLY sending from — the audio sender's own track, not what we asked the browser for.
+  const micTrack = peer.getSenders?.().find((s) => s.track?.kind === 'audio')?.track;
+  if (micTrack) {
+    if (micTrack.label) out.micLabel = micTrack.label;
+    out.micMuted = micTrack.muted;
+  }
   return out;
 }
 
@@ -127,59 +136,53 @@ async function pollPeerStats(peer: { getStats: () => Promise<unknown> }): Promis
 //
 let tappedPeer: RTCPeerConnection | null = null;
 
+function savedMicChoice(): boolean {
+  try {
+    return !!localStorage.getItem('deviceId'); // the SDK's own key for an explicit input choice
+  } catch {
+    return false;
+  }
+}
+
+/** Call-friendly audio constraints: drop a bare "default" deviceId, keep browser echo/noise processing on. */
+function callAudioConstraints(constraints: MediaStreamConstraints): MediaStreamConstraints {
+  const audio = constraints.audio;
+  if (audio === true) return { ...constraints, audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true } };
+  if (audio && typeof audio === 'object') {
+    const rest = { ...audio } as Record<string, unknown>;
+    if (typeof rest.deviceId === 'string' && (!rest.deviceId || rest.deviceId === 'default')) delete rest.deviceId;
+    return { ...constraints, audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true, ...rest } };
+  }
+  return constraints;
+}
+
 function installMediaTap(): void {
   const g = globalThis as { navigator?: Navigator & { mediaDevices?: MediaDevices } };
   const md = g.navigator?.mediaDevices;
   if (!md || (md as { __tccMediaTap?: boolean }).__tccMediaTap) return;
 
   const origGetUserMedia = md.getUserMedia.bind(md);
+  const origEnumerateDevices = md.enumerateDevices.bind(md);
   md.getUserMedia = async (constraints) => {
-    let cleanConstraints: MediaStreamConstraints = constraints || { audio: true };
-    if (typeof cleanConstraints.audio === 'object') {
-      const audio = { ...cleanConstraints.audio } as Record<string, unknown>;
-      // If deviceId is empty or "default", remove it so Chrome uses default input safely
-      if (typeof audio.deviceId === 'string' && (!audio.deviceId || audio.deviceId === 'default')) {
-        delete audio.deviceId;
-      }
-      cleanConstraints = {
-        ...cleanConstraints,
-        audio: {
-          echoCancellation: true,
-          noiseSuppression: true,
-          autoGainControl: true,
-          ...audio,
-        },
-      };
-    } else if (cleanConstraints.audio === true) {
-      cleanConstraints = {
-        ...cleanConstraints,
-        audio: {
-          echoCancellation: true,
-          noiseSuppression: true,
-          autoGainControl: true,
-        },
-      };
-    }
-
+    if (!constraints?.audio) return origGetUserMedia(constraints); // not a microphone request
+    let stream: MediaStream;
     try {
-      const stream = await origGetUserMedia(cleanConstraints);
-      stream.getAudioTracks().forEach((track) => {
-        track.enabled = true;
-        console.debug('[telecmi mic] Acquired audio track:', track.label, 'enabled:', track.enabled, 'muted:', track.muted);
-        track.addEventListener('mute', () => {
-          console.warn('[telecmi mic] Audio track was MUTED by system:', track.label);
-        });
-        track.addEventListener('unmute', () => {
-          console.debug('[telecmi mic] Audio track UNMUTED:', track.label);
-        });
-      });
-      return stream;
+      // The browser's default input is often a virtual device (BlackHole, Iriun, Teams…) that captures
+      // pure silence — the call connects and the far side hears nothing. Prefer a real microphone.
+      const mic = await acquireMicrophone({ getUserMedia: origGetUserMedia, enumerateDevices: origEnumerateDevices }, callAudioConstraints(constraints));
+      stream = mic.stream;
+      if (mic.replacedVirtual) console.warn('[telecmi mic] Default input was a virtual device; using', mic.label);
+      console.debug('[telecmi mic] Capturing from:', mic.label);
     } catch (err) {
-      console.warn('[telecmi mic] getUserMedia failed with constraints, falling back to basic audio', err);
-      const fallback = await origGetUserMedia({ audio: true, video: false });
-      fallback.getAudioTracks().forEach((t) => { t.enabled = true; });
-      return fallback;
+      console.warn('[telecmi mic] Microphone selection failed, falling back to basic audio', err);
+      stream = await origGetUserMedia({ audio: true, video: false });
     }
+    stream.getAudioTracks().forEach((track) => {
+      track.enabled = true;
+      track.addEventListener('mute', () => console.warn('[telecmi mic] Audio track was MUTED by system:', track.label));
+      track.addEventListener('unmute', () => console.debug('[telecmi mic] Audio track UNMUTED:', track.label));
+    });
+    return stream;
   };
   (md as { __tccMediaTap?: boolean }).__tccMediaTap = true;
 }
@@ -226,6 +229,22 @@ function installPeerTap(): void {
   g.RTCPeerConnection = Tapped;
 }
 
+/** First string in an event payload that looks like an audio file name (its last path segment, query stripped). */
+export function findRecordingFile(payload: unknown, depth = 0): string | undefined {
+  if (depth > 3 || payload == null) return undefined;
+  if (typeof payload === 'string') {
+    const m = /([^/\\?#]+\.(?:mp3|wav|ogg|m4a))(?:[?#].*)?$/i.exec(payload.trim());
+    return m ? m[1] : undefined;
+  }
+  if (typeof payload === 'object') {
+    for (const v of Object.values(payload as Record<string, unknown>)) {
+      const hit = findRecordingFile(v, depth + 1);
+      if (hit) return hit;
+    }
+  }
+  return undefined;
+}
+
 function loadSdk(scriptUrl: string): Promise<PiopiyCtor> {
   const g = globalThis as { PIOPIY?: unknown; document?: Document };
   const pick = (): PiopiyCtor | null => {
@@ -270,6 +289,11 @@ export class TeleCmiProvider implements TelephonyProvider {
   private desiredConnected = false;
   private statsTimer: ReturnType<typeof setInterval> | null = null;
   private statsBusy = false;
+  private micChecked = false;
+  /** The agent's REST token (from the same login the SDK does) — lets us read their own call records, no App Secret. */
+  private userToken: string | null = null;
+  private trace: { remote: string; startedAt: number; answeredAt: number | null } | null = null;
+  private readonly claimedRecordings = new Set<string>();
   /** Newest merged sample from the poll + the SDK's own sampler; re-emitted with 'ended'. */
   private lastStats: MediaStats | null = null;
 
@@ -286,6 +310,10 @@ export class TeleCmiProvider implements TelephonyProvider {
 
   connect(credentials: Credentials): void {
     this.desiredConnected = true;
+    void fetchUserToken(credentials.userId, credentials.password).then((token) => {
+      this.userToken = token;
+      if (this.config.debug) console.debug('[telecmi] REST token', token ? 'obtained' : 'NOT obtained — recordings cannot be looked up');
+    });
     this.ensureSdk(credentials.displayName)
       .then((sdk) => {
         if (!this.desiredConnected) return; // disconnect() won the race
@@ -297,12 +325,14 @@ export class TeleCmiProvider implements TelephonyProvider {
 
   disconnect(): void {
     this.desiredConnected = false;
+    this.userToken = null;
     const sdk = this.sdk;
     if (sdk?.isLogedIn()) sdk.logout(); // logout() on a non-registered UA emits an error event, so guard it
     else this.emit({ type: 'disconnected', reason: 'logout' });
   }
 
   dial(to: string, meta: Meta): void {
+    this.trace = { remote: to, startedAt: Date.now(), answeredAt: null };
     // The SDK only accepts tags as one JSON *string* under `extra_param`.
     this.need().call(to, Object.keys(meta).length ? { extra_param: JSON.stringify(meta) } : undefined);
     this.startStatsPolling();
@@ -343,6 +373,62 @@ export class TeleCmiProvider implements TelephonyProvider {
       const err = (r as { error?: string } | null)?.error;
       if (err) this.emit({ type: 'error', code: 1003, message: `Transfer failed: ${err}` });
     });
+  }
+
+  /** The recording for a call already made: asks the agent's own call records (`out_cdr`) and matches on number + start time. */
+  async findRecording(q: RecordingQuery): Promise<string | undefined> {
+    if (!this.userToken) return undefined;
+    const entries = await fetchOutgoingCdr(this.userToken, q.startedAt - 5 * 60_000, q.startedAt + 10 * 60_000);
+    const file = pickRecording(entries, q, this.claimedRecordings);
+    if (file) this.claimedRecordings.add(file);
+    if (this.config.debug) console.debug('[telecmi] out_cdr', { returned: entries.length, picked: file ?? null });
+    return file;
+  }
+
+  /** After an answered call ends, poll for its recording — TeleCMI's record appears a few seconds after hangup. */
+  private scheduleRecordingLookup(): void {
+    const trace = this.trace;
+    this.trace = null;
+    if (!trace || trace.answeredAt === null || !this.userToken) return;
+    const query: RecordingQuery = { remote: trace.remote, startedAt: trace.startedAt, talkSeconds: Math.round((Date.now() - trace.answeredAt) / 1000) };
+    const delays = [3000, 5000, 8000, 12000, 20000]; // ≈ 48 s in total
+    const attempt = async (i: number): Promise<void> => {
+      const file = await this.findRecording(query).catch((e: unknown) => {
+        if (this.config.debug) console.debug('[telecmi] out_cdr failed', e);
+        return undefined;
+      });
+      if (file) this.emit({ type: 'recording', file });
+      else if (i + 1 < delays.length) setTimeout(() => void attempt(i + 1), delays[i + 1]);
+      else console.warn('[telecmi] No recording found for the call after', delays.length, 'lookups');
+    };
+    setTimeout(() => void attempt(0), delays[0]);
+  }
+
+  /** Swap the live call's microphone in place (RTCRtpSender.replaceTrack — no renegotiation, the far side never notices). */
+  async setMicrophone(deviceId: string | null): Promise<string | undefined> {
+    const md = globalThis.navigator?.mediaDevices;
+    const sender = tappedPeer?.getSenders().find((s) => s.track?.kind === 'audio');
+    if (!md || !sender) return undefined;
+    // Goes through the patched getUserMedia: an explicit id is honoured, null means "best real microphone".
+    const stream = await md.getUserMedia({ audio: deviceId ? { deviceId: { exact: deviceId } } : true, video: false });
+    const next = stream.getAudioTracks()[0];
+    if (!next) return undefined;
+    const previous = sender.track;
+    next.enabled = previous ? previous.enabled : true; // keep a muted call muted
+    await sender.replaceTrack(next);
+    previous?.stop();
+    return next.label;
+  }
+
+  /** First stats sample of a call: if it is sending from a virtual input (and the agent didn't pick that on purpose), swap to a real one. */
+  private verifyMicrophone(stats: MediaStats): void {
+    if (this.micChecked || !stats.micLabel) return;
+    this.micChecked = true;
+    if (!isVirtualInput(stats.micLabel) || savedMicChoice()) return;
+    console.warn(`[telecmi mic] Call is sending from a virtual input (${stats.micLabel}) — switching to a real microphone`);
+    this.setMicrophone(null)
+      .then((label) => console.debug('[telecmi mic] Now sending from', label))
+      .catch((e) => console.warn('[telecmi mic] Could not switch microphone', e));
   }
 
   getCallId(): string | null {
@@ -408,23 +494,35 @@ export class TeleCmiProvider implements TelephonyProvider {
 
     on('trying', () => ({ type: 'trying' }));
     on('ringing', () => ({ type: 'ringing' }));
-    on('answered', () => ({ type: 'answered' }));
+    on('answered', () => {
+      if (this.trace && this.trace.answeredAt === null) this.trace.answeredAt = Date.now();
+      return { type: 'answered' };
+    });
     on('inComingCall', (d) => ({ type: 'incoming', from: str(d.from) ?? 'unknown', callId: str(d.call_id), team: str(d.team_name), toNumber: str(d.to_number) }));
     // `hangup` = we ended/cancelled it; `ended` = the far side did (or it failed, with a SIP-style code).
     // Both carry the newest stats sample so the saved call result records the call's final media state.
     on('hangup', (d) => {
       this.stopStatsPolling();
       this.flushStats();
+      this.scheduleRecordingLookup();
       return { type: 'ended', code: num(d.code), localHangup: true, stats: this.lastStats ?? undefined };
     });
     on('ended', (d) => {
       this.stopStatsPolling();
       this.flushStats();
+      this.scheduleRecordingLookup();
       return { type: 'ended', code: num(d.code), stats: this.lastStats ?? undefined };
     });
     on('hold', (d) => ({ type: 'hold', whom: d.whom === 'other' ? 'remote' : 'self', on: true }));
     on('unhold', (d) => ({ type: 'hold', whom: d.whom === 'other' ? 'remote' : 'self', on: false }));
     on('error', (d) => ({ type: 'error', code: num(d.code) ?? 1001, message: str(d.status) ?? 'Softphone error' }));
+    // TeleCMI's notification socket announces recordings (`cmi_record`). Payload shape is unverified, so the file name is
+    // found by looking for an audio file name anywhere in it; the raw payload is logged under `debug`.
+    on('record', (d) => {
+      const file = findRecordingFile(d);
+      const callId = str(d.call_id) ?? str(d.callId) ?? str(d.uuid) ?? str(d.cmiuuid);
+      return file ? { type: 'recording', file, callId } : null;
+    });
     on('mediaFailed', (d) => ({ type: 'mediaFailed', message: typeof d.status === 'string' ? d.status : 'Microphone unavailable — allow microphone access and retry' }));
 
     // The SDK's own sampler as a fallback for anything our direct poll misses
@@ -449,6 +547,7 @@ export class TeleCmiProvider implements TelephonyProvider {
     if (this.statsTimer) return;
     installPeerTap();
     this.lastStats = null;
+    this.micChecked = false;
     this.statsTimer = setInterval(() => {
       const peer = tappedPeer;
       if (!peer || this.statsBusy) return;
@@ -458,6 +557,7 @@ export class TeleCmiProvider implements TelephonyProvider {
           if (stats) {
             this.lastStats = { ...this.lastStats, ...stats };
             this.emit({ type: 'stats', stats: this.lastStats });
+            this.verifyMicrophone(stats);
           }
         })
         .catch(() => {})

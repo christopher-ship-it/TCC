@@ -1,6 +1,6 @@
 import { normalizePhone } from './phone-number.ts';
 import { initialSnapshot, reduce, type Action } from './reducer.ts';
-import type { CallResult, CallSnapshot, Credentials, Meta, ProviderEvent, TelephonyProvider } from './types.ts';
+import type { CallResult, CallSnapshot, Credentials, Meta, ProviderEvent, RecordingQuery, TelephonyProvider } from './types.ts';
 
 export interface ControllerOptions {
   provider: TelephonyProvider;
@@ -32,6 +32,7 @@ export class PhoneController {
   private readonly hangupGraceMs: number;
   private readonly listeners = new Set<() => void>();
   private readonly endedListeners = new Set<(result: CallResult) => void>();
+  private readonly recordingListeners = new Set<(rec: { file: string; callId?: string; duringCall: boolean }) => void>();
   private detach: (() => void) | null = null;
   private graceTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -62,6 +63,15 @@ export class PhoneController {
     this.endedListeners.add(listener);
     return () => {
       this.endedListeners.delete(listener);
+    };
+  };
+
+  /** Fires whenever the provider announces a recording. `duringCall` is false when it arrives after the call ended
+   *  (the usual case — recordings are finalised after hangup), so the app can attach it to the already-saved call. */
+  onRecording = (listener: (rec: { file: string; callId?: string; duringCall: boolean }) => void): (() => void) => {
+    this.recordingListeners.add(listener);
+    return () => {
+      this.recordingListeners.delete(listener);
     };
   };
 
@@ -136,6 +146,25 @@ export class PhoneController {
     this.dispatch({ type: 'setMuted', muted });
   }
 
+  /** Switch microphone mid-call (no renegotiation). Resolves to the device label now in use, if the provider supports it. */
+  async setMicrophone(deviceId: string | null): Promise<string | undefined> {
+    try {
+      return await this.provider.setMicrophone?.(deviceId);
+    } catch (e) {
+      this.emitError(e);
+      return undefined;
+    }
+  }
+
+  /** Ask the provider for the recording of a finished call. Resolves to a file name, or undefined when unknown / unsupported. */
+  async findRecording(query: RecordingQuery): Promise<string | undefined> {
+    try {
+      return await this.provider.findRecording?.(query);
+    } catch {
+      return undefined;
+    }
+  }
+
   toggleHold(): void {
     const call = this.state.call;
     if (call?.state !== 'connected') return;
@@ -168,6 +197,16 @@ export class PhoneController {
     if ((event.type === 'trying' || event.type === 'ringing' || event.type === 'answered') && !event.callId) {
       const callId = this.provider.getCallId();
       if (callId) event = { ...event, callId };
+    }
+    if (event.type === 'recording') {
+      const duringCall = this.state.call !== null;
+      for (const l of [...this.recordingListeners]) {
+        try {
+          l({ file: event.file, callId: event.callId, duringCall });
+        } catch (e) {
+          console.error('[telephony] onRecording listener threw', e);
+        }
+      }
     }
     this.dispatch({ type: 'event', event, now: this.now() });
   }

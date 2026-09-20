@@ -271,3 +271,46 @@ test('stop() hangs up, signs out and detaches from the provider', () => {
   provider.simulateIncoming('late');
   assert.equal(controller.getSnapshot(), snap);
 });
+
+test('setMicrophone forwards to a provider that supports it, and is a harmless no-op for one that does not', async () => {
+  const seen: (string | null)[] = [];
+  const events: ((e: ProviderEvent) => void)[] = [];
+  const base: TelephonyProvider = {
+    name: 'stub', requiresCredentials: false,
+    connect() {}, disconnect() {}, answer() {}, reject() {}, hangup() {}, mute() {}, hold() {}, sendDtmf() {},
+    dial() {}, getCallId: () => null,
+    subscribe(h) { events.push(h); return () => {}; },
+  };
+  const withMic = new PhoneController({ provider: { ...base, async setMicrophone(id) { seen.push(id); return 'Built-in'; } } });
+  assert.equal(await withMic.setMicrophone('abc'), 'Built-in');
+  assert.equal(await withMic.setMicrophone(null), 'Built-in');
+  assert.deepEqual(seen, ['abc', null]);
+  assert.equal(await new PhoneController({ provider: base }).setMicrophone('abc'), undefined);
+
+  const failing = new PhoneController({ provider: { ...base, async setMicrophone() { throw new Error('device gone'); } } });
+  failing.start();
+  assert.equal(await failing.setMicrophone('x'), undefined); // reported as an error state, never thrown into the UI
+  assert.equal(failing.getSnapshot().error?.message, 'device gone');
+});
+
+test('recording announcements: reach listeners with duringCall, ride along in the result when announced mid-call', () => {
+  const events: ((e: ProviderEvent) => void)[] = [];
+  const stub: TelephonyProvider = {
+    name: 'stub', requiresCredentials: false,
+    connect() {}, disconnect() {}, answer() {}, reject() {}, hangup() {}, mute() {}, hold() {}, sendDtmf() {},
+    dial() {}, getCallId: () => null,
+    subscribe(h) { events.push(h); return () => {}; },
+  };
+  const c = new PhoneController({ provider: stub });
+  c.start();
+  const seen: { file: string; callId?: string; duringCall: boolean }[] = [];
+  c.onRecording((r) => seen.push(r));
+  events.forEach((h) => h({ type: 'ready' }));
+  c.dial('9876543210');
+  events.forEach((h) => h({ type: 'answered' }));
+  events.forEach((h) => h({ type: 'recording', file: 'mid.mp3', callId: 'c1' }));
+  events.forEach((h) => h({ type: 'ended' }));
+  assert.equal(c.getSnapshot().lastResult?.recordingFile, 'mid.mp3');
+  events.forEach((h) => h({ type: 'recording', file: 'late.mp3' }));
+  assert.deepEqual(seen, [{ file: 'mid.mp3', callId: 'c1', duringCall: true }, { file: 'late.mp3', callId: undefined, duringCall: false }]);
+});

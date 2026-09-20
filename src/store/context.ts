@@ -1,6 +1,6 @@
 import { createContext, useContext, type Dispatch } from 'react';
 import type { Seed } from '../data/seed';
-import type { AgentAccount, CallAnalytics, CallStatus, CallTelephony, CustomerUser, EscalationRecord, Language, Outcome, QueueKey } from '../data/types';
+import type { AgentAccount, CallAnalytics, CallStatus, CallTelephony, CallTranscript, CustomerUser, EscalationRecord, Language, Outcome, QueueKey } from '../data/types';
 
 export interface State {
   agents: AgentAccount[];
@@ -16,6 +16,8 @@ export type Action =
   | { type: 'LOGIN'; agentId: string }
   | { type: 'LOGOUT' }
   | { type: 'LOG_CALL'; userId: string; status: CallStatus; outcome?: Outcome; comment: string; agentId: string; telephony?: CallTelephony; analytics?: CallAnalytics }
+  | { type: 'ATTACH_RECORDING'; file: string; callId?: string; entryId?: string }
+  | { type: 'SET_TRANSCRIPT'; userId: string; entryId: string; transcript: CallTranscript }
   | { type: 'RAISE_TICKET'; userId: string; subject: string }
   | { type: 'REQUEST_REROUTE'; userId: string; agentId: string; targetLanguage: Language; suggestedOwnerId?: string; note: string }
   | { type: 'REQUEST_ESCALATE'; userId: string; agentId: string; reason: string; urgency: 'normal' | 'urgent'; note: string }

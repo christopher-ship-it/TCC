@@ -68,6 +68,7 @@ function finish(state: CallSnapshot, now: number, hint: { code?: number; local?:
     endCode: hint.code ?? null,
     meta: call.meta,
     stats: hint.stats ?? call.stats,
+    recordingFile: call.recordingFile,
     recordingBlobUrl: hint.recordingBlobUrl,
   };
   return { ...state, call: null, lastResult: result };
@@ -129,6 +130,9 @@ function reduceEvent(state: CallSnapshot, event: ProviderEvent, now: number): Ca
       return event.whom === 'self' ? withCall(state, { held: event.on }) : withCall(state, { remoteHeld: event.on });
     case 'stats':
       return call ? withCall(state, { stats: event.stats }) : state;
+    case 'recording':
+      // During a call it rides along into the result; after the call the controller notifies listeners instead.
+      return call ? withCall(state, { recordingFile: event.file }) : state;
     case 'ended':
       return finish(state, now, { code: event.code, local: event.localHangup, stats: event.stats, recordingBlobUrl: event.recordingBlobUrl });
     case 'mediaFailed': {

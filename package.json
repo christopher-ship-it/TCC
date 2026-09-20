@@ -8,7 +8,8 @@
     "build": "tsc -b && vite build",
     "lint": "oxlint",
     "preview": "vite preview",
-    "test": "node --test src/telephony/tests/"
+    "test": "node --test src/telephony/tests/ src/lib/tests/",
+    "transcribe": "python3 tools/transcribe/server.py"
   },
   "dependencies": {
     "d3": "^7.9.0",

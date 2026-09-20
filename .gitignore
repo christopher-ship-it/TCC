@@ -23,3 +23,10 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# local transcription sidecar cache (downloaded recordings + transcripts)
+tools/transcribe/.cache/
+__pycache__/
+
+# Claude IDE
+.claude/

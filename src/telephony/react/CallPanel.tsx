@@ -1,6 +1,7 @@
 import { useEffect, useState, type CSSProperties, type FormEvent } from 'react';
+import { isVirtualInput } from '../core/microphone.ts';
 import type { Credentials, Disposition, MediaStats, Meta } from '../core/types.ts';
-import { formatDuration, useAudioDevices, useElapsedSeconds, useMicLevel, useTelephony } from './hooks.ts';
+import { formatDuration, useAudioDevices, useElapsedSeconds, useMicLevel, useSilentSamples, useTelephony } from './hooks.ts';
 
 // Themeable with CSS custom properties so it fits any host app without importing its CSS:
 //   --telephony-accent / -danger / -ok / -text / -muted / -border / -surface / -radius / -font
@@ -88,6 +89,10 @@ export function CallPanel({ number, label, meta, shortcutHint, defaultUserId, on
 
   const elapsed = useElapsedSeconds(call ? (call.answeredAt ?? call.startedAt) : null);
   const quality = call?.stats ? qualityLine(call.stats) : lastResult?.stats ? qualityLine(lastResult.stats) : null;
+  const silentSamples = useSilentSamples(call?.state === 'connected' && !call.muted ? call.stats : null);
+  const micLabel = call?.stats?.micLabel;
+  // "Bytes sent" grows even when the mic captures pure silence, so it proves nothing about audio — the mic name and its level do.
+  const micProblem = call?.stats?.micMuted ? 'The browser reports your microphone as muted — check macOS microphone privacy or a hardware mute' : micLabel && isVirtualInput(micLabel) ? 'Virtual microphone — the other person will hear nothing. Pick your real mic under Mic / Audio.' : silentSamples >= 8 ? 'Mic level is flat — speak up, or pick another input under Mic / Audio' : null;
 
   useEffect(() => {
     if (!call) setKeypad(false);
@@ -139,13 +144,16 @@ export function CallPanel({ number, label, meta, shortcutHint, defaultUserId, on
 
           <select
             value={selectedDeviceId}
-            onChange={(e) => selectDevice(e.target.value)}
+            onChange={(e) => {
+              selectDevice(e.target.value);
+              if (call) void controller.setMicrophone(e.target.value || null); // takes effect on the live call immediately
+            }}
             style={{ width: '100%', padding: '6px 8px', fontSize: 12, borderRadius: 4, border: '1px solid #ccc' }}
           >
-            <option value="">Default System Microphone (Recommended)</option>
+            <option value="">Automatic — real microphone (Recommended)</option>
             {devices.map((d) => (
               <option key={d.deviceId} value={d.deviceId}>
-                {d.label}
+                {d.label}{isVirtualInput(d.label) ? ' — virtual, no sound' : ''}
               </option>
             ))}
           </select>
@@ -171,7 +179,7 @@ export function CallPanel({ number, label, meta, shortcutHint, defaultUserId, on
           </div>
 
           <div style={{ fontSize: 11, color: '#666', lineHeight: 1.3 }}>
-            💡 <em>Tip:</em> Default System Microphone uses macOS native hardware acoustic echo cancellation and automatic gain control.
+            💡 <em>Tip:</em> Automatic picks your built-in microphone and skips virtual devices such as BlackHole. You can change it during a call — it switches instantly.
           </div>
         </div>
       )}
@@ -211,10 +219,10 @@ export function CallPanel({ number, label, meta, shortcutHint, defaultUserId, on
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: 11 }}>
                 <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
                   <span>🎙️</span>
-                  <span><strong>Microphone:</strong> {call.muted ? 'Muted' : 'Live Uplink Active'}</span>
+                  <span><strong>Microphone:</strong> {call.muted ? 'Muted' : micLabel ?? 'detecting…'}</span>
                 </span>
-                <span style={{ fontVariantNumeric: 'tabular-nums', fontWeight: 600, color: call.muted ? v('muted', '#888') : v('ok', '#22a544') }}>
-                  {call.muted ? 'Muted' : call.stats?.bytesSent && call.stats.bytesSent > 0 ? 'Transmitting audio' : 'Connected'}
+                <span style={{ fontVariantNumeric: 'tabular-nums', fontWeight: 600, color: call.muted ? v('muted', '#888') : micProblem ? v('danger', '#b3261e') : v('ok', '#22a544') }}>
+                  {call.muted ? 'Muted' : micProblem ? 'No audio' : call.stats?.audioLevel ? 'Transmitting audio' : 'Connected'}
                 </span>
               </div>
               {call.stats?.packetsSent !== undefined && (
@@ -225,6 +233,7 @@ export function CallPanel({ number, label, meta, shortcutHint, defaultUserId, on
                   )}
                 </div>
               )}
+              {micProblem && !call.muted && <div role="alert" style={{ fontSize: 11, fontWeight: 600, color: v('danger', '#b3261e') }}>⚠ {micProblem}</div>}
             </div>
           )}
 

@@ -14,11 +14,13 @@ import {
 import { db, ensureFirebaseAuth } from '../firebase/client';
 import { agentDoc, agentsRef, clearedEscalationsRef, escalationDoc, escalationsRef, overlayDoc, overlayRef } from '../firebase/collections';
 import { stripUndefined } from '../firebase/util';
-import { AGENTS, generateRealtimeAnalytics, generateSeed } from '../data/seed';
+import { AGENTS, generateSeed } from '../data/seed';
 import type { AgentAccount, CustomerOverlay, CustomerUser, EscalationRecord } from '../data/types';
-import { NEGATIVE_OUTCOMES, POSITIVE_OUTCOMES } from '../data/types';
+import { NEGATIVE_OUTCOMES } from '../data/types';
 import { fmtDay, fmtDayTime } from '../lib/dates';
 import { isReachable } from '../lib/queue';
+import { attachRecording, withTranscript } from '../lib/attachRecording';
+import { buildCallLogEntry } from '../lib/callLog';
 import { buildTeleCmiRecordingUrl } from '../lib/telephony';
 import { StoreContext, type Action, type State } from './context';
 
@@ -116,50 +118,22 @@ export function FirestoreStoreProvider({ children }: { children: React.ReactNode
         localStorage.removeItem(SESSION_KEY);
         return;
       }
+      case 'ATTACH_RECORDING': {
+        const hit = attachRecording(usersRef.current, action.file, buildTeleCmiRecordingUrl(action.file), action.callId, Date.now(), action.entryId);
+        if (hit) writeOverlay(hit.userId, { callHistory: hit.callHistory });
+        return;
+      }
+      case 'SET_TRANSCRIPT': {
+        const user = usersRef.current.find((u) => u.id === action.userId);
+        if (user) writeOverlay(user.id, { callHistory: withTranscript(user.callHistory, action.entryId, action.transcript) });
+        return;
+      }
       case 'LOG_CALL': {
         const user = usersRef.current.find((u) => u.id === action.userId);
         const agent = agentsRefLive.current?.find((a) => a.id === action.agentId);
         if (!user) return;
         const now = Date.now();
-        const isAnswered = action.status.startsWith('Answered') || (action.telephony?.durationSec ?? 0) > 0;
-        const durationSec = action.telephony?.durationSec ?? (isAnswered ? 45 : 0);
-        const recFile = action.telephony?.recordingFile ?? (isAnswered ? `rec_${now}.wav` : undefined);
-        const telephony = action.telephony ?? (isAnswered ? {
-          provider: 'telecmi',
-          callId: `cmi-${now}`,
-          durationSec,
-          ringSec: 12,
-          disposition: 'answered',
-          recordingFile: recFile,
-          recordingUrl: recFile ? buildTeleCmiRecordingUrl(recFile) : undefined,
-        } : undefined);
-
-        const isRealCall = action.telephony?.provider === 'telecmi';
-        const analytics = action.analytics ?? (isAnswered
-          ? isRealCall
-            ? {
-                sentiment: action.outcome && POSITIVE_OUTCOMES.includes(action.outcome) ? 'positive' : 'neutral',
-                sentimentScore: action.outcome && POSITIVE_OUTCOMES.includes(action.outcome) ? 0.6 : 0.15,
-                summary: `Real call (${durationSec}s) with ${user.name}. Outcome: ${action.outcome || action.status}.`,
-                keyTopics: [user.app, 'live_call', action.outcome ? action.outcome.toLowerCase().replace(/\s+/g, '_') : 'telephony'],
-                actionItems: [action.comment || 'Follow up with customer'],
-                transcript: [],
-                source: 'server_webhook' as const,
-              }
-            : generateRealtimeAnalytics(agent?.name ?? 'You', user.name, user.app, action.outcome, durationSec)
-          : undefined);
-
-        const entry = {
-          id: `cl-${now}-${Math.random().toString(36).slice(2, 7)}`,
-          atTs: now,
-          atLabel: fmtDayTime(now),
-          agentName: agent?.name ?? 'You',
-          status: action.status,
-          outcome: action.outcome,
-          comment: action.comment,
-          telephony,
-          analytics,
-        };
+        const entry = buildCallLogEntry(now, agent?.name ?? 'You', user, action);
         const callHistory = [entry, ...user.callHistory];
 
         if (!action.outcome) {

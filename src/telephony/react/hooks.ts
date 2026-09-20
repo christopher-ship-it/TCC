@@ -1,4 +1,5 @@
 import { useContext, useEffect, useState } from 'react';
+import type { MediaStats } from '../core/types.ts';
 import { TelephonyContext, type TelephonyContextValue } from './context.ts';
 
 /** Telephony state + controller. Throws outside <TelephonyProvider>. */
@@ -33,6 +34,17 @@ export function formatDuration(totalSeconds: number): string {
 export interface AudioInputDevice {
   deviceId: string;
   label: string;
+}
+
+/** Consecutive stat samples (≈ seconds) in which the outgoing mic level read exactly 0 — a live mic always has a noise floor. */
+export function useSilentSamples(stats: MediaStats | null | undefined): number {
+  const [silent, setSilent] = useState(0);
+  useEffect(() => {
+    const level = stats?.audioLevel;
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- a running count derived from a stream of samples
+    setSilent((n) => (level === undefined ? 0 : level === 0 ? n + 1 : 0));
+  }, [stats]);
+  return silent;
 }
 
 /** Lists available microphone devices and manages the active deviceId in localStorage for piopiy. */

@@ -16,5 +16,5 @@
     "noUnusedParameters": true,
     "erasableSyntaxOnly": true
   },
-  "include": ["src/telephony"]
+  "include": ["src/telephony", "src/lib/tests", "src/lib/attachRecording.ts"]
 }
