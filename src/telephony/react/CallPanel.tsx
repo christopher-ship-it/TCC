@@ -1,6 +1,6 @@
 import { useEffect, useState, type CSSProperties, type FormEvent } from 'react';
 import type { Credentials, Disposition, MediaStats, Meta } from '../core/types.ts';
-import { formatDuration, useElapsedSeconds, useTelephony } from './hooks.ts';
+import { formatDuration, useAudioDevices, useElapsedSeconds, useMicLevel, useTelephony } from './hooks.ts';
 
 // Themeable with CSS custom properties so it fits any host app without importing its CSS:
 //   --telephony-accent / -danger / -ok / -text / -muted / -border / -surface / -radius / -font
@@ -80,6 +80,13 @@ export function CallPanel({ number, label, meta, shortcutHint, defaultUserId, on
   const { call, connection, lastResult, error, connectionError } = snapshot;
   const [dialError, setDialError] = useState<string | null>(null);
   const [keypad, setKeypad] = useState(false);
+  const [showSettings, setShowSettings] = useState(false);
+  const [micTesting, setMicTesting] = useState(false);
+
+  const { devices, selectedDeviceId, selectDevice } = useAudioDevices();
+  const micActive = (call?.state === 'connected' && !call.muted) || micTesting;
+  const { volume, isSilent } = useMicLevel(micActive, selectedDeviceId);
+
   const elapsed = useElapsedSeconds(call ? (call.answeredAt ?? call.startedAt) : null);
   const quality = call?.stats ? qualityLine(call.stats) : lastResult?.stats ? qualityLine(lastResult.stats) : null;
 
@@ -88,6 +95,7 @@ export function CallPanel({ number, label, meta, shortcutHint, defaultUserId, on
   }, [call]);
 
   function dial() {
+    setMicTesting(false);
     const r = controller.dial(number, meta);
     setDialError(r.ok ? null : DIAL_ERROR[r.reason]);
   }
@@ -100,11 +108,76 @@ export function CallPanel({ number, label, meta, shortcutHint, defaultUserId, on
     <div className={className} style={{ display: 'grid', gap: 8, font: `13px ${v('font', 'system-ui, sans-serif')}`, color: v('text', '#222'), ...style }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, color: v('muted', '#666') }} aria-live="polite">
         <span aria-hidden style={{ width: 8, height: 8, borderRadius: '50%', background: dot }} />
-        {statusText}
+        <span>{statusText}</span>
+        {connection === 'ready' && (
+          <button
+            type="button"
+            onClick={() => setShowSettings((s) => !s)}
+            style={{ marginLeft: 'auto', background: 'none', border: 0, cursor: 'pointer', color: 'inherit', fontSize: 11, textDecoration: 'underline', display: 'flex', alignItems: 'center', gap: 3 }}
+            title="Configure microphone input"
+          >
+            🎙️ {showSettings ? 'Hide mic settings' : 'Mic / Audio'}
+          </button>
+        )}
         {connection === 'ready' && requiresCredentials && (
-          <button type="button" onClick={() => controller.disconnect()} style={{ marginLeft: 'auto', background: 'none', border: 0, cursor: 'pointer', color: 'inherit', fontSize: 11, textDecoration: 'underline' }}>sign out</button>
+          <button type="button" onClick={() => controller.disconnect()} style={{ background: 'none', border: 0, cursor: 'pointer', color: 'inherit', fontSize: 11, textDecoration: 'underline' }}>sign out</button>
         )}
       </div>
+
+      {showSettings && (
+        <div style={{ padding: 10, background: v('surface', '#f4f4f4'), borderRadius: v('radius', '6px'), border: `1px solid ${v('border', '#c9c9c9')}`, display: 'grid', gap: 8, fontSize: 12 }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+            <strong>Microphone Input Device</strong>
+            <button
+              type="button"
+              onClick={() => setMicTesting((t) => !t)}
+              style={{ padding: '3px 8px', fontSize: 11, borderRadius: 4, border: '1px solid #ccc', background: micTesting ? '#0369a1' : '#fff', color: micTesting ? '#fff' : '#333', cursor: 'pointer' }}
+            >
+              {micTesting ? 'Stop Test' : 'Test Mic Level'}
+            </button>
+          </div>
+
+          <select
+            value={selectedDeviceId}
+            onChange={(e) => selectDevice(e.target.value)}
+            style={{ width: '100%', padding: '6px 8px', fontSize: 12, borderRadius: 4, border: '1px solid #ccc' }}
+          >
+            {devices.length === 0 ? (
+              <option value="">Default System Microphone</option>
+            ) : (
+              devices.map((d) => (
+                <option key={d.deviceId} value={d.deviceId}>
+                  {d.label}
+                </option>
+              ))
+            )}
+          </select>
+
+          {/* Live Mic Meter in Settings */}
+          <div style={{ display: 'grid', gap: 4 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, color: '#666' }}>
+              <span>Live Mic Level:</span>
+              <span style={{ fontVariantNumeric: 'tabular-nums', fontWeight: 600, color: isSilent && micActive ? '#b3261e' : '#22a544' }}>
+                {micActive ? (isSilent ? 'Silent (0%)' : `${volume}%`) : 'Click "Test Mic Level" to check'}
+              </span>
+            </div>
+            <div style={{ height: 8, background: '#e0e0e0', borderRadius: 4, overflow: 'hidden' }}>
+              <div
+                style={{
+                  height: '100%',
+                  width: micActive ? `${volume}%` : '0%',
+                  background: isSilent ? '#b3261e' : '#22a544',
+                  transition: 'width 0.08s ease',
+                }}
+              />
+            </div>
+          </div>
+
+          <div style={{ fontSize: 11, color: '#666', lineHeight: 1.3 }}>
+            💡 <em>Note:</em> If the customer cannot hear you, ensure your laptop microphone is selected above, unmuted in <strong>macOS System Settings → Sound → Input</strong>, and Chrome has microphone permission.
+          </div>
+        </div>
+      )}
 
       {connection !== 'ready' && requiresCredentials && connection !== 'connecting' && (
         <CredentialsForm
@@ -133,6 +206,35 @@ export function CallPanel({ number, label, meta, shortcutHint, defaultUserId, on
           {call.state === 'connected' && quality && (
             <div role="status" style={{ fontSize: 11, color: quality.startsWith('⚠') ? v('danger', '#b3261e') : v('muted', '#666') }}>
               {quality}
+            </div>
+          )}
+
+          {call.state === 'connected' && (
+            <div style={{ display: 'grid', gap: 4, background: '#fff', padding: '6px 8px', borderRadius: 4, border: `1px solid ${v('border', '#e0e0e0')}` }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: 11 }}>
+                <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                  <span>🎙️</span>
+                  <span><strong>Microphone:</strong> {call.muted ? '(Muted)' : isSilent ? 'No sound detected' : 'Active'}</span>
+                </span>
+                <span style={{ fontVariantNumeric: 'tabular-nums', fontWeight: 600, color: call.muted ? v('muted', '#888') : isSilent ? v('danger', '#b3261e') : v('ok', '#22a544') }}>
+                  {call.muted ? 'Muted' : isSilent ? '0%' : `${volume}%`}
+                </span>
+              </div>
+              <div style={{ height: 6, background: '#e0e0e0', borderRadius: 3, overflow: 'hidden' }}>
+                <div
+                  style={{
+                    height: '100%',
+                    width: call.muted ? '0%' : `${volume}%`,
+                    background: isSilent ? v('danger', '#b3261e') : v('ok', '#22a544'),
+                    transition: 'width 0.08s ease',
+                  }}
+                />
+              </div>
+              {isSilent && !call.muted && (
+                <div style={{ fontSize: 10.5, color: v('danger', '#b3261e'), marginTop: 2, lineHeight: 1.25 }}>
+                  ⚠ Laptop mic is silent (0 dB). Check <strong>macOS System Settings → Sound → Input</strong> or switch device in "Mic / Audio" above.
+                </div>
+              )}
             </div>
           )}
 
