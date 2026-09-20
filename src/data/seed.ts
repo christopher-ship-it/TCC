@@ -1,9 +1,11 @@
 import { Rng } from '../lib/rng';
 import { DAY_MS, fmtDay, fmtDayTime } from '../lib/dates';
+import { buildTeleCmiRecordingUrl } from '../lib/telephony';
 import type {
   AgentAccount,
   AppDef,
   AppId,
+  CallAnalytics,
   CallLogEntry,
   CallStatus,
   CustomerUser,
@@ -11,6 +13,7 @@ import type {
   Language,
   Outcome,
   QueueKey,
+  Sentiment,
   StateDef,
   TicketRecord,
 } from './types';
@@ -161,7 +164,122 @@ function reachableAgent(agents: AgentAccount[], app: AppId, queue: QueueKey | nu
   return matching[0];
 }
 
-function makeCallHistory(r: Rng, agentNames: string[], attempts: number, finalStatus: CallStatus | null, finalOutcome: Outcome | undefined, finalComment: string): CallLogEntry[] {
+function makeCallAnalytics(
+  r: Rng,
+  _agentName: string,
+  customerName: string,
+  app: AppId,
+  outcome: Outcome | undefined,
+  _durationSec: number,
+): CallAnalytics {
+  const isRealbroks = app === 'realbroks';
+  const isPositive = outcome && ['Interested', 'Very interested', 'Ready to subscribe', 'Created first listing'].includes(outcome);
+  const isNegative = outcome && ['Not interested', 'Using competitor'].includes(outcome);
+  const isIssue = outcome && ['Payment issue', 'Technical issue'].includes(outcome);
+
+  let sentiment: Sentiment = 'neutral';
+  let sentimentScore = 0.15;
+  let summary = '';
+  let keyTopics: string[] = [];
+  let actionItems: string[] = [];
+  let transcript: { speaker: 'agent' | 'customer'; text: string; offsetSec: number }[] = [];
+
+  if (isPositive) {
+    sentiment = 'positive';
+    sentimentScore = Number((0.70 + r.float() * 0.25).toFixed(2));
+    if (isRealbroks) {
+      summary = `Customer verified listings sync for ${customerName} and requested pricing details on the Pro annual broker plan.`;
+      keyTopics = ['broker_listings', 'annual_plan', 'pricing', 'whatsapp_sync'];
+      actionItems = ['Send WhatsApp payment link for Annual Pro plan', 'Schedule onboarding follow-up'];
+      transcript = [
+        { speaker: 'agent', text: `Hello ${customerName}, calling from RealBroks team. How has your experience been with adding client requirements?`, offsetSec: 4 },
+        { speaker: 'customer', text: 'Hi! The app is great, especially the automated WhatsApp matching. It saved me a lot of time this week.', offsetSec: 16 },
+        { speaker: 'agent', text: 'Glad to hear that! Would you like to upgrade to the Pro plan to unlock unlimited property listings and direct buyer alerts?', offsetSec: 32 },
+        { speaker: 'customer', text: 'Yes, if you have an annual plan discount, please send the payment details on WhatsApp. I will complete it today.', offsetSec: 54 },
+        { speaker: 'agent', text: 'Sending the QR code and invoice right away. Thank you for choosing RealBroks!', offsetSec: 72 },
+      ];
+    } else {
+      summary = `Customer active on IronDrobe. Requested batch order tracking demo and agreed to upgrade upon invoice delivery.`;
+      keyTopics = ['drycleaning_orders', 'batch_tracking', 'sms_notifications'];
+      actionItems = ['Send UPI payment invoice', 'Enable multi-branch toggle'];
+      transcript = [
+        { speaker: 'agent', text: `Good afternoon ${customerName}, following up from IronDrobe support regarding your shop operations.`, offsetSec: 3 },
+        { speaker: 'customer', text: 'Hello, yes! The daily garment intake tracking works very smoothly on our counter.', offsetSec: 15 },
+        { speaker: 'agent', text: 'Awesome. Our paid tier gives you automatic SMS notifications to customers when their ironing or laundry is ready.', offsetSec: 30 },
+        { speaker: 'customer', text: 'That is exactly what our customers have been asking for. Send me the plan link.', offsetSec: 48 },
+        { speaker: 'agent', text: 'Shared via WhatsApp just now. I will confirm activation as soon as it clears.', offsetSec: 62 },
+      ];
+    }
+  } else if (isNegative) {
+    sentiment = 'churn_risk';
+    sentimentScore = Number((-0.50 - r.float() * 0.35).toFixed(2));
+    if (outcome === 'Using competitor') {
+      summary = `Customer currently using a local competitor due to existing team accounts. Hesitant to switch without data migration.`;
+      keyTopics = ['competitor_product', 'data_migration', 'pricing_objection'];
+      actionItems = ['Note competitor usage in CRM', 'Contact again when Excel import is released'];
+      transcript = [
+        { speaker: 'agent', text: `Hi ${customerName}, checking in from Tecstellar support. How are things going with your setup?`, offsetSec: 4 },
+        { speaker: 'customer', text: 'We actually moved our records to another software because our regional association offered us a free bulk license.', offsetSec: 18 },
+        { speaker: 'agent', text: 'Understood. We are releasing an automated 1-click import from Excel and competitor exports next month.', offsetSec: 38 },
+        { speaker: 'customer', text: 'Okay, let me know when that is live and we might reconsider. Currently satisfied where we are.', offsetSec: 58 },
+      ];
+    } else {
+      summary = `Customer stated business is slow this quarter and declining current subscription offers.`;
+      keyTopics = ['budget_constraints', 'declined_offer'];
+      actionItems = ['Pause active outreach for 30 days', 'Send seasonal discount bulletin'];
+      transcript = [
+        { speaker: 'agent', text: `Hello ${customerName}, calling to check if you need any help with your account.`, offsetSec: 3 },
+        { speaker: 'customer', text: 'Not interested at this time. Business has been slow, so we are cutting unnecessary software costs.', offsetSec: 16 },
+        { speaker: 'agent', text: 'Understood. Your free account will remain active. Feel free to reach out anytime.', offsetSec: 32 },
+      ];
+    }
+  } else if (isIssue) {
+    sentiment = 'neutral';
+    sentimentScore = Number((r.float() * 0.2 - 0.1).toFixed(2));
+    summary = `Customer reported payment deduction failure on checkout. Awaiting transaction reference screenshot.`;
+    keyTopics = ['payment_gateway', 'bank_reconciliation', 'checkout_issue'];
+    actionItems = ['Reconcile transaction reference with Razorpay/Gateway desk', 'Confirm plan upgrade once verified'];
+    transcript = [
+      { speaker: 'agent', text: `Hello ${customerName}, noticed an incomplete transaction on your account and wanted to verify if you were charged.`, offsetSec: 5 },
+      { speaker: 'customer', text: 'Yes, the money got deducted from my Google Pay but the app is still showing the free trial screen!', offsetSec: 18 },
+      { speaker: 'agent', text: 'Do not worry, we will fix this immediately. Please send your 12-digit UPI reference number to our official WhatsApp.', offsetSec: 35 },
+      { speaker: 'customer', text: 'Sharing it right away. Please activate the account as soon as possible.', offsetSec: 50 },
+      { speaker: 'agent', text: 'On it! I will manually activate your Pro license within 15 minutes of receiving the reference.', offsetSec: 64 },
+    ];
+  } else {
+    sentiment = 'positive';
+    sentimentScore = 0.45;
+    summary = `General check-in call with ${customerName}. Customer active and reviewing features.`;
+    keyTopics = ['general_inquiry', 'feature_walkthrough'];
+    actionItems = ['Send product guide link', 'Follow up next cycle'];
+    transcript = [
+      { speaker: 'agent', text: `Hello ${customerName}, checking in to see if you have any questions navigating the dashboard.`, offsetSec: 4 },
+      { speaker: 'customer', text: 'Everything seems straightforward so far. Just getting familiar with the daily reports.', offsetSec: 18 },
+      { speaker: 'agent', text: 'Wonderful! We have a quick 2-minute tutorial on our YouTube channel if you ever need reference.', offsetSec: 34 },
+      { speaker: 'customer', text: 'Sounds good, thanks for reaching out.', offsetSec: 46 },
+    ];
+  }
+
+  return {
+    sentiment,
+    sentimentScore,
+    summary,
+    keyTopics,
+    actionItems,
+    transcript,
+  };
+}
+
+function makeCallHistory(
+  r: Rng,
+  agentNames: string[],
+  attempts: number,
+  finalStatus: CallStatus | null,
+  finalOutcome: Outcome | undefined,
+  finalComment: string,
+  app: AppId = 'realbroks',
+  customerName: string = 'Customer',
+): CallLogEntry[] {
   const entries: CallLogEntry[] = [];
   let ts = NOW - attempts * r.int(1, 3) * DAY_MS;
   for (let i = 0; i < attempts - (finalStatus ? 1 : 0); i++) {
@@ -179,14 +297,33 @@ function makeCallHistory(r: Rng, agentNames: string[], attempts: number, finalSt
   }
   if (finalStatus) {
     ts = NOW - r.int(0, 2) * DAY_MS - r.int(0, 12) * 3600000;
+    const agent = r.pick(agentNames);
+    const isAnswered = finalStatus.startsWith('Answered');
+    const durationSec = isAnswered ? r.int(65, 230) : 0;
+    const recFile = isAnswered ? `rec_${r.int(100000, 999999)}.wav` : undefined;
+
     entries.push({
       id: `cl-${r.int(1, 1e9)}`,
       atTs: ts,
       atLabel: fmtDayTime(ts),
-      agentName: r.pick(agentNames),
+      agentName: agent,
       status: finalStatus,
       outcome: finalOutcome,
       comment: finalComment,
+      telephony: isAnswered
+        ? {
+            provider: 'telecmi',
+            callId: `cmi-${r.int(100000, 999999)}`,
+            durationSec,
+            ringSec: r.int(12, 22),
+            disposition: 'answered',
+            recordingFile: recFile,
+            recordingUrl: recFile ? buildTeleCmiRecordingUrl(recFile) : undefined,
+          }
+        : undefined,
+      analytics: isAnswered
+        ? makeCallAnalytics(r, agent, customerName, app, finalOutcome, durationSec)
+        : undefined,
     });
   }
   return entries.sort((a, b) => b.atTs - a.atTs);
@@ -247,7 +384,7 @@ function buildUser(opts: {
     case 'new': {
       attempt = r.int(1, 4);
       stageTag = attempt > 1 ? 'Hot lead' : 'New';
-      callHistory = makeCallHistory(r, ownerNames, attempt, r.bool(0.5) ? r.pick(CALL_STATUSES) : null, undefined, comment);
+      callHistory = makeCallHistory(r, ownerNames, attempt, r.bool(0.5) ? r.pick(CALL_STATUSES) : null, undefined, comment, app, name);
       planNote = `Free · ${r.int(2, 50)} orders left`;
       break;
     }
@@ -261,7 +398,7 @@ function buildUser(opts: {
         slaBreached,
       }];
       stageTag = slaBreached ? 'SLA breach' : 'Open ticket';
-      callHistory = makeCallHistory(r, ownerNames, 1, null, undefined, comment);
+      callHistory = makeCallHistory(r, ownerNames, 1, null, undefined, comment, app, name);
       break;
     }
     case 'payments': {
@@ -276,7 +413,7 @@ function buildUser(opts: {
         status,
       };
       stageTag = status === 'expired' ? 'Expired' : status === 'overdue' ? 'Overdue' : 'Due soon';
-      callHistory = makeCallHistory(r, ownerNames, r.int(1, 3), null, undefined, comment);
+      callHistory = makeCallHistory(r, ownerNames, r.int(1, 3), null, undefined, comment, app, name);
       break;
     }
     case 'followup': {
@@ -292,17 +429,17 @@ function buildUser(opts: {
       };
       stageTag = 'Hot lead';
       const finalOutcome = r.pick<Outcome>(['Interested', 'Very interested', 'Ready to subscribe']);
-      callHistory = makeCallHistory(r, ownerNames, week + 1, r.pick(CALL_STATUSES), finalOutcome, comment);
+      callHistory = makeCallHistory(r, ownerNames, week + 1, r.pick(CALL_STATUSES), finalOutcome, comment, app, name);
       break;
     }
     case 'errors': {
       stageTag = r.pick(['Payment failed', 'Tried to subscribe', 'App crash on pay']);
-      callHistory = makeCallHistory(r, ownerNames, 1, null, undefined, comment);
+      callHistory = makeCallHistory(r, ownerNames, 1, null, undefined, comment, app, name);
       break;
     }
     case 'inactive': {
       stageTag = 'Inactive 30+';
-      callHistory = makeCallHistory(r, ownerNames, r.int(0, 2), null, undefined, comment);
+      callHistory = makeCallHistory(r, ownerNames, r.int(0, 2), null, undefined, comment, app, name);
       break;
     }
     default: {

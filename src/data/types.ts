@@ -114,6 +114,23 @@ export const OUTCOME_LIST: { outcome: Outcome; key: string; note?: string }[] = 
   { outcome: 'Using competitor', key: 'i' },
 ];
 
+export type Sentiment = 'positive' | 'neutral' | 'negative' | 'churn_risk';
+
+export interface TranscriptMessage {
+  speaker: 'agent' | 'customer';
+  text: string;
+  offsetSec: number;
+}
+
+export interface CallAnalytics {
+  sentiment: Sentiment;
+  sentimentScore: number;
+  summary: string;
+  keyTopics: string[];
+  actionItems: string[];
+  transcript: TranscriptMessage[];
+}
+
 // Telephony details for calls placed through the in-app softphone (absent for calls logged by hand).
 export interface CallTelephony {
   provider: string;
@@ -121,6 +138,10 @@ export interface CallTelephony {
   durationSec: number;
   ringSec: number;
   disposition: string;
+  /** Audio recording filename as reported by TeleCMI (e.g. "rec_123456.wav"). */
+  recordingFile?: string;
+  /** Full streamable/downloadable URL for the call recording. */
+  recordingUrl?: string;
   /** Last WebRTC media-quality sample before the call ended — which audio direction failed. Absent on older entries. */
   quality?: MediaStats;
 }
@@ -135,6 +156,8 @@ export interface CallLogEntry {
   comment: string;
   auto?: boolean;
   telephony?: CallTelephony;
+  /** AI speech-to-text transcription, sentiment score, and conversational analytics. */
+  analytics?: CallAnalytics;
 }
 
 export interface TicketRecord {

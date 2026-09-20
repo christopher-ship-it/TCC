@@ -3,7 +3,7 @@ import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { useStore } from '../../store/StoreContext';
 import { APP_LOGOS } from '../../assets';
 import { TECSTELLAR_MARK } from '../../assets';
-import { CALL_STATUS_LIST, OUTCOME_LIST, POSITIVE_OUTCOMES, QUEUES, type AppId, type CallStatus, type Outcome, type QueueKey } from '../../data/types';
+import { CALL_STATUS_LIST, OUTCOME_LIST, POSITIVE_OUTCOMES, QUEUES, type AppId, type CallLogEntry, type CallStatus, type Outcome, type QueueKey, type Sentiment } from '../../data/types';
 import { tasksForQueue, queueCounts } from '../../lib/queue';
 import { APPS } from '../../data/seed';
 import MidCallModal from '../../components/agent/MidCallModal';
@@ -11,6 +11,22 @@ import { TccCallPanel } from '../../components/agent/AgentTelephony';
 import { formatDuration, useTelephonyOptional, type CallResult } from '../../telephony';
 import { LIVE_DIAL_BLOCKED, callMeta, dialNumberFor, suggestStatus, toCallTelephony } from '../../lib/telephony';
 import { telephonyQualitySummary } from '../../data/types';
+import AudioPlayer from '../../components/telephony/AudioPlayer';
+import TranscriptDrawer from '../../components/agent/TranscriptDrawer';
+
+function sentimentBadgeStyle(sentiment: Sentiment): { bg: string; color: string; label: string } {
+  switch (sentiment) {
+    case 'positive':
+      return { bg: '#ecfdf5', color: '#065f46', label: 'Positive' };
+    case 'churn_risk':
+      return { bg: '#fef2f2', color: '#991b1b', label: 'Churn Risk' };
+    case 'negative':
+      return { bg: '#fff7ed', color: '#9a3412', label: 'Negative' };
+    case 'neutral':
+    default:
+      return { bg: '#f3f4f6', color: '#374151', label: 'Neutral' };
+  }
+}
 
 export default function Workspace() {
   const { appId } = useParams<{ appId: AppId }>();
@@ -39,6 +55,7 @@ export default function Workspace() {
   const controller = telephony?.controller;
   const callActive = !!telephony?.snapshot.call;
   const [lastCall, setLastCall] = useState<CallResult | null>(null);
+  const [transcriptCall, setTranscriptCall] = useState<CallLogEntry | null>(null);
   const currentUserIdRef = useRef<string | null>(null);
   const toggleCallRef = useRef<() => void>(() => {});
 
@@ -341,17 +358,72 @@ export default function Workspace() {
                 <div style={{ fontFamily: 'var(--font-heading)', fontWeight: 800, fontSize: 22, color: 'var(--color-accent-700)' }}>{currentUser.conversionScore} <span style={{ fontSize: 12, fontWeight: 400, color: 'var(--color-neutral-700)' }}>/ 100</span></div>
               </div>
               <div className="eyebrow" style={{ margin: 'var(--space-4) 0 var(--space-2)' }}>Full call history</div>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-3)', fontSize: 12, borderLeft: '2px solid var(--color-divider)', paddingLeft: 'var(--space-3)', maxHeight: 260, overflow: 'auto' }}>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-3)', fontSize: 12, borderLeft: '2px solid var(--color-divider)', paddingLeft: 'var(--space-3)', maxHeight: 380, overflow: 'auto' }}>
                 {currentUser.callHistory.length === 0 && <div style={{ color: 'var(--color-neutral-700)' }}>No calls logged yet.</div>}
-                {currentUser.callHistory.map((c) => (
-                  <div key={c.id}>
-                    <div style={{ fontWeight: 600 }}>{c.status}{c.outcome ? ` · ${c.outcome}` : ''}</div>
-                    <div style={{ color: 'var(--color-neutral-700)' }}>{c.atLabel} · {c.agentName}{c.telephony ? ` · ${c.telephony.durationSec ? `${formatDuration(c.telephony.durationSec)} on call` : 'call did not connect'}` : ''}</div>
-                    {c.telephony?.quality && telephonyQualitySummary(c.telephony.quality) && (
-                      <div style={{ fontSize: 11, color: 'var(--color-neutral-700)' }}>media: {telephonyQualitySummary(c.telephony.quality)}</div>
-                    )}
-                  </div>
-                ))}
+                {currentUser.callHistory.map((c) => {
+                  const sBadge = c.analytics ? sentimentBadgeStyle(c.analytics.sentiment) : null;
+                  return (
+                    <div key={c.id} style={{ display: 'flex', flexDirection: 'column', gap: 6, paddingBottom: 10, borderBottom: '1px solid var(--color-divider)' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 4 }}>
+                        <div style={{ fontWeight: 600 }}>{c.status}{c.outcome ? ` · ${c.outcome}` : ''}</div>
+                        {sBadge && (
+                          <span style={{ fontSize: 10, fontWeight: 700, padding: '1px 6px', borderRadius: 999, background: sBadge.bg, color: sBadge.color }}>
+                            {sBadge.label}
+                          </span>
+                        )}
+                      </div>
+
+                      <div style={{ color: 'var(--color-neutral-700)' }}>
+                        {c.atLabel} · {c.agentName}
+                        {c.telephony?.durationSec ? ` · ${formatDuration(c.telephony.durationSec)} on call` : ' · call did not connect'}
+                      </div>
+
+                      {c.comment && (
+                        <div style={{ fontSize: 11, color: 'var(--color-text)', fontStyle: 'italic', background: 'var(--color-bg)', padding: '4px 6px', borderRadius: 4 }}>
+                          "{c.comment}"
+                        </div>
+                      )}
+
+                      {c.telephony?.quality && telephonyQualitySummary(c.telephony.quality) && (
+                        <div style={{ fontSize: 11, color: 'var(--color-neutral-700)' }}>media: {telephonyQualitySummary(c.telephony.quality)}</div>
+                      )}
+
+                      {c.telephony?.recordingUrl && (
+                        <div style={{ marginTop: 2 }}>
+                          <AudioPlayer src={c.telephony.recordingUrl} durationSec={c.telephony.durationSec} label="Recording" />
+                        </div>
+                      )}
+
+                      {c.analytics && (
+                        <div style={{ marginTop: 2, display: 'flex', flexDirection: 'column', gap: 4 }}>
+                          <div style={{ fontSize: 11, color: 'var(--color-neutral-800)', lineHeight: 1.4 }}>
+                            {c.analytics.summary}
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => setTranscriptCall(c)}
+                            style={{
+                              alignSelf: 'flex-start',
+                              background: 'none',
+                              border: 'none',
+                              padding: 0,
+                              color: 'var(--color-accent-700)',
+                              fontWeight: 700,
+                              fontSize: 11,
+                              cursor: 'pointer',
+                              display: 'flex',
+                              alignItems: 'center',
+                              gap: 4,
+                            }}
+                          >
+                            <span>View AI Transcript ({c.analytics.transcript.length} turns)</span>
+                            <span>▸</span>
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
               </div>
             </div>
           </div>
@@ -359,6 +431,13 @@ export default function Workspace() {
       )}
 
       {midCallOpen && currentUser && <MidCallModal user={currentUser} onClose={() => setMidCallOpen(false)} />}
+      {transcriptCall && currentUser && (
+        <TranscriptDrawer
+          user={currentUser}
+          call={transcriptCall}
+          onClose={() => setTranscriptCall(null)}
+        />
+      )}
     </div>
   );
 }
