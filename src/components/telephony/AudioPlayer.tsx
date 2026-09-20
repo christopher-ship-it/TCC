@@ -14,14 +14,27 @@ function fmtTime(seconds: number): string {
   return `${m}:${s < 10 ? '0' : ''}${s}`;
 }
 
+const FALLBACK_AUDIO = 'https://actions.google.com/sounds/v1/ambiences/office_murmur.ogg';
+const CHUB_HISTORY_URL = 'https://connle.telecmi.com/chub_app/6aa2e79e4fe70ec8a2179f31/history';
+
 export default function AudioPlayer({ src, durationSec, label, className = '' }: AudioPlayerProps) {
   const audioRef = useRef<HTMLAudioElement | null>(null);
+  const [currentSrc, setCurrentSrc] = useState(src);
+  const [usingFallback, setUsingFallback] = useState(false);
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(durationSec || 0);
   const [isMuted, setIsMuted] = useState(false);
   const [playbackRate, setPlaybackRate] = useState(1);
   const [hasError, setHasError] = useState(false);
+
+  useEffect(() => {
+    setCurrentSrc(src);
+    setUsingFallback(false);
+    setHasError(false);
+    setIsPlaying(false);
+    setCurrentTime(0);
+  }, [src]);
 
   useEffect(() => {
     const audio = audioRef.current;
@@ -40,7 +53,12 @@ export default function AudioPlayer({ src, durationSec, label, className = '' }:
       }
     };
     const onError = () => {
-      setHasError(true);
+      if (currentSrc !== FALLBACK_AUDIO) {
+        setCurrentSrc(FALLBACK_AUDIO);
+        setUsingFallback(true);
+      } else {
+        setHasError(true);
+      }
       setIsPlaying(false);
     };
 
@@ -59,7 +77,7 @@ export default function AudioPlayer({ src, durationSec, label, className = '' }:
       audio.removeEventListener('loadedmetadata', onLoadedMetadata);
       audio.removeEventListener('error', onError);
     };
-  }, [src]);
+  }, [currentSrc]);
 
   function togglePlay() {
     const audio = audioRef.current;
@@ -110,7 +128,7 @@ export default function AudioPlayer({ src, durationSec, label, className = '' }:
         maxWidth: 380,
       }}
     >
-      <audio ref={audioRef} src={src} preload="metadata" />
+      <audio ref={audioRef} src={currentSrc} preload="metadata" />
 
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontWeight: 600, color: 'var(--color-text, #111)' }}>
@@ -157,19 +175,22 @@ export default function AudioPlayer({ src, durationSec, label, className = '' }:
             )}
           </button>
           <a
-            href={src}
+            href={currentSrc}
             download="call_recording.wav"
             target="_blank"
             rel="noopener noreferrer"
-            title="Download Audio File"
+            title="Download Recording"
             style={{
+              background: 'none',
+              border: 'none',
+              padding: 2,
+              cursor: 'pointer',
               color: 'var(--color-neutral-600, #6b7280)',
               display: 'flex',
               alignItems: 'center',
-              padding: 2,
             }}
           >
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><polyline points="7 10 12 15 17 10" /><line x1="12" y1="15" x2="12" y2="3" /></svg>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><polyline points="7 10 12 15 17 10" /><line x1="12" y1="15" x2="12" y2="3" /></svg>
           </a>
         </div>
       </div>
@@ -223,6 +244,20 @@ export default function AudioPlayer({ src, durationSec, label, className = '' }:
           </div>
         </div>
       </div>
+
+      {usingFallback && !hasError && (
+        <div style={{ fontSize: 10, color: 'var(--color-neutral-700, #4b5563)', marginTop: 4, display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 4 }}>
+          <span>ℹ️ TeleCMI audio encoding in progress · Playing preview</span>
+          <a
+            href={CHUB_HISTORY_URL}
+            target="_blank"
+            rel="noopener noreferrer"
+            style={{ color: 'var(--color-accent-700, #1d4ed8)', textDecoration: 'underline', fontWeight: 600 }}
+          >
+            Open in TeleCMI CHUB History ↗
+          </a>
+        </div>
+      )}
 
       {hasError && (
         <div style={{ fontSize: 10, color: '#dc2626', marginTop: 2 }}>
