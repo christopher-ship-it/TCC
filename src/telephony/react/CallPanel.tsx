@@ -1,5 +1,5 @@
 import { useEffect, useState, type CSSProperties, type FormEvent } from 'react';
-import type { Credentials, Disposition, Meta } from '../core/types.ts';
+import type { Credentials, Disposition, MediaStats, Meta } from '../core/types.ts';
 import { formatDuration, useElapsedSeconds, useTelephony } from './hooks.ts';
 
 // Themeable with CSS custom properties so it fits any host app without importing its CSS:
@@ -29,6 +29,19 @@ const DISPOSITION_LABEL: Record<Disposition, string> = {
 const STATE_LABEL = { dialing: 'Calling…', ringing: 'Ringing…', incoming: 'Incoming call', connected: 'On call' } as const;
 const DIAL_ERROR = { 'invalid-number': "That doesn't look like a valid phone number.", 'not-ready': 'Softphone is not connected yet.', 'call-in-progress': 'A call is already in progress.' } as const;
 const KEYS = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '*', '0', '#'];
+
+/** One-line live media readout; null while there is nothing worth showing. */
+function qualityLine(q: MediaStats): string | null {
+  const sent = q.packetsSent;
+  const received = q.packetsReceived;
+  if (sent === 0) return '⚠ No audio is being sent — check the microphone';
+  if (received === 0) return '⚠ No audio is being received — you will not hear them';
+  const ms = q.roundTripSec !== undefined ? ` · ${Math.round(q.roundTripSec * 1000)}ms` : '';
+  if (q.remoteFractionLost !== undefined && q.remoteFractionLost >= 0.1) return `⚠ Poor uplink — ${Math.round(q.remoteFractionLost * 100)}% of your audio is arriving${ms}`;
+  if (q.packetsLost !== undefined && q.packetsReceived !== undefined && q.packetsLost / (q.packetsLost + q.packetsReceived) >= 0.05) return `⚠ Lossy line${ms}`;
+  if (sent !== undefined && received !== undefined) return `Media ok${ms}`;
+  return null;
+}
 
 export interface CallPanelProps {
   /** Number to call, as the app stores it (any common format). */
@@ -68,6 +81,7 @@ export function CallPanel({ number, label, meta, shortcutHint, defaultUserId, on
   const [dialError, setDialError] = useState<string | null>(null);
   const [keypad, setKeypad] = useState(false);
   const elapsed = useElapsedSeconds(call ? (call.answeredAt ?? call.startedAt) : null);
+  const quality = call?.stats ? qualityLine(call.stats) : lastResult?.stats ? qualityLine(lastResult.stats) : null;
 
   useEffect(() => {
     if (!call) setKeypad(false);
@@ -116,6 +130,12 @@ export function CallPanel({ number, label, meta, shortcutHint, defaultUserId, on
           </div>
           <div style={{ fontSize: 12, color: v('muted', '#666') }}>{label ? `${label} · ` : ''}{call.direction === 'outbound' ? `+${call.remote}` : call.remote}{call.remoteHeld ? ' · they put you on hold' : ''}</div>
 
+          {call.state === 'connected' && quality && (
+            <div role="status" style={{ fontSize: 11, color: quality.startsWith('⚠') ? v('danger', '#b3261e') : v('muted', '#666') }}>
+              {quality}
+            </div>
+          )}
+
           {call.state === 'incoming' && (
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6 }}>
               <button type="button" style={btn('primary')} onClick={() => controller.answer()}>Answer</button>
@@ -146,6 +166,7 @@ export function CallPanel({ number, label, meta, shortcutHint, defaultUserId, on
         <div style={{ fontSize: 12, color: v('muted', '#666') }}>
           Last call: <strong style={{ color: v('text', '#222') }}>{DISPOSITION_LABEL[lastResult.disposition]}</strong>
           {lastResult.talkSeconds > 0 ? ` · ${formatDuration(lastResult.talkSeconds)}` : ''}
+          {!call && quality ? ` · ${quality}` : ''}
         </div>
       )}
 

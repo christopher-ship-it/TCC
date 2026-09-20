@@ -9,7 +9,8 @@ import { APPS } from '../../data/seed';
 import MidCallModal from '../../components/agent/MidCallModal';
 import { TccCallPanel } from '../../components/agent/AgentTelephony';
 import { formatDuration, useTelephonyOptional, type CallResult } from '../../telephony';
-import { callMeta, suggestStatus, toCallTelephony } from '../../lib/telephony';
+import { LIVE_DIAL_BLOCKED, callMeta, dialNumberFor, suggestStatus, toCallTelephony } from '../../lib/telephony';
+import { telephonyQualitySummary } from '../../data/types';
 
 export default function Workspace() {
   const { appId } = useParams<{ appId: AppId }>();
@@ -149,7 +150,7 @@ export default function Workspace() {
   toggleCallRef.current = () => {
     if (!controller || !currentUser || !currentAgent) return;
     if (controller.getSnapshot().call) controller.hangup();
-    else controller.dial(currentUser.phone, callMeta(currentUser, currentAgent));
+    else if (!LIVE_DIAL_BLOCKED) controller.dial(dialNumberFor(currentUser), callMeta(currentUser, currentAgent));
   };
 
   if (!currentAgent || !app || !appId) return null;
@@ -256,7 +257,14 @@ export default function Workspace() {
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-2)', fontSize: 12 }}>
                   {currentUser.callHistory.slice(0, 3).map((c) => (
                     <div key={c.id} style={{ display: 'flex', justifyContent: 'space-between', paddingBottom: 'var(--space-2)', borderBottom: '1px solid var(--color-divider)' }}>
-                      <span>{c.atLabel}</span><span style={{ color: 'var(--color-neutral-700)' }}>{c.status}{c.outcome ? ` · ${c.outcome}` : ''}{c.telephony?.durationSec ? ` · ${formatDuration(c.telephony.durationSec)}` : ''} · {c.agentName}</span>
+                      <span>{c.atLabel}</span>
+                      <span style={{ color: 'var(--color-neutral-700)' }}>
+                        {c.status}
+                        {c.outcome ? ` · ${c.outcome}` : ''}
+                        {c.telephony?.durationSec ? ` · ${formatDuration(c.telephony.durationSec)}` : ''}
+                        {c.telephony?.quality && telephonyQualitySummary(c.telephony.quality) ? ` · ${telephonyQualitySummary(c.telephony.quality)}` : ''}
+                        {' · '}{c.agentName}
+                      </span>
                     </div>
                   ))}
                   {currentUser.callHistory.length === 0 && <div style={{ color: 'var(--color-neutral-700)' }}>No previous attempts.</div>}
@@ -339,6 +347,9 @@ export default function Workspace() {
                   <div key={c.id}>
                     <div style={{ fontWeight: 600 }}>{c.status}{c.outcome ? ` · ${c.outcome}` : ''}</div>
                     <div style={{ color: 'var(--color-neutral-700)' }}>{c.atLabel} · {c.agentName}{c.telephony ? ` · ${c.telephony.durationSec ? `${formatDuration(c.telephony.durationSec)} on call` : 'call did not connect'}` : ''}</div>
+                    {c.telephony?.quality && telephonyQualitySummary(c.telephony.quality) && (
+                      <div style={{ fontSize: 11, color: 'var(--color-neutral-700)' }}>media: {telephonyQualitySummary(c.telephony.quality)}</div>
+                    )}
                   </div>
                 ))}
               </div>

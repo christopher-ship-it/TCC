@@ -37,5 +37,5 @@ export function setup(opts: MockOptions = {}, controllerOpts: { hangupGraceMs?: 
   controller.start();
   controller.connect({ userId: 'u', password: 'p' });
   clock.advance(1000); // let the mock "log in"
-  return { clock, provider, controller };
+  return { clock, provider, controller, dispatchStats: () => provider.emitStatsForTest() };
 }

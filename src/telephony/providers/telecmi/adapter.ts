@@ -1,4 +1,4 @@
-import type { Credentials, Meta, ProviderEvent, TelephonyProvider } from '../../core/types.ts';
+import type { Credentials, MediaStats, Meta, ProviderEvent, TelephonyProvider } from '../../core/types.ts';
 
 /** Regional signalling hosts from TeleCMI's Browser SDK docs. */
 export const TELECMI_REGIONS = {
@@ -40,8 +40,106 @@ interface PiopiySdk {
 }
 type PiopiyCtor = new (opts: { name?: string; debug?: boolean; autoplay?: boolean; ringTime?: number }) => PiopiySdk;
 
-const num = (v: unknown): number | undefined => (typeof v === 'number' ? v : undefined);
+const num = (v: unknown): number | undefined => (typeof v === 'number' && Number.isFinite(v) ? v : undefined);
 const str = (v: unknown): string | undefined => (typeof v === 'string' && v ? v : undefined);
+
+/**
+ * Translation of piopiyjs's own 1-second WebRTC sampler (`RTCStats`, lib/stats.js).
+ * Only useful as a fallback: it has no packet counts for either direction, which is
+ * exactly what direction-failure diagnosis needs. Field names are the SDK's
+ * (including its `rountTrip` typo).
+ */
+function sdkStatsToMediaStats(d: Record<string, unknown>): MediaStats {
+  return {
+    ...(str(d.codec) ? { codec: str(d.codec) } : {}),
+    ...(str(d.network) ? { network: str(d.network) } : {}),
+    ...(num(d.delay) !== undefined ? { roundTripSec: num(d.delay) } : {}),
+    packetsLost: num(d.totalPacketLost) ?? 0,
+    jitterSec: num(d.jitter) ?? 0,
+    remoteFractionLost: num(d.fractionLost),
+    remoteRoundTripSec: num(d.rountTrip),
+  };
+}
+
+/** Minimal WebRTC stats we read when polling the peer connection directly. */
+interface RtcStatLike {
+  type?: string;
+  mimeType?: string;
+  networkType?: string;
+  currentRoundTripTime?: number;
+  packetsReceived?: number;
+  bytesReceived?: number;
+  packetsLost?: number;
+  jitter?: number;
+  packetsSent?: number;
+  bytesSent?: number;
+  isRemote?: boolean;
+  fractionLost?: number;
+}
+
+async function pollPeerStats(peer: { getStats: () => Promise<unknown> }): Promise<MediaStats | null> {
+  let report: unknown;
+  try {
+    report = await peer.getStats();
+  } catch {
+    return null; // peer connection gone mid-poll — the ended/failed event will follow on its own
+  }
+  const out: MediaStats = {};
+  let codec: string | undefined;
+  const sendCodecs = new Map<string, string>();
+  // report.forEach over the RTCStatsReport (it is not a plain iterable in all browsers).
+  (report as { forEach?: (cb: (s: RtcStatLike) => void) => void }).forEach?.((s) => {
+    if (s.type === 'inbound-rtp') {
+      if (s.packetsReceived !== undefined) out.packetsReceived = (out.packetsReceived ?? 0) + s.packetsReceived;
+      if (s.bytesReceived !== undefined) out.bytesReceived = (out.bytesReceived ?? 0) + s.bytesReceived;
+      if (s.packetsLost !== undefined) out.packetsLost = (out.packetsLost ?? 0) + s.packetsLost;
+      if (s.jitter !== undefined) out.jitterSec = Math.max(out.jitterSec ?? 0, s.jitter);
+    }
+    if (s.type === 'outbound-rtp' && s.packetsSent !== undefined) {
+      out.packetsSent = (out.packetsSent ?? 0) + s.packetsSent;
+      if (s.bytesSent !== undefined) out.bytesSent = (out.bytesSent ?? 0) + s.bytesSent;
+    }
+    if (s.type === 'remote-inbound-rtp') {
+      // The far side's RTCP report on the stream WE send.
+      if (s.fractionLost !== undefined) out.remoteFractionLost = s.fractionLost;
+      if (s.jitter !== undefined) out.remoteJitterSec = s.jitter;
+      if (s.currentRoundTripTime !== undefined) out.remoteRoundTripSec = s.currentRoundTripTime;
+    }
+    if (s.type === 'candidate-pair' && (s as { nominated?: boolean }).nominated && s.currentRoundTripTime !== undefined) out.roundTripSec = s.currentRoundTripTime;
+    if (s.type === 'local-candidate' && s.networkType) out.network = s.networkType;
+    if (s.type === 'media-source' && s.mimeType) codec = s.mimeType;
+    if (s.type === 'codec' && s.mimeType && !s.isRemote) sendCodecs.set(s.mimeType, s.mimeType);
+  });
+  const mime = codec ?? [...sendCodecs.keys()][0];
+  if (mime) out.codec = mime;
+  return out;
+}
+
+//
+// Peer-connection tap. The SDK never exposes its RTCPeerConnection, and its own
+// stats event lacks packet counts, so before the SDK script loads we swap in a
+// passthrough subclass that remembers the newest connection (the SDK is strictly
+// single-call). The live call's full getStats() is then one await away.
+//
+let tappedPeer: RTCPeerConnection | null = null;
+
+function capturePeer(peer: RTCPeerConnection): void {
+  tappedPeer = peer;
+}
+
+function installPeerTap(): void {
+  const g = globalThis as { RTCPeerConnection?: unknown };
+  const Native = g.RTCPeerConnection as (typeof RTCPeerConnection & { __tccTap?: boolean }) | undefined;
+  if (!Native || Native.__tccTap) return;
+  const Tapped = class extends Native {
+    constructor(...args: ConstructorParameters<typeof RTCPeerConnection>) {
+      super(...args);
+      capturePeer(this);
+    }
+  };
+  (Tapped as { __tccTap?: boolean }).__tccTap = true;
+  g.RTCPeerConnection = Tapped;
+}
 
 function loadSdk(scriptUrl: string): Promise<PiopiyCtor> {
   const g = globalThis as { PIOPIY?: unknown; document?: Document };
@@ -85,6 +183,10 @@ export class TeleCmiProvider implements TelephonyProvider {
   private sdk: PiopiySdk | null = null;
   private loading: Promise<PiopiySdk> | null = null;
   private desiredConnected = false;
+  private statsTimer: ReturnType<typeof setInterval> | null = null;
+  private statsBusy = false;
+  /** Newest merged sample from the poll + the SDK's own sampler; re-emitted with 'ended'. */
+  private lastStats: MediaStats | null = null;
 
   constructor(config: TeleCmiConfig) {
     this.config = config;
@@ -118,10 +220,12 @@ export class TeleCmiProvider implements TelephonyProvider {
   dial(to: string, meta: Meta): void {
     // The SDK only accepts tags as one JSON *string* under `extra_param`.
     this.need().call(to, Object.keys(meta).length ? { extra_param: JSON.stringify(meta) } : undefined);
+    this.startStatsPolling();
   }
 
   answer(): void {
     this.need().answer();
+    this.startStatsPolling();
   }
 
   reject(): void {
@@ -129,6 +233,7 @@ export class TeleCmiProvider implements TelephonyProvider {
   }
 
   hangup(): void {
+    this.stopStatsPolling();
     this.need().terminate();
   }
 
@@ -168,8 +273,20 @@ export class TeleCmiProvider implements TelephonyProvider {
     return this.sdk;
   }
 
+  /** One last getStats() read raced against the SIP teardown, so the final sample lands before 'ended'. */
+  private flushStats(): void {
+    const peer = tappedPeer;
+    if (!peer) return;
+    pollPeerStats(peer)
+      .then((stats) => {
+        if (stats) this.lastStats = { ...this.lastStats, ...stats };
+      })
+      .catch(() => {});
+  }
+
   private ensureSdk(displayName?: string): Promise<PiopiySdk> {
     if (this.sdk) return Promise.resolve(this.sdk);
+    installPeerTap(); // before the SDK script runs, so it picks up the tap
     this.loading ??= loadSdk(this.config.scriptUrl).then((Ctor) => {
       const sdk = new Ctor({ name: displayName, debug: this.config.debug ?? false, autoplay: true, ringTime: this.config.ringTimeSec ?? 60 });
       this.wire(sdk);
@@ -186,6 +303,7 @@ export class TeleCmiProvider implements TelephonyProvider {
   private wire(sdk: PiopiySdk): void {
     const on = (name: string, fn: (d: Record<string, unknown>) => ProviderEvent | null) =>
       sdk.on(name, (d) => {
+        if (this.config.debug) console.debug(`[telecmi] ${name}`, d); // raw SDK payloads — how the unverified event assumptions get checked
         const e = fn(d ?? {});
         if (e) this.emit(e);
       });
@@ -202,12 +320,65 @@ export class TeleCmiProvider implements TelephonyProvider {
     on('answered', () => ({ type: 'answered' }));
     on('inComingCall', (d) => ({ type: 'incoming', from: str(d.from) ?? 'unknown', callId: str(d.call_id), team: str(d.team_name), toNumber: str(d.to_number) }));
     // `hangup` = we ended/cancelled it; `ended` = the far side did (or it failed, with a SIP-style code).
-    on('hangup', (d) => ({ type: 'ended', code: num(d.code), localHangup: true }));
-    on('ended', (d) => ({ type: 'ended', code: num(d.code) }));
+    // Both carry the newest stats sample so the saved call result records the call's final media state.
+    on('hangup', (d) => {
+      this.stopStatsPolling();
+      this.flushStats();
+      return { type: 'ended', code: num(d.code), localHangup: true, stats: this.lastStats ?? undefined };
+    });
+    on('ended', (d) => {
+      this.stopStatsPolling();
+      this.flushStats();
+      return { type: 'ended', code: num(d.code), stats: this.lastStats ?? undefined };
+    });
     on('hold', (d) => ({ type: 'hold', whom: d.whom === 'other' ? 'remote' : 'self', on: true }));
     on('unhold', (d) => ({ type: 'hold', whom: d.whom === 'other' ? 'remote' : 'self', on: false }));
     on('error', (d) => ({ type: 'error', code: num(d.code) ?? 1001, message: str(d.status) ?? 'Softphone error' }));
     on('mediaFailed', (d) => ({ type: 'mediaFailed', message: typeof d.status === 'string' ? d.status : 'Microphone unavailable — allow microphone access and retry' }));
+
+    // The SDK's own sampler as a fallback for anything our direct poll misses
+    // (e.g. a future SDK that stops exposing the peer connection). Normalised
+    // and merged by the caller, like the poll's output.
+    sdk.on('RTCStats', (d) => {
+      if (this.config.debug) console.debug('[telecmi] RTCStats', d);
+      const stats = sdkStatsToMediaStats(d ?? {});
+      this.lastStats = { ...this.lastStats, ...stats };
+      this.emit({ type: 'stats', stats: this.lastStats });
+    });
+    // ICE-level connectivity changes, distinct from SIP signalling — this is what
+    // "the call was up but the network path died" looks like.
+    sdk.on('RTC', (d) => {
+      if (this.config.debug) console.debug('[telecmi] RTC', d);
+      if ((d as { state?: unknown } | null)?.state === 'disconnected') this.emit({ type: 'error', code: 1004, message: 'Media connection lost (network changed?)' });
+    });
+  }
+
+  /** Once a second while a call is live: full getStats() off the tapped peer connection. */
+  private startStatsPolling(): void {
+    if (this.statsTimer) return;
+    installPeerTap();
+    this.lastStats = null;
+    this.statsTimer = setInterval(() => {
+      const peer = tappedPeer;
+      if (!peer || this.statsBusy) return;
+      this.statsBusy = true;
+      pollPeerStats(peer)
+        .then((stats) => {
+          if (stats) {
+            this.lastStats = { ...this.lastStats, ...stats };
+            this.emit({ type: 'stats', stats: this.lastStats });
+          }
+        })
+        .catch(() => {})
+        .finally(() => {
+          this.statsBusy = false;
+        });
+    }, 1000);
+  }
+
+  private stopStatsPolling(): void {
+    if (this.statsTimer) clearInterval(this.statsTimer);
+    this.statsTimer = null;
   }
 
   private emit(event: ProviderEvent): void {

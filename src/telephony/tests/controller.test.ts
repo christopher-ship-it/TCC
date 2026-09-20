@@ -210,6 +210,41 @@ test('the SDK emitting "answered" twice does not reset the answer time', () => {
   assert.equal(c.getSnapshot().call?.answeredAt, first);
 });
 
+test('stats samples attach to the live call and freeze into the final result', () => {
+  const { clock, controller, dispatchStats } = setup({ ringMs: 1000, stats: { packetsSent: 50, packetsReceived: 50, roundTripSec: 0.04 } });
+  const ended: CallResult[] = [];
+  controller.onCallEnded((r) => ended.push(r));
+
+  controller.dial('9876543210');
+  clock.advance(1500); // answered + first stats tick at +500ms
+  assert.equal(controller.getSnapshot().call?.state, 'connected');
+  assert.equal(controller.getSnapshot().call?.stats?.packetsSent, 50);
+
+  clock.advance(2000); // two more ticks: counters grow
+  assert.equal(controller.getSnapshot().call?.stats?.packetsSent, 150);
+  assert.equal(controller.getSnapshot().call?.stats?.packetsReceived, 150);
+
+  controller.hangup();
+  assert.equal(ended.length, 1);
+  assert.equal(ended[0].stats?.packetsSent, 150);
+  assert.equal(controller.getSnapshot().lastResult?.stats?.packetsReceived, 150);
+
+  // A stats event for an old call (no call live) is ignored.
+  dispatchStats();
+  assert.equal(controller.getSnapshot().lastResult?.stats?.packetsSent, 150);
+});
+
+test('a dead-microphone stats sample is preserved in the result for diagnosis', () => {
+  const { clock, controller } = setup({ ringMs: 500, stats: { packetsSent: 0, packetsReceived: 50 } });
+  controller.dial('9876543210');
+  clock.advance(1200); // answered at +500, one stats tick at +1000
+  controller.hangup();
+  const r = controller.getSnapshot().lastResult;
+  assert.equal(r?.disposition, 'connected');
+  assert.equal(r?.stats?.packetsSent, 0);
+  assert.equal(r?.stats?.packetsReceived, 50);
+});
+
 test('snapshot identity is stable while nothing changes, and subscribers are notified on change', () => {
   const { clock, controller } = setup();
   let notified = 0;

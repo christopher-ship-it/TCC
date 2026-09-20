@@ -1,4 +1,23 @@
+import type { MediaStats } from '../telephony';
+
 export type QueueKey = 'new' | 'tickets' | 'payments' | 'followup' | 'errors' | 'inactive';
+
+/** One-line diagnosis of which audio direction failed, from the last WebRTC stats sample. */
+export function telephonyQualitySummary(q: MediaStats | undefined | null): string | null {
+  if (!q) return null;
+  const sent = q.packetsSent;
+  const received = q.packetsReceived;
+  const pct = (v: number) => `${Math.round(v * 100)}%`;
+  const delay = q.roundTripSec !== undefined ? ` · delay ${Math.round(q.roundTripSec * 1000)}ms` : '';
+  if (sent === 0 && received === 0) return 'No media';
+  if (sent === 0) return 'No audio sent — microphone uplink is dead';
+  if (q.remoteFractionLost !== undefined && q.remoteFractionLost >= 0.5) return `One-way audio — they received almost nothing (${pct(q.remoteFractionLost)} lost)`;
+  if (received === 0) return 'No audio received — you would not hear them';
+  const downLost = q.packetsLost !== undefined && q.packetsReceived !== undefined ? q.packetsLost / (q.packetsLost + q.packetsReceived) : undefined;
+  if (downLost !== undefined && downLost >= 0.05) return `Loss ${pct(downLost)}${delay}`;
+  if (q.jitterSec !== undefined && q.jitterSec >= 0.06) return `Jitter ${Math.round(q.jitterSec * 1000)}ms${delay}`;
+  return 'Both directions flowing';
+}
 
 export interface QueueDef {
   key: QueueKey;
@@ -102,6 +121,8 @@ export interface CallTelephony {
   durationSec: number;
   ringSec: number;
   disposition: string;
+  /** Last WebRTC media-quality sample before the call ended — which audio direction failed. Absent on older entries. */
+  quality?: MediaStats;
 }
 
 export interface CallLogEntry {

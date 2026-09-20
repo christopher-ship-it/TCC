@@ -43,6 +43,8 @@ export interface CallSession {
   remoteHeld: boolean;
   hangupRequested: boolean;
   meta: Meta;
+  /** Latest media-quality sample; refreshed while the call is live. */
+  stats: MediaStats | null;
 }
 
 export interface CallResult {
@@ -60,6 +62,9 @@ export interface CallResult {
   /** Raw SIP-style status code from the provider when there was one. */
   endCode: number | null;
   meta: Meta;
+  /** Last media-quality sample seen before the call ended. Null for calls that
+   *  never connected (and for providers that report no stats). */
+  stats: MediaStats | null;
 }
 
 export interface CallSnapshot {
@@ -71,6 +76,38 @@ export interface CallSnapshot {
   error: { code: number; message: string } | null;
 }
 
+/** One sample of WebRTC media quality, taken while a call is live.
+ *  All fields optional — a provider emits what it can measure.
+ *
+ *  Two directions, which is the point: `packetsSent` / `bytesSent` count audio
+ *  we're pushing out, and the `remote*` fields carry the far side's RTCP report
+ *  on that same stream — so a stuck `packetsSent` or a `remoteFractionLost`
+ *  near 1 means OUR microphone uplink is broken while the call still sounds
+ *  fine to us. The plain `packetsReceived` / `packetsLost` / `jitterSec` /
+ *  `roundTripSec` describe their voice coming towards us. */
+export interface MediaStats {
+  /** Audio codec in use, e.g. "audio/opus". */
+  codec?: string;
+  /** Current network type of the local candidate: wifi, ethernet, cellular… */
+  network?: string;
+  /** Round-trip time to the far party, seconds (WebRTC's currentRoundTripTime). */
+  roundTripSec?: number;
+  /** Receiving (their voice → us): cumulative packets / bytes since call start. */
+  packetsReceived?: number;
+  bytesReceived?: number;
+  packetsLost?: number;
+  jitterSec?: number;
+  /** Sending (our voice → them): cumulative packets / bytes since call start. A
+   *  sending counter stuck at 0 is the signature of a dead microphone uplink. */
+  packetsSent?: number;
+  bytesSent?: number;
+  /** Their RTCP report of our audio: fraction of our packets they received, 0–1.
+   *  Falls towards 0 when our uplink is broken even though we're "sending". */
+  remoteFractionLost?: number;
+  remoteJitterSec?: number;
+  remoteRoundTripSec?: number;
+}
+
 /** Normalised events every provider adapter must emit. */
 export type ProviderEvent =
   | { type: 'ready' }
@@ -80,10 +117,11 @@ export type ProviderEvent =
   | { type: 'ringing'; callId?: string }
   | { type: 'incoming'; from: string; callId?: string; team?: string; toNumber?: string }
   | { type: 'answered'; callId?: string }
-  | { type: 'ended'; code?: number; localHangup?: boolean }
+  | { type: 'ended'; code?: number; localHangup?: boolean; stats?: MediaStats }
   | { type: 'hold'; whom: 'self' | 'remote'; on: boolean }
   | { type: 'error'; code: number; message: string }
-  | { type: 'mediaFailed'; message: string };
+  | { type: 'mediaFailed'; message: string }
+  | { type: 'stats'; stats: MediaStats };
 
 export interface TelephonyProvider {
   readonly name: string;

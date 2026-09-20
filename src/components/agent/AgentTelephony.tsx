@@ -1,7 +1,7 @@
 import type { CSSProperties, ReactNode } from 'react';
 import type { AgentAccount, CustomerUser } from '../../data/types';
 import { CallPanel, TelephonyProvider } from '../../telephony';
-import { DEFAULT_COUNTRY_CODE, callMeta, telephonyProvider } from '../../lib/telephony';
+import { DEFAULT_COUNTRY_CODE, LIVE_DIAL_BLOCKED, TEST_NUMBER, callMeta, dialNumberFor, telephonyProvider } from '../../lib/telephony';
 
 // Maps the module's theme variables onto TCC's design tokens.
 const theme = {
@@ -40,11 +40,22 @@ export default function AgentTelephony({ children }: { children: ReactNode }) {
   );
 }
 
+const notice: CSSProperties = { fontSize: 12, lineHeight: 1.45, padding: 'var(--space-2)', background: 'var(--color-accent-100)', borderLeft: '2px solid var(--color-accent)' };
+
 export function TccCallPanel({ user, agent }: { user: CustomerUser; agent: AgentAccount }) {
+  if (LIVE_DIAL_BLOCKED) {
+    return (
+      <div style={notice}>
+        <strong>Live dialling is off.</strong> Customer numbers are still sample data, so calling them would ring real strangers. Set <code>VITE_TELEPHONY_TEST_NUMBER</code> to route every call to your own phone, or <code>VITE_TELEPHONY_LIVE=true</code> once real data is connected.
+      </div>
+    );
+  }
   return (
+    <>
+    {TEST_NUMBER && <div style={{ ...notice, marginBottom: 'var(--space-2)' }}><strong>Test mode</strong> — every call rings {TEST_NUMBER}, not {user.name}.</div>}
     <CallPanel
       style={theme}
-      number={user.phone}
+      number={dialNumberFor(user)}
       label={user.name}
       meta={callMeta(user, agent)}
       shortcutHint="F1"
@@ -57,6 +68,7 @@ export function TccCallPanel({ user, agent }: { user: CustomerUser; agent: Agent
         }
       }}
     />
+    </>
   );
 }
 

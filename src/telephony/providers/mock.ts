@@ -1,4 +1,4 @@
-import type { Credentials, Meta, ProviderEvent, TelephonyProvider } from '../core/types.ts';
+import type { Credentials, MediaStats, Meta, ProviderEvent, TelephonyProvider } from '../core/types.ts';
 
 export type MockScenario = 'answer' | 'no-answer' | 'busy' | 'unreachable' | 'invalid' | 'reject';
 
@@ -11,6 +11,8 @@ export interface MockOptions {
   connectMs?: number;
   /** Pick a scenario for a dialled number. Default: keyed on the last digit — see scenarioFromLastDigit. */
   scenarioFor?: (to: string) => MockScenario;
+  /** Media stats emitted once per answered second (a fake healthy line). Default: none. */
+  stats?: MediaStats;
 }
 
 /** Last digit → outcome, so a demo list of customers exercises every path:
@@ -40,10 +42,14 @@ export class MockProvider implements TelephonyProvider {
   private readonly ringMs: number;
   private readonly connectMs: number;
   private readonly scenarioFor: (to: string) => MockScenario;
+  private readonly stats: MediaStats | undefined;
   private registered = false;
   private callId: string | null = null;
   private held = false;
   private seq = 0;
+  private statsSeq = 0;
+  /** Newest stats sample emitted for the current call (sent again with 'ended'). */
+  private lastStats: MediaStats | null = null;
 
   constructor(opts: MockOptions = {}) {
     this.schedule = opts.schedule ?? ((fn, ms) => {
@@ -53,6 +59,7 @@ export class MockProvider implements TelephonyProvider {
     this.ringMs = opts.ringMs ?? 2500;
     this.connectMs = opts.connectMs ?? 300;
     this.scenarioFor = opts.scenarioFor ?? scenarioFromLastDigit;
+    this.stats = opts.stats;
   }
 
   subscribe(handler: (e: ProviderEvent) => void): () => void {
@@ -89,7 +96,11 @@ export class MockProvider implements TelephonyProvider {
     this.callId = `mock-${++this.seq}`;
     this.held = false;
     this.emit({ type: 'trying' });
-    const at = (ms: number, e: ProviderEvent) => this.later(() => this.emit(e), ms);
+    const at = (ms: number, e: ProviderEvent) =>
+      this.later(() => {
+        this.emit(e);
+        if (e.type === 'answered') this.startStats(); // media (and its stats) only exist from answer
+      }, ms);
     switch (this.scenarioFor(to)) {
       case 'answer':
         at(300, { type: 'ringing' });
@@ -121,9 +132,9 @@ export class MockProvider implements TelephonyProvider {
     this.emit({ type: 'incoming', from, callId: this.callId, team });
     this.emit({ type: 'ringing' });
   }
-
   answer(): void {
     this.emit({ type: 'answered' });
+    this.startStats();
   }
 
   reject(): void {
@@ -156,10 +167,33 @@ export class MockProvider implements TelephonyProvider {
     return this.held;
   }
 
+  /** Test seam: fire one extra stats event with no call live. */
+  emitStatsForTest(): void {
+    if (this.stats) this.emit({ type: 'stats', stats: this.stats });
+  }
+
   private endLocal(): void {
     this.cancelTimers();
     this.callId = null;
-    this.emit({ type: 'ended', localHangup: true, code: 200 });
+    this.emit({ type: 'ended', localHangup: true, code: 200, stats: this.lastStats ?? this.stats });
+  }
+
+  /** While a call is connected, emit the configured stats sample once a second. */
+  private startStats(): void {
+    const s = this.stats;
+    if (!s) return;
+    const tick = () => {
+      this.statsSeq += 1;
+      const grown: MediaStats = {
+        ...s,
+        packetsSent: s.packetsSent !== undefined ? s.packetsSent * this.statsSeq : undefined,
+        packetsReceived: s.packetsReceived !== undefined ? s.packetsReceived * this.statsSeq : undefined,
+      };
+      this.lastStats = grown;
+      this.emit({ type: 'stats', stats: grown });
+      this.later(tick, 1000);
+    };
+    this.later(tick, 500);
   }
 
   private later(fn: () => void, ms: number): void {

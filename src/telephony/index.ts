@@ -3,7 +3,7 @@ export { PhoneController, type ControllerOptions, type DialResult } from './core
 export { normalizePhone } from './core/phone-number.ts';
 export { initialSnapshot, reduce, type Action } from './core/reducer.ts';
 export type {
-  CallDirection, CallResult, CallSession, CallSnapshot, CallState, ConnectionState, Credentials, Disposition, Meta, ProviderEvent, TelephonyProvider as TelephonyProviderContract,
+  CallDirection, CallResult, CallSession, CallSnapshot, CallState, ConnectionState, Credentials, Disposition, MediaStats, Meta, ProviderEvent, TelephonyProvider as TelephonyProviderContract,
 } from './core/types.ts';
 
 export { MockProvider, scenarioFromLastDigit, type MockOptions, type MockScenario } from './providers/mock.ts';
