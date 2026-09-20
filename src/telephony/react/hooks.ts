@@ -66,8 +66,9 @@ export function useAudioDevices() {
             const stored = localStorage.getItem('deviceId');
             if (stored && inputs.some((d) => d.deviceId === stored)) {
               setSelectedDeviceId(stored);
-            } else if (inputs.length > 0 && !stored) {
-              setSelectedDeviceId(inputs[0].deviceId);
+            } else if (stored) {
+              localStorage.removeItem('deviceId');
+              setSelectedDeviceId('');
             }
           } catch {
             // ignore localStorage errors

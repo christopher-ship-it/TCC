@@ -75,6 +75,7 @@ interface RtcStatLike {
   bytesSent?: number;
   isRemote?: boolean;
   fractionLost?: number;
+  audioLevel?: number;
 }
 
 async function pollPeerStats(peer: { getStats: () => Promise<unknown> }): Promise<MediaStats | null> {
@@ -107,7 +108,10 @@ async function pollPeerStats(peer: { getStats: () => Promise<unknown> }): Promis
     }
     if (s.type === 'candidate-pair' && (s as { nominated?: boolean }).nominated && s.currentRoundTripTime !== undefined) out.roundTripSec = s.currentRoundTripTime;
     if (s.type === 'local-candidate' && s.networkType) out.network = s.networkType;
-    if (s.type === 'media-source' && s.mimeType) codec = s.mimeType;
+    if (s.type === 'media-source') {
+      if (s.mimeType) codec = s.mimeType;
+      if (typeof s.audioLevel === 'number') out.audioLevel = s.audioLevel;
+    }
     if (s.type === 'codec' && s.mimeType && !s.isRemote) sendCodecs.set(s.mimeType, s.mimeType);
   });
   const mime = codec ?? [...sendCodecs.keys()][0];
@@ -122,7 +126,6 @@ async function pollPeerStats(peer: { getStats: () => Promise<unknown> }): Promis
 // single-call). The live call's full getStats() is then one await away.
 //
 let tappedPeer: RTCPeerConnection | null = null;
-let currentCallRecorder: { stop: () => Promise<string | undefined> } | null = null;
 
 function installMediaTap(): void {
   const g = globalThis as { navigator?: Navigator & { mediaDevices?: MediaDevices } };
@@ -137,8 +140,6 @@ function installMediaTap(): void {
       // If deviceId is empty or "default", remove it so Chrome uses default input safely
       if (typeof audio.deviceId === 'string' && (!audio.deviceId || audio.deviceId === 'default')) {
         delete audio.deviceId;
-      } else if (typeof audio.deviceId === 'string') {
-        audio.deviceId = { ideal: audio.deviceId };
       }
       cleanConstraints = {
         ...cleanConstraints,
@@ -164,97 +165,23 @@ function installMediaTap(): void {
       const stream = await origGetUserMedia(cleanConstraints);
       stream.getAudioTracks().forEach((track) => {
         track.enabled = true;
-        console.debug('[telecmi] Acquired audio track:', track.label, 'enabled:', track.enabled, 'muted:', track.muted);
+        console.debug('[telecmi mic] Acquired audio track:', track.label, 'enabled:', track.enabled, 'muted:', track.muted);
+        track.addEventListener('mute', () => {
+          console.warn('[telecmi mic] Audio track was MUTED by system:', track.label);
+        });
+        track.addEventListener('unmute', () => {
+          console.debug('[telecmi mic] Audio track UNMUTED:', track.label);
+        });
       });
       return stream;
     } catch (err) {
-      console.warn('[telecmi] getUserMedia failed with constraints, falling back to basic audio', err);
+      console.warn('[telecmi mic] getUserMedia failed with constraints, falling back to basic audio', err);
       const fallback = await origGetUserMedia({ audio: true, video: false });
       fallback.getAudioTracks().forEach((t) => { t.enabled = true; });
       return fallback;
     }
   };
   (md as { __tccMediaTap?: boolean }).__tccMediaTap = true;
-}
-
-function startCallRecording(peer: RTCPeerConnection): { stop: () => Promise<string | undefined> } | null {
-  const g = globalThis as { AudioContext?: typeof AudioContext; MediaRecorder?: typeof MediaRecorder; MediaStream?: typeof MediaStream };
-  if (!g.AudioContext || !g.MediaRecorder || !g.MediaStream) return null;
-
-  try {
-    const audioCtx = new g.AudioContext();
-    const dest = audioCtx.createMediaStreamDestination();
-
-    let localConnected = false;
-    let remoteConnected = false;
-
-    function attachTracks() {
-      peer.getSenders().forEach((s) => {
-        if (s.track && s.track.kind === 'audio' && !localConnected) {
-          try {
-            const src = audioCtx.createMediaStreamSource(new g.MediaStream!([s.track]));
-            src.connect(dest);
-            localConnected = true;
-          } catch {
-            // ignore
-          }
-        }
-      });
-      peer.getReceivers().forEach((r) => {
-        if (r.track && r.track.kind === 'audio' && !remoteConnected) {
-          try {
-            const src = audioCtx.createMediaStreamSource(new g.MediaStream!([r.track]));
-            src.connect(dest);
-            remoteConnected = true;
-          } catch {
-            // ignore
-          }
-        }
-      });
-    }
-
-    attachTracks();
-    peer.addEventListener('track', () => attachTracks());
-
-    const recorder = new g.MediaRecorder(dest.stream);
-    const chunks: Blob[] = [];
-    recorder.ondataavailable = (e) => {
-      if (e.data && e.data.size > 0) chunks.push(e.data);
-    };
-
-    recorder.start(1000);
-
-    return {
-      stop: () =>
-        new Promise<string | undefined>((resolve) => {
-          if (recorder.state === 'inactive') {
-            audioCtx.close().catch(() => {});
-            return resolve(undefined);
-          }
-          recorder.onstop = () => {
-            try {
-              audioCtx.close().catch(() => {});
-              if (chunks.length > 0) {
-                const blob = new Blob(chunks, { type: recorder.mimeType || 'audio/webm' });
-                const url = URL.createObjectURL(blob);
-                resolve(url);
-              } else {
-                resolve(undefined);
-              }
-            } catch {
-              resolve(undefined);
-            }
-          };
-          try {
-            recorder.stop();
-          } catch {
-            resolve(undefined);
-          }
-        }),
-    };
-  } catch {
-    return null;
-  }
 }
 
 function capturePeer(peer: RTCPeerConnection): void {
@@ -264,9 +191,9 @@ function capturePeer(peer: RTCPeerConnection): void {
       peer.getSenders().forEach((s) => {
         if (s.track && s.track.kind === 'audio') {
           s.track.enabled = true;
+          console.debug('[telecmi peer] Verified audio sender track enabled:', s.track.label, 'muted:', s.track.muted);
         }
       });
-      currentCallRecorder ??= startCallRecording(peer);
     }
   });
 }
@@ -285,6 +212,12 @@ function installPeerTap(): void {
     override addTrack(track: MediaStreamTrack, ...streams: MediaStream[]): RTCRtpSender {
       if (track.kind === 'audio') {
         track.enabled = true;
+        track.addEventListener('mute', () => {
+          console.warn('[telecmi audio track] Track MUTED by system/browser! Label:', track.label);
+        });
+        track.addEventListener('unmute', () => {
+          console.log('[telecmi audio track] Track UNMUTED. Label:', track.label);
+        });
       }
       return super.addTrack(track, ...streams);
     }
@@ -479,19 +412,15 @@ export class TeleCmiProvider implements TelephonyProvider {
     on('inComingCall', (d) => ({ type: 'incoming', from: str(d.from) ?? 'unknown', callId: str(d.call_id), team: str(d.team_name), toNumber: str(d.to_number) }));
     // `hangup` = we ended/cancelled it; `ended` = the far side did (or it failed, with a SIP-style code).
     // Both carry the newest stats sample so the saved call result records the call's final media state.
-    on('hangup', async (d) => {
+    on('hangup', (d) => {
       this.stopStatsPolling();
       this.flushStats();
-      const recUrl = await currentCallRecorder?.stop().catch(() => undefined);
-      currentCallRecorder = null;
-      return { type: 'ended', code: num(d.code), localHangup: true, stats: this.lastStats ?? undefined, recordingBlobUrl: recUrl };
+      return { type: 'ended', code: num(d.code), localHangup: true, stats: this.lastStats ?? undefined };
     });
-    on('ended', async (d) => {
+    on('ended', (d) => {
       this.stopStatsPolling();
       this.flushStats();
-      const recUrl = await currentCallRecorder?.stop().catch(() => undefined);
-      currentCallRecorder = null;
-      return { type: 'ended', code: num(d.code), stats: this.lastStats ?? undefined, recordingBlobUrl: recUrl };
+      return { type: 'ended', code: num(d.code), stats: this.lastStats ?? undefined };
     });
     on('hold', (d) => ({ type: 'hold', whom: d.whom === 'other' ? 'remote' : 'self', on: true }));
     on('unhold', (d) => ({ type: 'hold', whom: d.whom === 'other' ? 'remote' : 'self', on: false }));

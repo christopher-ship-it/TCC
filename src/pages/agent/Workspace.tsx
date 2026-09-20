@@ -3,7 +3,7 @@ import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { useStore } from '../../store/StoreContext';
 import { APP_LOGOS } from '../../assets';
 import { TECSTELLAR_MARK } from '../../assets';
-import { CALL_STATUS_LIST, OUTCOME_LIST, POSITIVE_OUTCOMES, QUEUES, type AppId, type CallAnalytics, type CallLogEntry, type CallStatus, type Outcome, type QueueKey, type Sentiment } from '../../data/types';
+import { CALL_STATUS_LIST, OUTCOME_LIST, POSITIVE_OUTCOMES, QUEUES, type AppId, type CallLogEntry, type CallStatus, type Outcome, type QueueKey, type Sentiment } from '../../data/types';
 import { tasksForQueue, queueCounts } from '../../lib/queue';
 import { APPS } from '../../data/seed';
 import MidCallModal from '../../components/agent/MidCallModal';
@@ -95,58 +95,7 @@ export default function Workspace() {
   const focusId = searchParams.get('focus');
   const currentUser = (focusId && list.find((u) => u.id === focusId)) || list[0];
 
-  // Live in-browser Speech Recognition (Web Speech API) to transcribe the agent's real voice during calls
-  const liveTurnsRef = useRef<{ speaker: 'agent' | 'customer'; text: string; offsetSec: number }[]>([]);
-  const callSnapshot = telephony?.snapshot.call;
-  const isCallConnected = callSnapshot?.state === 'connected';
 
-  useEffect(() => {
-    if (!isCallConnected) return;
-
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const SpeechRec = (window as unknown as { SpeechRecognition?: any; webkitSpeechRecognition?: any }).SpeechRecognition ||
-                      (window as unknown as { webkitSpeechRecognition?: any }).webkitSpeechRecognition;
-    if (!SpeechRec) return;
-
-    liveTurnsRef.current = [];
-    const recognition = new SpeechRec();
-    recognition.continuous = true;
-    recognition.interimResults = false;
-    recognition.lang = 'en-IN';
-
-    const startTime = Date.now();
-
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    recognition.onresult = (e: any) => {
-      for (let i = e.resultIndex; i < e.results.length; ++i) {
-        if (e.results[i].isFinal) {
-          const text = e.results[i][0].transcript.trim();
-          if (text) {
-            const offsetSec = Math.max(1, Math.floor((Date.now() - startTime) / 1000));
-            liveTurnsRef.current.push({
-              speaker: 'agent',
-              text,
-              offsetSec,
-            });
-          }
-        }
-      }
-    };
-
-    try {
-      recognition.start();
-    } catch {
-      // already started or mic in use
-    }
-
-    return () => {
-      try {
-        recognition.stop();
-      } catch {
-        // ignore
-      }
-    };
-  }, [isCallConnected]);
 
   // When a softphone call ends, remember it (saved with the log entry) and pre-fill the cases the line already knows.
   useEffect(() => {
@@ -167,7 +116,6 @@ export default function Workspace() {
     setComment('');
     setCommentError(false);
     setOverrideDate(false);
-    liveTurnsRef.current = [];
   }
 
   function save() {
@@ -175,23 +123,6 @@ export default function Workspace() {
     const finalComment = comment.trim() || (lastCall && lastCall.talkSeconds > 0 ? `Call ended (${formatDuration(lastCall.talkSeconds)})` : `${status} · line checked`);
     const finalOutcome = status.startsWith('Answered') && outcome ? outcome : undefined;
     const telephonyInfo = lastCall && lastCall.meta.customerId === currentUser.id ? toCallTelephony(lastCall) : undefined;
-
-    let liveAnalytics: CallAnalytics | undefined;
-    if (liveTurnsRef.current.length > 0) {
-      const turns = [...liveTurnsRef.current];
-      const spokenSummary = turns.map((t) => t.text).join(' ');
-      liveAnalytics = {
-        sentiment: 'positive',
-        sentimentScore: 0.65,
-        summary: `Live call transcript: "${spokenSummary.slice(0, 160)}${spokenSummary.length > 160 ? '...' : ''}"`,
-        keyTopics: ['live_outreach', 'agent_call'],
-        actionItems: ['Review customer action items discussed on call'],
-        transcript: turns,
-        isLiveCaptured: true,
-        source: 'live_stt',
-      };
-      liveTurnsRef.current = [];
-    }
 
     dispatch({
       type: 'LOG_CALL',
@@ -201,7 +132,6 @@ export default function Workspace() {
       comment: finalComment,
       agentId: currentAgent.id,
       telephony: telephonyInfo,
-      analytics: liveAnalytics,
     });
     setDoneToday((d) => d + 1);
     if (finalOutcome && POSITIVE_OUTCOMES.includes(finalOutcome)) setPositiveToday((p) => p + 1);

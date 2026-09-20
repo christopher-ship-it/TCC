@@ -84,14 +84,14 @@ export function CallPanel({ number, label, meta, shortcutHint, defaultUserId, on
   const [micTesting, setMicTesting] = useState(false);
 
   const { devices, selectedDeviceId, selectDevice } = useAudioDevices();
-  const micActive = (call?.state === 'connected' && !call.muted) || micTesting;
-  const { volume, isSilent } = useMicLevel(micActive, selectedDeviceId);
+  const { volume, isSilent } = useMicLevel(micTesting, selectedDeviceId);
 
   const elapsed = useElapsedSeconds(call ? (call.answeredAt ?? call.startedAt) : null);
   const quality = call?.stats ? qualityLine(call.stats) : lastResult?.stats ? qualityLine(lastResult.stats) : null;
 
   useEffect(() => {
     if (!call) setKeypad(false);
+    else setMicTesting(false); // Never run test meter during an active call to prevent mic contention
   }, [call]);
 
   function dial() {
@@ -142,30 +142,27 @@ export function CallPanel({ number, label, meta, shortcutHint, defaultUserId, on
             onChange={(e) => selectDevice(e.target.value)}
             style={{ width: '100%', padding: '6px 8px', fontSize: 12, borderRadius: 4, border: '1px solid #ccc' }}
           >
-            {devices.length === 0 ? (
-              <option value="">Default System Microphone</option>
-            ) : (
-              devices.map((d) => (
-                <option key={d.deviceId} value={d.deviceId}>
-                  {d.label}
-                </option>
-              ))
-            )}
+            <option value="">Default System Microphone (Recommended)</option>
+            {devices.map((d) => (
+              <option key={d.deviceId} value={d.deviceId}>
+                {d.label}
+              </option>
+            ))}
           </select>
 
           {/* Live Mic Meter in Settings */}
           <div style={{ display: 'grid', gap: 4 }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, color: '#666' }}>
               <span>Live Mic Level:</span>
-              <span style={{ fontVariantNumeric: 'tabular-nums', fontWeight: 600, color: isSilent && micActive ? '#b3261e' : '#22a544' }}>
-                {micActive ? (isSilent ? 'Silent (0%)' : `${volume}%`) : 'Click "Test Mic Level" to check'}
+              <span style={{ fontVariantNumeric: 'tabular-nums', fontWeight: 600, color: isSilent && micTesting ? '#b3261e' : '#22a544' }}>
+                {micTesting ? (isSilent ? 'Silent (0%)' : `${volume}%`) : 'Click "Test Mic Level" to check'}
               </span>
             </div>
             <div style={{ height: 8, background: '#e0e0e0', borderRadius: 4, overflow: 'hidden' }}>
               <div
                 style={{
                   height: '100%',
-                  width: micActive ? `${volume}%` : '0%',
+                  width: micTesting ? `${volume}%` : '0%',
                   background: isSilent ? '#b3261e' : '#22a544',
                   transition: 'width 0.08s ease',
                 }}
@@ -174,7 +171,7 @@ export function CallPanel({ number, label, meta, shortcutHint, defaultUserId, on
           </div>
 
           <div style={{ fontSize: 11, color: '#666', lineHeight: 1.3 }}>
-            💡 <em>Note:</em> If the customer cannot hear you, ensure your laptop microphone is selected above, unmuted in <strong>macOS System Settings → Sound → Input</strong>, and Chrome has microphone permission.
+            💡 <em>Tip:</em> Default System Microphone uses macOS native hardware acoustic echo cancellation and automatic gain control.
           </div>
         </div>
       )}
@@ -214,25 +211,18 @@ export function CallPanel({ number, label, meta, shortcutHint, defaultUserId, on
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: 11 }}>
                 <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
                   <span>🎙️</span>
-                  <span><strong>Microphone:</strong> {call.muted ? '(Muted)' : isSilent ? 'No sound detected' : 'Active'}</span>
+                  <span><strong>Microphone:</strong> {call.muted ? 'Muted' : 'Live Uplink Active'}</span>
                 </span>
-                <span style={{ fontVariantNumeric: 'tabular-nums', fontWeight: 600, color: call.muted ? v('muted', '#888') : isSilent ? v('danger', '#b3261e') : v('ok', '#22a544') }}>
-                  {call.muted ? 'Muted' : isSilent ? '0%' : `${volume}%`}
+                <span style={{ fontVariantNumeric: 'tabular-nums', fontWeight: 600, color: call.muted ? v('muted', '#888') : v('ok', '#22a544') }}>
+                  {call.muted ? 'Muted' : call.stats?.bytesSent && call.stats.bytesSent > 0 ? 'Transmitting audio' : 'Connected'}
                 </span>
               </div>
-              <div style={{ height: 6, background: '#e0e0e0', borderRadius: 3, overflow: 'hidden' }}>
-                <div
-                  style={{
-                    height: '100%',
-                    width: call.muted ? '0%' : `${volume}%`,
-                    background: isSilent ? v('danger', '#b3261e') : v('ok', '#22a544'),
-                    transition: 'width 0.08s ease',
-                  }}
-                />
-              </div>
-              {isSilent && !call.muted && (
-                <div style={{ fontSize: 10.5, color: v('danger', '#b3261e'), marginTop: 2, lineHeight: 1.25 }}>
-                  ⚠ Laptop mic is silent (0 dB). Check <strong>macOS System Settings → Sound → Input</strong> or switch device in "Mic / Audio" above.
+              {call.stats?.packetsSent !== undefined && (
+                <div style={{ fontSize: 10.5, color: v('muted', '#666'), display: 'flex', justifyContent: 'space-between' }}>
+                  <span>Packets sent: {call.stats.packetsSent}</span>
+                  {call.stats.audioLevel !== undefined && (
+                    <span>Level: {Math.round(call.stats.audioLevel * 100)}%</span>
+                  )}
                 </div>
               )}
             </div>
