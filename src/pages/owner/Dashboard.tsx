@@ -5,6 +5,7 @@ import { useStore } from '../../store/StoreContext';
 import { inrLabel } from '../../lib/dates';
 import { Rng } from '../../lib/rng';
 import { APPS } from '../../data/seed';
+import { auditTeamSentiment } from '../../lib/telecmiService';
 
 const RANGES = ['Today', '7 days', '30 days', 'All time'];
 
@@ -22,9 +23,14 @@ export default function Dashboard() {
   const callsToday = agents.reduce((s, a) => s + a.todayCalls, 0);
   const positiveToday = agents.reduce((s, a) => s + a.todayPositive, 0);
 
+  const sentimentAudit = useMemo(() => auditTeamSentiment(state.users), [state.users]);
+
   const perApp = liveApps.map((app) => {
     const users = state.users.filter((u) => u.app === app.id);
     const share = users.length / totalUsers;
+    const appCalls = users.flatMap((u) => u.callHistory).filter((c) => !!c.analytics);
+    const posAppCalls = appCalls.filter((c) => c.analytics?.sentiment === 'positive').length;
+    const sentimentPct = appCalls.length > 0 ? Math.round((posAppCalls / appCalls.length) * 100) : 0;
     return {
       app,
       users: users.length,
@@ -34,6 +40,7 @@ export default function Dashboard() {
       dues: users.filter((u) => u.queue === 'payments').reduce((s, u) => s + (u.paymentDue?.amount ?? 0), 0),
       tickets: users.filter((u) => u.queue === 'tickets').length,
       positiveToday: Math.round(positiveToday * share),
+      sentimentPct,
     };
   });
 
@@ -91,7 +98,7 @@ export default function Dashboard() {
         <div style={{ padding: 'var(--space-4)', borderRight: '2px solid var(--color-divider)' }}>
           <div className="eyebrow" style={{ marginBottom: 'var(--space-3)' }}>Per app</div>
           <table className="table">
-            <thead><tr><th>App</th><th>Users</th><th>MAU</th><th>Paying</th><th>MRR</th><th>Dues</th><th>Tickets</th><th>Positive today</th></tr></thead>
+            <thead><tr><th>App</th><th>Users</th><th>MAU</th><th>Paying</th><th>MRR</th><th>Dues</th><th>Tickets</th><th>Positive today</th><th>AI Sentiment</th></tr></thead>
             <tbody>
               {perApp.map((p) => (
                 <tr key={p.app.id}>
@@ -103,10 +110,15 @@ export default function Dashboard() {
                   <td style={{ color: 'var(--color-accent-700)' }}>{inrLabel(p.dues)}</td>
                   <td>{p.tickets}</td>
                   <td>{p.positiveToday}</td>
+                  <td>
+                    <span style={{ fontSize: 11, fontWeight: 700, padding: '2px 6px', borderRadius: 4, background: '#ecfdf5', color: '#065f46', border: '1px solid #a7f3d0' }}>
+                      {p.sentimentPct}% pos
+                    </span>
+                  </td>
                 </tr>
               ))}
               {APPS.filter((a) => !a.live).map((a) => (
-                <tr key={a.id}><td style={{ color: 'var(--color-neutral-700)' }}>{a.name}</td><td colSpan={7} style={{ color: 'var(--color-neutral-700)' }}>In development — connects when the first build ships</td></tr>
+                <tr key={a.id}><td style={{ color: 'var(--color-neutral-700)' }}>{a.name}</td><td colSpan={8} style={{ color: 'var(--color-neutral-700)' }}>In development — connects when the first build ships</td></tr>
               ))}
             </tbody>
           </table>
@@ -156,6 +168,18 @@ export default function Dashboard() {
               <div style={{ fontSize: 12, color: 'var(--color-neutral-700)' }}>{breaches} breaches open now</div>
             </div>
             <div>
+              <div className="eyebrow">TeleCMI Call Health</div>
+              <div style={{ font: '800 24px var(--font-heading)', color: '#047857' }}>{sentimentAudit.positivePct}%</div>
+              <div style={{ fontSize: 12, color: 'var(--color-neutral-700)' }}>{sentimentAudit.totalCallsAnalyzed} recordings analyzed</div>
+            </div>
+            <div>
+              <div className="eyebrow">AI Churn Alerts</div>
+              <div style={{ font: '800 24px var(--font-heading)', color: sentimentAudit.churnRiskCount > 0 ? '#b91c1c' : 'inherit' }}>
+                {sentimentAudit.churnRiskCount}
+              </div>
+              <div style={{ fontSize: 12, color: 'var(--color-neutral-700)' }}>Flagged for supervisor review</div>
+            </div>
+            <div>
               <div className="eyebrow">Play Store installs · 7d</div>
               <div style={{ font: '800 24px var(--font-heading)' }}>+{installBars.reduce((s, v) => s + v, 0)}</div>
               <div style={{ display: 'flex', gap: 2, alignItems: 'flex-end', height: 26, marginTop: 4 }}>
@@ -163,7 +187,7 @@ export default function Dashboard() {
               </div>
             </div>
             <div>
-              <div className="eyebrow">Payment attempts failed / errors</div>
+              <div className="eyebrow">Payment errors / drop-offs</div>
               <div style={{ font: '800 24px var(--font-heading)' }}>{errorsCount}</div>
               <div style={{ fontSize: 12, color: 'var(--color-neutral-700)' }}>Queued to split 5</div>
             </div>

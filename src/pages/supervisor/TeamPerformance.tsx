@@ -1,9 +1,14 @@
-import type React from 'react';
+import React, { useMemo, useState } from 'react';
 import SupervisorNav from '../../components/SupervisorNav';
 import { useStore } from '../../store/StoreContext';
+import { auditTeamSentiment } from '../../lib/telecmiService';
+import TranscriptDrawer from '../../components/agent/TranscriptDrawer';
+import type { CallLogEntry, CustomerUser } from '../../data/types';
+import { formatDuration } from '../../telephony';
 
 export default function TeamPerformance() {
   const { state, dispatch } = useStore();
+  const [qaModal, setQaModal] = useState<{ user: CustomerUser; call: CallLogEntry } | null>(null);
   const agents = state.agents.filter((a) => a.role === 'agent');
 
   const callsToday = agents.reduce((s, a) => s + a.todayCalls, 0);
@@ -12,6 +17,8 @@ export default function TeamPerformance() {
   const positiveToday = agents.reduce((s, a) => s + a.todayPositive, 0);
   const overdueFollowups = state.users.filter((u) => u.followUp?.state === 'overdue').length;
   const exitedNegative = state.users.filter((u) => u.stageTag === 'Exited — negative').length;
+
+  const sentimentAudit = useMemo(() => auditTeamSentiment(state.users), [state.users]);
 
   const followupUsers = state.users
     .filter((u) => u.queue === 'followup')
@@ -66,6 +73,88 @@ export default function TeamPerformance() {
             </tbody>
           </table>
 
+          {/* AI Call Intelligence & Quality Audit */}
+          <div style={{ marginTop: 'var(--space-6)', padding: 'var(--space-3)', background: 'var(--color-neutral-100)', border: '1px solid var(--color-divider)', borderRadius: 6 }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 'var(--space-2)' }}>
+              <div className="eyebrow" style={{ color: 'var(--color-accent-700)', margin: 0 }}>
+                TeleCMI &amp; AI Call Quality Intelligence
+              </div>
+              <span style={{ fontSize: 11, color: 'var(--color-neutral-600)' }}>
+                {sentimentAudit.totalCallsAnalyzed} recordings transcribed &amp; analyzed
+              </span>
+            </div>
+
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 'var(--space-3)', marginBottom: 'var(--space-3)' }}>
+              <div style={{ padding: '8px 12px', background: '#ecfdf5', border: '1px solid #a7f3d0', borderRadius: 4 }}>
+                <div style={{ fontSize: 10, fontWeight: 700, textTransform: 'uppercase', color: '#065f46' }}>Positive Sentiment</div>
+                <div style={{ fontSize: 18, fontWeight: 800, color: '#065f46' }}>{sentimentAudit.positivePct}%</div>
+                <div style={{ fontSize: 11, color: '#047857' }}>{sentimentAudit.positiveCount} calls</div>
+              </div>
+              <div style={{ padding: '8px 12px', background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 4 }}>
+                <div style={{ fontSize: 10, fontWeight: 700, textTransform: 'uppercase', color: '#475569' }}>Neutral / Informational</div>
+                <div style={{ fontSize: 18, fontWeight: 800, color: '#1e293b' }}>{sentimentAudit.neutralPct}%</div>
+                <div style={{ fontSize: 11, color: '#64748b' }}>{sentimentAudit.neutralCount} calls</div>
+              </div>
+              <div style={{ padding: '8px 12px', background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 4 }}>
+                <div style={{ fontSize: 10, fontWeight: 700, textTransform: 'uppercase', color: '#991b1b' }}>Churn Risk &amp; Objections</div>
+                <div style={{ fontSize: 18, fontWeight: 800, color: '#991b1b' }}>{sentimentAudit.churnRiskPct}%</div>
+                <div style={{ fontSize: 11, color: '#b91c1c' }}>{sentimentAudit.churnRiskCount} calls flagged</div>
+              </div>
+            </div>
+
+            <div className="eyebrow" style={{ marginBottom: 'var(--space-2)' }}>Priority QA Review · Flagged Calls</div>
+            <table className="table" style={{ background: '#fff' }}>
+              <thead>
+                <tr>
+                  <th>Customer</th>
+                  <th>Agent</th>
+                  <th>Outcome</th>
+                  <th>AI Summary Preview</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody>
+                {sentimentAudit.flaggedCalls.slice(0, 5).map(({ user, call }) => (
+                  <tr key={call.id}>
+                    <td style={{ fontWeight: 600 }}>
+                      {user.name}
+                      <span style={{ fontSize: 11, color: 'var(--color-neutral-600)', display: 'block' }}>{user.business}</span>
+                    </td>
+                    <td>{call.agentName}</td>
+                    <td>
+                      <span className="tag tag-accent">{call.outcome || call.status}</span>
+                      {call.telephony?.durationSec ? (
+                        <span style={{ fontSize: 11, color: 'var(--color-neutral-600)', display: 'block' }}>
+                          {formatDuration(call.telephony.durationSec)}
+                        </span>
+                      ) : null}
+                    </td>
+                    <td style={{ fontSize: 12, maxWidth: 280, color: 'var(--color-neutral-800)' }}>
+                      {call.analytics?.summary || call.comment}
+                    </td>
+                    <td>
+                      <button
+                        type="button"
+                        className="btn btn-secondary"
+                        style={{ padding: '3px 8px', fontSize: 11, whiteSpace: 'nowrap' }}
+                        onClick={() => setQaModal({ user, call })}
+                      >
+                        Audit Audio &amp; Transcript ▸
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+                {sentimentAudit.flaggedCalls.length === 0 && (
+                  <tr>
+                    <td colSpan={5} style={{ color: 'var(--color-neutral-600)', textAlign: 'center' }}>
+                      No calls currently flagged for churn risk.
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+
           <div className="eyebrow" style={{ margin: 'var(--space-6) 0 var(--space-3)' }}>Follow-up chain · needs a decision</div>
           <table className="table">
             <thead><tr><th>User</th><th>Marked positive</th><th>Week</th><th>State</th><th>Owner</th><th></th></tr></thead>
@@ -117,6 +206,13 @@ export default function TeamPerformance() {
           <button className="btn btn-primary btn-block" type="button" onClick={() => dispatch({ type: 'AUTO_DISTRIBUTE' })}>Distribute to agents</button>
         </div>
       </div>
+      {qaModal && (
+        <TranscriptDrawer
+          user={qaModal.user}
+          call={qaModal.call}
+          onClose={() => setQaModal(null)}
+        />
+      )}
     </div>
   );
 }
