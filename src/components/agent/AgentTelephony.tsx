@@ -22,12 +22,13 @@ const MOCK_CREDENTIALS = { userId: 'mock-agent', password: '' };
 const savedUserKey = (agentId: string) => `tcc.softphone.user.${agentId}`;
 
 function rememberedUserId(agent: AgentAccount): string | undefined {
-  if (agent.telecmiUserId) return agent.telecmiUserId;
   try {
-    return localStorage.getItem(savedUserKey(agent.id)) ?? undefined;
+    const saved = localStorage.getItem(savedUserKey(agent.id));
+    if (saved) return saved;
   } catch {
-    return undefined;
+    /* private browsing */
   }
+  return agent.telecmiUserId;
 }
 
 /** Mounts the softphone around the agent workspace. When no telephony provider is configured it renders children untouched. */
