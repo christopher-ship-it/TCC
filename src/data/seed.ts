@@ -170,7 +170,7 @@ function reachableAgent(agents: AgentAccount[], app: AppId, queue: QueueKey | nu
   return matching[0];
 }
 
-function makeCallAnalytics(
+export function makeCallAnalytics(
   r: Rng,
   _agentName: string,
   customerName: string,
@@ -274,6 +274,17 @@ function makeCallAnalytics(
     actionItems,
     transcript,
   };
+}
+
+export function generateRealtimeAnalytics(
+  agentName: string,
+  customerName: string,
+  app: AppId = 'realbroks',
+  outcome?: Outcome,
+  durationSec: number = 60,
+): CallAnalytics {
+  const r = new Rng(Date.now());
+  return makeCallAnalytics(r, agentName, customerName, app, outcome, durationSec);
 }
 
 function makeCallHistory(

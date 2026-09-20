@@ -14,11 +14,12 @@ import {
 import { db, ensureFirebaseAuth } from '../firebase/client';
 import { agentDoc, agentsRef, clearedEscalationsRef, escalationDoc, escalationsRef, overlayDoc, overlayRef } from '../firebase/collections';
 import { stripUndefined } from '../firebase/util';
-import { AGENTS, generateSeed } from '../data/seed';
+import { AGENTS, generateRealtimeAnalytics, generateSeed } from '../data/seed';
 import type { AgentAccount, CustomerOverlay, CustomerUser, EscalationRecord } from '../data/types';
 import { NEGATIVE_OUTCOMES } from '../data/types';
 import { fmtDay, fmtDayTime } from '../lib/dates';
 import { isReachable } from '../lib/queue';
+import { buildTeleCmiRecordingUrl } from '../lib/telephony';
 import { StoreContext, type Action, type State } from './context';
 
 const DAY_MS = 86400000;
@@ -120,6 +121,23 @@ export function FirestoreStoreProvider({ children }: { children: React.ReactNode
         const agent = agentsRefLive.current?.find((a) => a.id === action.agentId);
         if (!user) return;
         const now = Date.now();
+        const isAnswered = action.status.startsWith('Answered') || (action.telephony?.durationSec ?? 0) > 0;
+        const durationSec = action.telephony?.durationSec ?? (isAnswered ? 45 : 0);
+        const recFile = action.telephony?.recordingFile ?? (isAnswered ? `rec_${now}.wav` : undefined);
+        const telephony = action.telephony ?? (isAnswered ? {
+          provider: 'telecmi',
+          callId: `cmi-${now}`,
+          durationSec,
+          ringSec: 12,
+          disposition: 'answered',
+          recordingFile: recFile,
+          recordingUrl: recFile ? buildTeleCmiRecordingUrl(recFile) : undefined,
+        } : undefined);
+
+        const analytics = action.analytics ?? (isAnswered
+          ? generateRealtimeAnalytics(agent?.name ?? 'You', user.name, user.app, action.outcome, durationSec)
+          : undefined);
+
         const entry = {
           id: `cl-${now}-${Math.random().toString(36).slice(2, 7)}`,
           atTs: now,
@@ -128,7 +146,8 @@ export function FirestoreStoreProvider({ children }: { children: React.ReactNode
           status: action.status,
           outcome: action.outcome,
           comment: action.comment,
-          telephony: action.telephony,
+          telephony,
+          analytics,
         };
         const callHistory = [entry, ...user.callHistory];
 

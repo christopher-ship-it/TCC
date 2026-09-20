@@ -1,9 +1,10 @@
 import React, { useEffect, useMemo, useReducer } from 'react';
-import { generateSeed } from '../data/seed';
+import { generateRealtimeAnalytics, generateSeed } from '../data/seed';
 import type { CustomerUser, EscalationRecord, QueueKey } from '../data/types';
 import { NEGATIVE_OUTCOMES } from '../data/types';
 import { fmtDay, fmtDayTime } from '../lib/dates';
 import { isReachable } from '../lib/queue';
+import { buildTeleCmiRecordingUrl } from '../lib/telephony';
 import { StoreContext, type Action, type State } from './context';
 
 const STORAGE_KEY = 'tcc-store-v1';
@@ -34,6 +35,23 @@ function reducer(state: State, action: Action): State {
       const users = state.users.map((u) => {
         if (u.id !== action.userId) return u;
         const now = Date.now();
+        const isAnswered = action.status.startsWith('Answered') || (action.telephony?.durationSec ?? 0) > 0;
+        const durationSec = action.telephony?.durationSec ?? (isAnswered ? 45 : 0);
+        const recFile = action.telephony?.recordingFile ?? (isAnswered ? `rec_${now}.wav` : undefined);
+        const telephony = action.telephony ?? (isAnswered ? {
+          provider: 'telecmi',
+          callId: `cmi-${now}`,
+          durationSec,
+          ringSec: 12,
+          disposition: 'answered',
+          recordingFile: recFile,
+          recordingUrl: recFile ? buildTeleCmiRecordingUrl(recFile) : undefined,
+        } : undefined);
+
+        const analytics = action.analytics ?? (isAnswered
+          ? generateRealtimeAnalytics(agent?.name ?? 'You', u.name, u.app, action.outcome, durationSec)
+          : undefined);
+
         const entry = {
           id: `cl-${now}-${Math.random().toString(36).slice(2, 7)}`,
           atTs: now,
@@ -42,7 +60,8 @@ function reducer(state: State, action: Action): State {
           status: action.status,
           outcome: action.outcome,
           comment: action.comment,
-          telephony: action.telephony,
+          telephony,
+          analytics,
         };
         const callHistory = [entry, ...u.callHistory];
         const next: CustomerUser = { ...u, callHistory };
