@@ -50,6 +50,32 @@ export function suggestStatus(r: CallResult): CallStatus | null {
   }
 }
 
+/** Build an authenticated audio URL for TeleCMI recordings (or sample audio for demo/mock mode). */
+export function buildTeleCmiRecordingUrl(filename: string): string {
+  if (!filename) return '';
+  if (filename.startsWith('http://') || filename.startsWith('https://')) return filename;
+  const appId = (import.meta.env.VITE_TELECMI_APP_ID as string | undefined)?.trim();
+  const token = (import.meta.env.VITE_TELECMI_SECRET as string | undefined)?.trim() ||
+                (import.meta.env.VITE_TELECMI_TOKEN as string | undefined)?.trim();
+
+  if (appId && token) {
+    return `https://piopiy.telecmi.com/v1/play?appid=${encodeURIComponent(appId)}&token=${encodeURIComponent(token)}&file=${encodeURIComponent(filename)}`;
+  }
+  // Demo speech sample when no TeleCMI credentials configured
+  return 'https://actions.google.com/sounds/v1/ambiences/office_murmur.ogg';
+}
+
 export function toCallTelephony(r: CallResult): CallTelephony {
-  return { provider: r.provider, callId: r.providerCallId, durationSec: r.talkSeconds, ringSec: r.ringSeconds, disposition: r.disposition, quality: r.stats ?? undefined };
+  const isAnswered = r.disposition === 'connected' || r.talkSeconds > 0;
+  const mockFile = isAnswered ? `rec_${r.providerCallId || Date.now()}.wav` : undefined;
+  return {
+    provider: r.provider,
+    callId: r.providerCallId,
+    durationSec: r.talkSeconds,
+    ringSec: r.ringSeconds,
+    disposition: r.disposition,
+    recordingFile: mockFile,
+    recordingUrl: mockFile ? buildTeleCmiRecordingUrl(mockFile) : undefined,
+    quality: r.stats ?? undefined,
+  };
 }
