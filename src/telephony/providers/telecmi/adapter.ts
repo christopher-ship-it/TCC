@@ -122,12 +122,157 @@ async function pollPeerStats(peer: { getStats: () => Promise<unknown> }): Promis
 // single-call). The live call's full getStats() is then one await away.
 //
 let tappedPeer: RTCPeerConnection | null = null;
+let currentCallRecorder: { stop: () => Promise<string | undefined> } | null = null;
+
+function installMediaTap(): void {
+  const g = globalThis as { navigator?: Navigator & { mediaDevices?: MediaDevices } };
+  const md = g.navigator?.mediaDevices;
+  if (!md || (md as { __tccMediaTap?: boolean }).__tccMediaTap) return;
+
+  const origGetUserMedia = md.getUserMedia.bind(md);
+  md.getUserMedia = async (constraints) => {
+    let cleanConstraints: MediaStreamConstraints = constraints || { audio: true };
+    if (typeof cleanConstraints.audio === 'object') {
+      const audio = { ...cleanConstraints.audio } as Record<string, unknown>;
+      // If deviceId is empty or "default", remove it so Chrome uses default input safely
+      if (typeof audio.deviceId === 'string' && (!audio.deviceId || audio.deviceId === 'default')) {
+        delete audio.deviceId;
+      } else if (typeof audio.deviceId === 'string') {
+        audio.deviceId = { ideal: audio.deviceId };
+      }
+      cleanConstraints = {
+        ...cleanConstraints,
+        audio: {
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true,
+          ...audio,
+        },
+      };
+    } else if (cleanConstraints.audio === true) {
+      cleanConstraints = {
+        ...cleanConstraints,
+        audio: {
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true,
+        },
+      };
+    }
+
+    try {
+      const stream = await origGetUserMedia(cleanConstraints);
+      stream.getAudioTracks().forEach((track) => {
+        track.enabled = true;
+        console.debug('[telecmi] Acquired audio track:', track.label, 'enabled:', track.enabled, 'muted:', track.muted);
+      });
+      return stream;
+    } catch (err) {
+      console.warn('[telecmi] getUserMedia failed with constraints, falling back to basic audio', err);
+      const fallback = await origGetUserMedia({ audio: true, video: false });
+      fallback.getAudioTracks().forEach((t) => { t.enabled = true; });
+      return fallback;
+    }
+  };
+  (md as { __tccMediaTap?: boolean }).__tccMediaTap = true;
+}
+
+function startCallRecording(peer: RTCPeerConnection): { stop: () => Promise<string | undefined> } | null {
+  const g = globalThis as { AudioContext?: typeof AudioContext; MediaRecorder?: typeof MediaRecorder; MediaStream?: typeof MediaStream };
+  if (!g.AudioContext || !g.MediaRecorder || !g.MediaStream) return null;
+
+  try {
+    const audioCtx = new g.AudioContext();
+    const dest = audioCtx.createMediaStreamDestination();
+
+    let localConnected = false;
+    let remoteConnected = false;
+
+    function attachTracks() {
+      peer.getSenders().forEach((s) => {
+        if (s.track && s.track.kind === 'audio' && !localConnected) {
+          try {
+            const src = audioCtx.createMediaStreamSource(new g.MediaStream!([s.track]));
+            src.connect(dest);
+            localConnected = true;
+          } catch {
+            // ignore
+          }
+        }
+      });
+      peer.getReceivers().forEach((r) => {
+        if (r.track && r.track.kind === 'audio' && !remoteConnected) {
+          try {
+            const src = audioCtx.createMediaStreamSource(new g.MediaStream!([r.track]));
+            src.connect(dest);
+            remoteConnected = true;
+          } catch {
+            // ignore
+          }
+        }
+      });
+    }
+
+    attachTracks();
+    peer.addEventListener('track', () => attachTracks());
+
+    const recorder = new g.MediaRecorder(dest.stream);
+    const chunks: Blob[] = [];
+    recorder.ondataavailable = (e) => {
+      if (e.data && e.data.size > 0) chunks.push(e.data);
+    };
+
+    recorder.start(1000);
+
+    return {
+      stop: () =>
+        new Promise<string | undefined>((resolve) => {
+          if (recorder.state === 'inactive') {
+            audioCtx.close().catch(() => {});
+            return resolve(undefined);
+          }
+          recorder.onstop = () => {
+            try {
+              audioCtx.close().catch(() => {});
+              if (chunks.length > 0) {
+                const blob = new Blob(chunks, { type: recorder.mimeType || 'audio/webm' });
+                const url = URL.createObjectURL(blob);
+                resolve(url);
+              } else {
+                resolve(undefined);
+              }
+            } catch {
+              resolve(undefined);
+            }
+          };
+          try {
+            recorder.stop();
+          } catch {
+            resolve(undefined);
+          }
+        }),
+    };
+  } catch {
+    return null;
+  }
+}
 
 function capturePeer(peer: RTCPeerConnection): void {
   tappedPeer = peer;
+  peer.addEventListener('connectionstatechange', () => {
+    if (peer.connectionState === 'connected') {
+      peer.getSenders().forEach((s) => {
+        if (s.track && s.track.kind === 'audio') {
+          s.track.enabled = true;
+        }
+      });
+      currentCallRecorder ??= startCallRecording(peer);
+    }
+  });
 }
 
 function installPeerTap(): void {
+  installMediaTap();
   const g = globalThis as { RTCPeerConnection?: unknown };
   const Native = g.RTCPeerConnection as (typeof RTCPeerConnection & { __tccTap?: boolean }) | undefined;
   if (!Native || Native.__tccTap) return;
@@ -135,6 +280,13 @@ function installPeerTap(): void {
     constructor(...args: ConstructorParameters<typeof RTCPeerConnection>) {
       super(...args);
       capturePeer(this);
+    }
+
+    override addTrack(track: MediaStreamTrack, ...streams: MediaStream[]): RTCRtpSender {
+      if (track.kind === 'audio') {
+        track.enabled = true;
+      }
+      return super.addTrack(track, ...streams);
     }
   };
   (Tapped as { __tccTap?: boolean }).__tccTap = true;
@@ -301,11 +453,17 @@ export class TeleCmiProvider implements TelephonyProvider {
 
   /** Translate the SDK's event vocabulary into ProviderEvents. */
   private wire(sdk: PiopiySdk): void {
-    const on = (name: string, fn: (d: Record<string, unknown>) => ProviderEvent | null) =>
+    const on = (name: string, fn: (d: Record<string, unknown>) => ProviderEvent | Promise<ProviderEvent | null> | null) =>
       sdk.on(name, (d) => {
         if (this.config.debug) console.debug(`[telecmi] ${name}`, d); // raw SDK payloads — how the unverified event assumptions get checked
         const e = fn(d ?? {});
-        if (e) this.emit(e);
+        if (e && typeof (e as Promise<unknown>).then === 'function') {
+          (e as Promise<ProviderEvent | null>).then((ev) => {
+            if (ev) this.emit(ev);
+          }).catch(() => {});
+        } else if (e) {
+          this.emit(e as ProviderEvent);
+        }
       });
 
     on('login', () => ({ type: 'ready' }));
@@ -321,15 +479,19 @@ export class TeleCmiProvider implements TelephonyProvider {
     on('inComingCall', (d) => ({ type: 'incoming', from: str(d.from) ?? 'unknown', callId: str(d.call_id), team: str(d.team_name), toNumber: str(d.to_number) }));
     // `hangup` = we ended/cancelled it; `ended` = the far side did (or it failed, with a SIP-style code).
     // Both carry the newest stats sample so the saved call result records the call's final media state.
-    on('hangup', (d) => {
+    on('hangup', async (d) => {
       this.stopStatsPolling();
       this.flushStats();
-      return { type: 'ended', code: num(d.code), localHangup: true, stats: this.lastStats ?? undefined };
+      const recUrl = await currentCallRecorder?.stop().catch(() => undefined);
+      currentCallRecorder = null;
+      return { type: 'ended', code: num(d.code), localHangup: true, stats: this.lastStats ?? undefined, recordingBlobUrl: recUrl };
     });
-    on('ended', (d) => {
+    on('ended', async (d) => {
       this.stopStatsPolling();
       this.flushStats();
-      return { type: 'ended', code: num(d.code), stats: this.lastStats ?? undefined };
+      const recUrl = await currentCallRecorder?.stop().catch(() => undefined);
+      currentCallRecorder = null;
+      return { type: 'ended', code: num(d.code), stats: this.lastStats ?? undefined, recordingBlobUrl: recUrl };
     });
     on('hold', (d) => ({ type: 'hold', whom: d.whom === 'other' ? 'remote' : 'self', on: true }));
     on('unhold', (d) => ({ type: 'hold', whom: d.whom === 'other' ? 'remote' : 'self', on: false }));

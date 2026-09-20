@@ -78,7 +78,7 @@ export function toCallTelephony(r: CallResult): CallTelephony {
     ringSec: r.ringSeconds,
     disposition: r.disposition,
     recordingFile: mockFile,
-    recordingUrl: mockFile ? buildTeleCmiRecordingUrl(mockFile) : undefined,
+    recordingUrl: r.recordingBlobUrl || (mockFile ? buildTeleCmiRecordingUrl(mockFile) : undefined),
     quality: r.stats ?? undefined,
   };
 }

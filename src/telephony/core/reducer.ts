@@ -50,7 +50,7 @@ function classify(call: CallSession, hint: { code?: number; local?: boolean }): 
   }
 }
 
-function finish(state: CallSnapshot, now: number, hint: { code?: number; local?: boolean; stats?: MediaStats }): CallSnapshot {
+function finish(state: CallSnapshot, now: number, hint: { code?: number; local?: boolean; stats?: MediaStats; recordingBlobUrl?: string }): CallSnapshot {
   const call = state.call;
   if (!call) return state;
   const result: CallResult = {
@@ -68,6 +68,7 @@ function finish(state: CallSnapshot, now: number, hint: { code?: number; local?:
     endCode: hint.code ?? null,
     meta: call.meta,
     stats: hint.stats ?? call.stats,
+    recordingBlobUrl: hint.recordingBlobUrl,
   };
   return { ...state, call: null, lastResult: result };
 }
@@ -129,7 +130,7 @@ function reduceEvent(state: CallSnapshot, event: ProviderEvent, now: number): Ca
     case 'stats':
       return call ? withCall(state, { stats: event.stats }) : state;
     case 'ended':
-      return finish(state, now, { code: event.code, local: event.localHangup, stats: event.stats });
+      return finish(state, now, { code: event.code, local: event.localHangup, stats: event.stats, recordingBlobUrl: event.recordingBlobUrl });
     case 'mediaFailed': {
       const failed = finish(state, now, { code: 415 });
       return { ...failed, error: { code: 415, message: event.message } };

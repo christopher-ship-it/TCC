@@ -65,6 +65,8 @@ export interface CallResult {
   /** Last media-quality sample seen before the call ended. Null for calls that
    *  never connected (and for providers that report no stats). */
   stats: MediaStats | null;
+  /** In-browser recorded audio blob URL of the actual call, available immediately. */
+  recordingBlobUrl?: string;
 }
 
 export interface CallSnapshot {
@@ -98,14 +100,16 @@ export interface MediaStats {
   packetsLost?: number;
   jitterSec?: number;
   /** Sending (our voice → them): cumulative packets / bytes since call start. A
-   *  sending counter stuck at 0 is the signature of a dead microphone uplink. */
+   *  flat count during an active call is a broken microphone or un-granted permission. */
   packetsSent?: number;
   bytesSent?: number;
-  /** Their RTCP report of our audio: fraction of our packets they received, 0–1.
+  /** RTCP reports from the remote party about the stream they're receiving from us.
    *  Falls towards 0 when our uplink is broken even though we're "sending". */
   remoteFractionLost?: number;
   remoteJitterSec?: number;
   remoteRoundTripSec?: number;
+  /** Audio level from WebRTC media-source (0 to 1). 0 indicates silent mic input. */
+  audioLevel?: number;
 }
 
 /** Normalised events every provider adapter must emit. */
@@ -117,7 +121,7 @@ export type ProviderEvent =
   | { type: 'ringing'; callId?: string }
   | { type: 'incoming'; from: string; callId?: string; team?: string; toNumber?: string }
   | { type: 'answered'; callId?: string }
-  | { type: 'ended'; code?: number; localHangup?: boolean; stats?: MediaStats }
+  | { type: 'ended'; code?: number; localHangup?: boolean; stats?: MediaStats; recordingBlobUrl?: string }
   | { type: 'hold'; whom: 'self' | 'remote'; on: boolean }
   | { type: 'error'; code: number; message: string }
   | { type: 'mediaFailed'; message: string }
