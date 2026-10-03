@@ -17,19 +17,35 @@ Open the printed local URL. Sign in with any of the quick-select accounts on the
 
 ## What's implemented
 
-- **Login** — role-based landing (agent → launcher, supervisor → team performance, admin → owner dashboard).
-- **Agent launcher** — per-app tiles with live queue counts, "Serve my next task."
-- **Agent workspace** (the "1a Focus" direction from the design) — the 3-step call panel (reach →
-  connect → outcome), keyboard shortcuts (1–5 status, Q–I outcome, Enter to save, S to skip, T to
-  raise a ticket), the weekly positive follow-up chain, and a queue-pill rail that only shows the
-  queues an agent is assigned — this is how a restricted agent (e.g. Priya N, one queue) differs
-  from a full-access agent (e.g. Abhinaya M, six queues across two apps) without a separate screen.
-- **Mid-call reroute / escalate** modal, wired to a live escalations queue.
-- **Supervisor** — team performance, team & access (create logins, tick queue access, coverage
-  gaps), language/state allocation (with a live "reachable users" count), and an escalations inbox
-  with approve/decline.
-- **Owner** — all-apps dashboard (funnel, leaderboard, churn, SLA health) and a Geography screen
-  with a real India choropleth-style map (D3, state boundaries + circles sized by user count).
+One console for every Tecstellar app, in three roles. The look is the "Control Room + Shift Board"
+direction: IBM Plex for the interface, Anek for Indian scripts, a navy header with the brand's
+green/blue rule, and colour only for state (blue = the action, green = live / positive, amber =
+attention, red = risk). Tokens live in `src/styles/tokens.css`, components in `src/ui/`.
+
+- **Agents** — *Today* (queue cards per app, today's numbers, follow-ups due), the *Call queue*
+  workspace (customer card with why they're in the queue, the outcome form with keyboard shortcuts,
+  and a phone-style softphone: mute, keypad, hold, audio devices, transfer, escalate), and *My calls*.
+  The phone line is mounted for the whole session, so a call keeps going while the agent opens the
+  customer's history, and an ended call waits in the header until it is logged.
+- **Customer page** (`/customers/:id`) — the per-lead view: sentiment across calls, who talked how
+  much on each call, the full call journey with summaries, objections and next steps, profile,
+  owner, payments, follow-up chain and tickets.
+- **Call detail** (`/customers/:id/calls/:entryId`) — the BusinessOS contact-centre view: recording
+  player synced to the transcript, a who-spoke-when timeline, sentiment, talk share, summary, key
+  points, objections and next step.
+- **Supervisors** — team performance (calls per day, per-agent table, sentiment, outcomes, the
+  follow-up chain, calls to listen to), calls & recordings with filters and CSV export,
+  escalations, and an allocation view that shows which states nobody can reach.
+- **People & access** (`/people`) — add people, set their role, per-app permissions (call, tickets,
+  recordings, payments, export), queues, languages, states, phone line and daily target, with a
+  plain-language summary of what they'll be able to do. Supervisors manage agents; admins manage
+  everyone. Suspended people cannot sign in. `src/lib/access.ts` holds the rules.
+- **Change log** (`/audit`) — every sign-in, access change, approval, payment and export, with
+  exactly what changed.
+- **Admins** — an overview across every app (customers, revenue, sign-ups, the sign-up-to-paying
+  funnel, service health) and a geography map.
+
+Sign-in is a demo until accounts move to a server: the password is not checked.
 
 ## Data backend
 
@@ -113,13 +129,30 @@ When connecting TCC to real customer data (Firestore, Postgres, or your CRM API)
 
 - **Virtual Input Guard**: If the browser's default audio input is a virtual device (e.g. BlackHole, Iriun, Teams Audio) that captures 0 dB silence, TCC automatically detects it and swaps to the machine's real hardware microphone.
 - **Hardware AEC / AGC**: All microphone streams request native `echoCancellation: true`, `noiseSuppression: true`, and `autoGainControl: true` on macOS/Windows.
-- **Pre-Call Mic Level Meter**: Agents can verify their microphone level under **🎙️ Mic / Audio → Test Mic Level** before placing a call. During an active call, the meter shuts down to avoid audio stream contention and preserve 100% WebRTC uplink performance.
+- **Pre-Call Mic Level Meter**: Agents pick their microphone and speaker under **Audio** on the phone, before or during a call. During a call the phone shows live levels for both sides and warns when either goes silent.
 
 ### Call Recordings & Post-Call Analytics
 
-- **Cloud Recordings**: Answered calls are recorded on TeleCMI. Once a call ends, TCC queries TeleCMI's `out_cdr` endpoint using the agent's REST session token to retrieve the recording file and streamable URL.
-- **Local Transcription Sidecar**: A local Whisper sidecar server (`tools/transcribe/server.py`) is provided for transcription testing.
-- **Enterprise Webhook Pipeline**: In production, TeleCMI CDR webhooks stream dual-channel audio to automated speech-to-text engines (see [`docs/TELECMI_ENTERPRISE_SPEC.md`](docs/TELECMI_ENTERPRISE_SPEC.md)).
+Same pipeline as BusinessOS's contact centre, served by TCC's own small server (`server/`), which
+Vite mounts at `/api` on `npm run dev` and `npm run preview`:
+
+1. While a call is live, the browser measures each side's loudness every second
+   (`MediaStats.timeline`); it is saved with the call.
+2. TeleCMI announces the recording after hangup (or TCC finds it in the agent's call records).
+3. `GET /api/recordings/:file` fetches it with the **App Secret** and serves it to the player.
+4. `POST /api/analyze` sends it to **Gemini** for a transcript, summary, sentiment (0–100),
+   objections and next step; speaker labels are then corrected from the measured loudness.
+   Every recorded call is analysed automatically in the background; results are cached in `.data/`.
+
+Server-only settings in `.env.local` (never `VITE_` — those are compiled into the browser bundle):
+
+```bash
+TELECMI_APP_SECRET=   # TeleCMI › Settings › Developer › App Secret
+GEMINI_API_KEY=       # Google AI Studio
+```
+
+Without `GEMINI_API_KEY`, the local Whisper sidecar (`npm run transcribe`) can still produce a bare
+transcript. Calls on the demo line (`VITE_TELEPHONY_PROVIDER=mock`) carry labelled sample analysis.
 
 ## Known limitation
 
