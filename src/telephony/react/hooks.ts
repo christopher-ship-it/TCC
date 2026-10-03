@@ -41,8 +41,19 @@ export function useSilentSamples(stats: MediaStats | null | undefined): number {
   const [silent, setSilent] = useState(0);
   useEffect(() => {
     const level = stats?.audioLevel;
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- a running count derived from a stream of samples
+    // A running count derived from a stream of samples, so the effect folds
+    // the new sample into the previous value rather than replacing it.
     setSilent((n) => (level === undefined ? 0 : level === 0 ? n + 1 : 0));
+  }, [stats]);
+  return silent;
+}
+
+/** Consecutive samples (≈ seconds) in which nothing audible arrived from the far side. */
+export function useSilentRemoteSamples(stats: MediaStats | null | undefined): number {
+  const [silent, setSilent] = useState(0);
+  useEffect(() => {
+    const level = stats?.remoteAudioLevel;
+    setSilent((n) => (level === undefined ? 0 : level < 0.001 ? n + 1 : 0));
   }, [stats]);
   return silent;
 }

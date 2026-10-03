@@ -122,6 +122,24 @@ export interface MediaStats {
   remoteRoundTripSec?: number;
   /** Audio level from WebRTC media-source (0 to 1). 0 indicates silent mic input. */
   audioLevel?: number;
+  /** Level of the voice arriving from the far side (WebRTC inbound-rtp audioLevel, 0 to 1). Stuck at ~0 means the
+   *  line carries silence — the carrier is not bridging their voice, which no browser setting can fix. */
+  remoteAudioLevel?: number;
+  /** Cumulative audio energy / sample seconds (WebRTC totalAudioEnergy, totalSamplesDuration) for each side —
+   *  differencing two samples gives the average loudness over that interval, not just one instant. */
+  micEnergy?: number;
+  micSamplesSec?: number;
+  theirEnergy?: number;
+  theirSamplesSec?: number;
+  /** Per-second loudness of each side since the call was answered: [seconds, agent, customer], 0 to 1.
+   *  Attached to the final sample only. It is the ground truth for who spoke when — the carrier's
+   *  recording is a single mixed track. */
+  timeline?: Array<[number, number, number]>;
+  /** Loudest levels seen so far in this call — a single sample can land on a pause. */
+  remoteAudioPeak?: number;
+  micAudioPeak?: number;
+  /** The element that plays their voice exists, has the call's stream and is actually playing. */
+  speakerPlaying?: boolean;
   /** Name of the microphone the call is actually sending from (read off the live audio sender). */
   micLabel?: string;
   /** The browser reports the outgoing mic track as muted — no samples are arriving from the device. */

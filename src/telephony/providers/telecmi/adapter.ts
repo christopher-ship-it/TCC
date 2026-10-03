@@ -79,6 +79,8 @@ interface RtcStatLike {
   isRemote?: boolean;
   fractionLost?: number;
   audioLevel?: number;
+  totalAudioEnergy?: number;
+  totalSamplesDuration?: number;
 }
 
 async function pollPeerStats(peer: { getStats: () => Promise<unknown>; getSenders?: () => { track: MediaStreamTrack | null }[] }): Promise<MediaStats | null> {
@@ -98,6 +100,9 @@ async function pollPeerStats(peer: { getStats: () => Promise<unknown>; getSender
       if (s.bytesReceived !== undefined) out.bytesReceived = (out.bytesReceived ?? 0) + s.bytesReceived;
       if (s.packetsLost !== undefined) out.packetsLost = (out.packetsLost ?? 0) + s.packetsLost;
       if (s.jitter !== undefined) out.jitterSec = Math.max(out.jitterSec ?? 0, s.jitter);
+      if (typeof s.audioLevel === 'number') out.remoteAudioLevel = Math.max(out.remoteAudioLevel ?? 0, s.audioLevel);
+      if (typeof s.totalAudioEnergy === 'number') out.theirEnergy = (out.theirEnergy ?? 0) + s.totalAudioEnergy;
+      if (typeof s.totalSamplesDuration === 'number') out.theirSamplesSec = (out.theirSamplesSec ?? 0) + s.totalSamplesDuration;
     }
     if (s.type === 'outbound-rtp' && s.packetsSent !== undefined) {
       out.packetsSent = (out.packetsSent ?? 0) + s.packetsSent;
@@ -114,6 +119,8 @@ async function pollPeerStats(peer: { getStats: () => Promise<unknown>; getSender
     if (s.type === 'media-source') {
       if (s.mimeType) codec = s.mimeType;
       if (typeof s.audioLevel === 'number') out.audioLevel = s.audioLevel;
+      if (typeof s.totalAudioEnergy === 'number') out.micEnergy = s.totalAudioEnergy;
+      if (typeof s.totalSamplesDuration === 'number') out.micSamplesSec = s.totalSamplesDuration;
     }
     if (s.type === 'codec' && s.mimeType && !s.isRemote) sendCodecs.set(s.mimeType, s.mimeType);
   });
@@ -187,8 +194,66 @@ function installMediaTap(): void {
   (md as { __tccMediaTap?: boolean }).__tccMediaTap = true;
 }
 
+const AUDIO_TAG_ID = 'telecmi_audio_tag'; // the SDK's own element; reusing it means their voice only ever plays once
+
+function remoteAudioElement(): HTMLAudioElement | null {
+  if (typeof document === 'undefined') return null;
+  let el = document.getElementById(AUDIO_TAG_ID) as HTMLAudioElement | null;
+  if (!el) {
+    el = document.createElement('audio');
+    el.id = AUDIO_TAG_ID;
+    el.autoplay = true;
+    el.hidden = true;
+    document.body.appendChild(el);
+  }
+  return el;
+}
+
+/** True while their voice is wired to a playing element — read into every stats sample. */
+function speakerPlaying(): boolean {
+  const el = typeof document === 'undefined' ? null : (document.getElementById(AUDIO_TAG_ID) as HTMLAudioElement | null);
+  return !!el && !!el.srcObject && !el.paused;
+}
+
+let resumeArmed = false;
+
+/**
+ * Play the far side's audio. The SDK does this itself only through the legacy
+ * `onaddstream` callback, and if anything goes wrong there (element missing,
+ * play() refused) the call connects in silence with nothing logged. Binding the
+ * standard `track` event as well makes playback independent of that path. A
+ * play() the browser refuses for want of a user gesture is retried on the next
+ * click or key press.
+ */
+function playRemote(stream: MediaStream): void {
+  const el = remoteAudioElement();
+  if (!el) return;
+  if (el.srcObject !== stream) el.srcObject = stream;
+  el.muted = false;
+  el.volume = 1;
+  el.play()
+    .then(() => console.debug('[telecmi audio] Playing their audio'))
+    .catch((err: unknown) => {
+      console.warn('[telecmi audio] Browser refused to play their audio — will retry on the next click', err);
+      if (resumeArmed) return;
+      resumeArmed = true;
+      const retry = () => {
+        resumeArmed = false;
+        document.removeEventListener('pointerdown', retry);
+        document.removeEventListener('keydown', retry);
+        void el.play().catch(() => undefined);
+      };
+      document.addEventListener('pointerdown', retry);
+      document.addEventListener('keydown', retry);
+    });
+}
+
 function capturePeer(peer: RTCPeerConnection): void {
   tappedPeer = peer;
+  peer.addEventListener('track', (ev: RTCTrackEvent) => {
+    if (ev.track.kind !== 'audio') return;
+    playRemote(ev.streams[0] ?? new MediaStream([ev.track]));
+  });
   peer.addEventListener('connectionstatechange', () => {
     if (peer.connectionState === 'connected') {
       peer.getSenders().forEach((s) => {
@@ -296,6 +361,8 @@ export class TeleCmiProvider implements TelephonyProvider {
   private readonly claimedRecordings = new Set<string>();
   /** Newest merged sample from the poll + the SDK's own sampler; re-emitted with 'ended'. */
   private lastStats: MediaStats | null = null;
+  /** Who was loud when, one entry per stats sample after answer — see MediaStats.timeline. */
+  private timeline: Array<[number, number, number]> = [];
 
   constructor(config: TeleCmiConfig) {
     this.config = config;
@@ -455,6 +522,44 @@ export class TeleCmiProvider implements TelephonyProvider {
       .catch(() => {});
   }
 
+  /**
+   * Average loudness of each side over the last interval, from energy deltas (RMS = sqrt(energy / seconds)).
+   * Falls back to the instantaneous level when the browser does not report energy.
+   */
+  private recordTimeline(prev: MediaStats | null, cur: MediaStats): void {
+    const answeredAt = this.trace?.answeredAt;
+    if (!answeredAt) return;
+    const rms = (e1?: number, d1?: number, e0?: number, d0?: number, fallback?: number) => {
+      if (e1 === undefined || d1 === undefined || e0 === undefined || d0 === undefined || d1 - d0 <= 0) return fallback ?? 0;
+      return Math.sqrt(Math.max(0, e1 - e0) / (d1 - d0));
+    };
+    const agent = rms(cur.micEnergy, cur.micSamplesSec, prev?.micEnergy, prev?.micSamplesSec, cur.audioLevel);
+    const customer = rms(cur.theirEnergy, cur.theirSamplesSec, prev?.theirEnergy, prev?.theirSamplesSec, cur.remoteAudioLevel);
+    const at = Math.round((Date.now() - answeredAt) / 100) / 10;
+    if (this.timeline.length < 7200) this.timeline.push([at, Math.round(agent * 1000) / 1000, Math.round(customer * 1000) / 1000]);
+  }
+
+  /** The final sample, carrying the whole call's timeline. */
+  private finalStats(): MediaStats | undefined {
+    return this.lastStats ? { ...this.lastStats, timeline: this.timeline.slice() } : undefined;
+  }
+
+  /** One console line per call with what the media actually did — the first thing to read when a call was silent. */
+  private logMediaSummary(): void {
+    const s = this.lastStats;
+    if (!s) return;
+    console.info('[telecmi] call media summary', {
+      mic: s.micLabel ?? 'unknown',
+      micLevel: s.audioLevel,
+      packetsSent: s.packetsSent,
+      packetsReceived: s.packetsReceived,
+      theirLevel: s.remoteAudioLevel,
+      theirPeak: s.remoteAudioPeak,
+      micPeak: s.micAudioPeak,
+      speakerPlaying: s.speakerPlaying,
+    });
+  }
+
   private ensureSdk(displayName?: string): Promise<PiopiySdk> {
     if (this.sdk) return Promise.resolve(this.sdk);
     installPeerTap(); // before the SDK script runs, so it picks up the tap
@@ -505,13 +610,15 @@ export class TeleCmiProvider implements TelephonyProvider {
       this.stopStatsPolling();
       this.flushStats();
       this.scheduleRecordingLookup();
-      return { type: 'ended', code: num(d.code), localHangup: true, stats: this.lastStats ?? undefined };
+      this.logMediaSummary();
+      return { type: 'ended', code: num(d.code), localHangup: true, stats: this.finalStats() };
     });
     on('ended', (d) => {
       this.stopStatsPolling();
       this.flushStats();
       this.scheduleRecordingLookup();
-      return { type: 'ended', code: num(d.code), stats: this.lastStats ?? undefined };
+      this.logMediaSummary();
+      return { type: 'ended', code: num(d.code), stats: this.finalStats() };
     });
     on('hold', (d) => ({ type: 'hold', whom: d.whom === 'other' ? 'remote' : 'self', on: true }));
     on('unhold', (d) => ({ type: 'hold', whom: d.whom === 'other' ? 'remote' : 'self', on: false }));
@@ -547,6 +654,7 @@ export class TeleCmiProvider implements TelephonyProvider {
     if (this.statsTimer) return;
     installPeerTap();
     this.lastStats = null;
+    this.timeline = [];
     this.micChecked = false;
     this.statsTimer = setInterval(() => {
       const peer = tappedPeer;
@@ -555,6 +663,10 @@ export class TeleCmiProvider implements TelephonyProvider {
       pollPeerStats(peer)
         .then((stats) => {
           if (stats) {
+            stats.speakerPlaying = speakerPlaying();
+            this.recordTimeline(this.lastStats, stats);
+            stats.remoteAudioPeak = Math.max(this.lastStats?.remoteAudioPeak ?? 0, stats.remoteAudioLevel ?? 0);
+            stats.micAudioPeak = Math.max(this.lastStats?.micAudioPeak ?? 0, stats.audioLevel ?? 0);
             this.lastStats = { ...this.lastStats, ...stats };
             this.emit({ type: 'stats', stats: this.lastStats });
             this.verifyMicrophone(stats);

@@ -1,7 +1,7 @@
 import { useEffect, useState, type CSSProperties, type FormEvent } from 'react';
 import { isVirtualInput } from '../core/microphone.ts';
 import type { Credentials, Disposition, MediaStats, Meta } from '../core/types.ts';
-import { formatDuration, useAudioDevices, useElapsedSeconds, useMicLevel, useSilentSamples, useTelephony } from './hooks.ts';
+import { formatDuration, useAudioDevices, useElapsedSeconds, useMicLevel, useSilentRemoteSamples, useSilentSamples, useTelephony } from './hooks.ts';
 
 // Themeable with CSS custom properties so it fits any host app without importing its CSS:
 //   --telephony-accent / -danger / -ok / -text / -muted / -border / -surface / -radius / -font
@@ -90,6 +90,13 @@ export function CallPanel({ number, label, meta, shortcutHint, defaultUserId, on
   const elapsed = useElapsedSeconds(call ? (call.answeredAt ?? call.startedAt) : null);
   const quality = call?.stats ? qualityLine(call.stats) : lastResult?.stats ? qualityLine(lastResult.stats) : null;
   const silentSamples = useSilentSamples(call?.state === 'connected' && !call.muted ? call.stats : null);
+  const silentRemote = useSilentRemoteSamples(call?.state === 'connected' && !call.held && !call.remoteHeld ? call.stats : null);
+  const speakerProblem =
+    call?.stats?.speakerPlaying === false
+      ? 'Their audio is arriving but your browser is not playing it — click anywhere on this page'
+      : silentRemote >= 10
+        ? 'No sound has come from their side for 10 seconds — if they are talking, the carrier is not passing their voice through'
+        : null;
   const micLabel = call?.stats?.micLabel;
   // "Bytes sent" grows even when the mic captures pure silence, so it proves nothing about audio — the mic name and its level do.
   const micProblem = call?.stats?.micMuted ? 'The browser reports your microphone as muted — check macOS microphone privacy or a hardware mute' : micLabel && isVirtualInput(micLabel) ? 'Virtual microphone — the other person will hear nothing. Pick your real mic under Mic / Audio.' : silentSamples >= 8 ? 'Mic level is flat — speak up, or pick another input under Mic / Audio' : null;
@@ -234,6 +241,16 @@ export function CallPanel({ number, label, meta, shortcutHint, defaultUserId, on
                 </div>
               )}
               {micProblem && !call.muted && <div role="alert" style={{ fontSize: 11, fontWeight: 600, color: v('danger', '#b3261e') }}>⚠ {micProblem}</div>}
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: 11, borderTop: `1px solid ${v('border', '#e0e0e0')}`, paddingTop: 4 }}>
+                <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                  <span>🔊</span>
+                  <span><strong>Their audio:</strong> {call.stats?.remoteAudioLevel !== undefined ? `level ${Math.round(call.stats.remoteAudioLevel * 100)}%` : 'detecting…'}</span>
+                </span>
+                <span style={{ fontWeight: 600, color: speakerProblem ? v('danger', '#b3261e') : v('ok', '#22a544') }}>
+                  {call.stats?.speakerPlaying === false ? 'Not playing' : speakerProblem ? 'Silent' : call.stats?.speakerPlaying ? 'Playing' : '…'}
+                </span>
+              </div>
+              {speakerProblem && <div role="alert" style={{ fontSize: 11, fontWeight: 600, color: v('danger', '#b3261e') }}>⚠ {speakerProblem}</div>}
             </div>
           )}
 
