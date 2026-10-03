@@ -1,0 +1,22 @@
+.login { min-height: 100vh; display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 6fr); background: var(--surface); }
+.login__brand { position: relative; display: flex; flex-direction: column; justify-content: space-between; gap: 40px; padding: 40px 44px 44px; background: var(--navy); color: #fff; }
+.login__pitch h1 { font-size: 44px; line-height: 1.05; font-weight: 600; letter-spacing: -0.02em; }
+.login__pitch p { margin-top: 16px; max-width: 440px; font-size: 16px; line-height: 1.55; color: var(--navy-text); }
+.login__rule { display: flex; height: 4px; width: 100%; border-radius: 2px; overflow: hidden; }
+.login__rule span:first-child { flex: 3; background: var(--brand-green); }
+.login__rule span:last-child { flex: 7; background: var(--brand-blue); }
+.login__panel { display: flex; align-items: center; justify-content: center; padding: 40px 24px; background: var(--bg); }
+.login__card { width: min(460px, 100%); display: flex; flex-direction: column; gap: 22px; }
+.login__group { display: flex; flex-direction: column; gap: 6px; }
+.login__role { font-size: 12.5px; color: var(--muted); }
+.login__people { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 8px; }
+.login__person { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border-radius: var(--r-md); border: 1px solid var(--line); background: var(--surface); cursor: pointer; min-width: 0; }
+.login__person:hover { border-color: var(--accent); }
+.login__go { margin-left: auto; color: var(--subtle); flex: none; }
+.login__person:hover .login__go { color: var(--accent); }
+
+@media (max-width: 860px) {
+  .login { grid-template-columns: 1fr; }
+  .login__brand { padding: 28px 20px; gap: 24px; }
+  .login__pitch h1 { font-size: 32px; }
+}

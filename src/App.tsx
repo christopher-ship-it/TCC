@@ -1,32 +1,43 @@
 import type React from 'react';
 import { HashRouter, Navigate, Route, Routes } from 'react-router-dom';
 import { StoreProvider, useStore } from './store/StoreContext';
+import { ToastProvider } from './ui/toast';
+import AppShell from './shell/AppShell';
+import { AgentCallSession } from './components/telephony/CallSession';
 import LoginPage from './pages/LoginPage';
-import Launcher from './pages/agent/Launcher';
+import Today from './pages/agent/Today';
 import Workspace from './pages/agent/Workspace';
-import AgentTelephony from './components/agent/AgentTelephony';
-import TeamPerformance from './pages/supervisor/TeamPerformance';
-import CallAudits from './pages/supervisor/CallAudits';
-import TeamAccess from './pages/supervisor/TeamAccess';
-import Allocation from './pages/supervisor/Allocation';
-import Escalations from './pages/supervisor/Escalations';
-import Dashboard from './pages/owner/Dashboard';
+import Calls from './pages/Calls';
+import CustomerPage from './pages/CustomerPage';
+import CallDetail from './pages/CallDetail';
+import TeamPerformance from './pages/team/TeamPerformance';
+import Escalations from './pages/team/Escalations';
+import Allocation from './pages/team/Allocation';
+import People from './pages/admin/People';
+import AuditLog from './pages/admin/AuditLog';
+import Overview from './pages/owner/Overview';
 import Geography from './pages/owner/Geography';
 import type { Role } from './data/types';
+import { isActive } from './lib/access';
+import { homeFor } from './lib/routes';
 
 function LoadingScreen() {
-  return (
-    <div style={{ minHeight: '100vh', display: 'grid', placeItems: 'center', color: 'var(--color-neutral-700)', fontSize: 13 }}>
-      Connecting to TCC…
-    </div>
-  );
+  return <div style={{ minHeight: '100vh', display: 'grid', placeItems: 'center', color: 'var(--muted)' }}>Connecting to Command Center…</div>;
 }
 
-function RequireRole({ roles, children }: { roles: Role[]; children: React.ReactNode }) {
+/** Signed in and not suspended — then the agent's phone line wraps every page so calls survive navigation. */
+function Protected() {
   const { currentAgent, ready } = useStore();
   if (!ready) return <LoadingScreen />;
-  if (!currentAgent) return <Navigate to="/" replace />;
-  if (!roles.includes(currentAgent.role)) return <Navigate to="/" replace />;
+  if (!currentAgent || !isActive(currentAgent)) return <Navigate to="/" replace />;
+  const shell = <AppShell />;
+  return currentAgent.role === 'agent' ? <AgentCallSession>{shell}</AgentCallSession> : shell;
+}
+
+function Only({ roles, children }: { roles: Role[]; children: React.ReactNode }) {
+  const { currentAgent } = useStore();
+  if (!currentAgent) return null;
+  if (!roles.includes(currentAgent.role)) return <Navigate to={homeFor(currentAgent.role)} replace />;
   return <>{children}</>;
 }
 
@@ -34,15 +45,20 @@ function Routed() {
   return (
     <Routes>
       <Route path="/" element={<LoginPage />} />
-      <Route path="/launcher" element={<RequireRole roles={['agent']}><Launcher /></RequireRole>} />
-      <Route path="/work/:appId" element={<RequireRole roles={['agent']}><AgentTelephony><Workspace /></AgentTelephony></RequireRole>} />
-      <Route path="/supervisor" element={<RequireRole roles={['supervisor']}><TeamPerformance /></RequireRole>} />
-      <Route path="/supervisor/audits" element={<RequireRole roles={['supervisor']}><CallAudits /></RequireRole>} />
-      <Route path="/supervisor/team" element={<RequireRole roles={['supervisor']}><TeamAccess /></RequireRole>} />
-      <Route path="/supervisor/allocation" element={<RequireRole roles={['supervisor']}><Allocation /></RequireRole>} />
-      <Route path="/supervisor/escalations" element={<RequireRole roles={['supervisor']}><Escalations /></RequireRole>} />
-      <Route path="/owner" element={<RequireRole roles={['admin']}><Dashboard /></RequireRole>} />
-      <Route path="/owner/geography" element={<RequireRole roles={['admin']}><Geography /></RequireRole>} />
+      <Route element={<Protected />}>
+        <Route path="/home" element={<Only roles={['agent']}><Today /></Only>} />
+        <Route path="/work/:appId" element={<Only roles={['agent']}><Workspace /></Only>} />
+        <Route path="/calls" element={<Calls />} />
+        <Route path="/customers/:id" element={<CustomerPage />} />
+        <Route path="/customers/:id/calls/:entryId" element={<CallDetail />} />
+        <Route path="/team" element={<Only roles={['supervisor', 'admin']}><TeamPerformance /></Only>} />
+        <Route path="/escalations" element={<Only roles={['supervisor', 'admin']}><Escalations /></Only>} />
+        <Route path="/allocation" element={<Only roles={['supervisor', 'admin']}><Allocation /></Only>} />
+        <Route path="/people" element={<Only roles={['supervisor', 'admin']}><People /></Only>} />
+        <Route path="/audit" element={<Only roles={['supervisor', 'admin']}><AuditLog /></Only>} />
+        <Route path="/overview" element={<Only roles={['admin']}><Overview /></Only>} />
+        <Route path="/geography" element={<Only roles={['admin']}><Geography /></Only>} />
+      </Route>
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
   );
@@ -51,9 +67,11 @@ function Routed() {
 export default function App() {
   return (
     <StoreProvider>
-      <HashRouter>
-        <Routed />
-      </HashRouter>
+      <ToastProvider>
+        <HashRouter>
+          <Routed />
+        </HashRouter>
+      </ToastProvider>
     </StoreProvider>
   );
 }
