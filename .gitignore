@@ -30,3 +30,6 @@ __pycache__/
 
 # Claude IDE
 .claude/
+
+# server cache: downloaded call recordings and their analyses (server/)
+.data/
