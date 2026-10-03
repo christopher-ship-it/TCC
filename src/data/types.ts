@@ -1,4 +1,8 @@
 import type { MediaStats } from '../telephony';
+import type { CallAnalysis } from '../lib/analysis/model';
+import type { LevelSample } from '../lib/analysis/speakers';
+
+export type { CallAnalysis, LevelSample };
 
 export type QueueKey = 'new' | 'tickets' | 'payments' | 'followup' | 'errors' | 'inactive';
 
@@ -56,6 +60,11 @@ export interface StateDef {
 
 export type Role = 'agent' | 'supervisor' | 'admin';
 
+/** What a person may do inside one app. Queues, languages and states then narrow which customers they see. */
+export type Capability = 'call' | 'tickets' | 'payments' | 'recordings' | 'export';
+
+export type AccountStatus = 'active' | 'invited' | 'suspended';
+
 export interface AgentAccount {
   id: string;
   name: string;
@@ -70,6 +79,12 @@ export interface AgentAccount {
   clickToDial: boolean;
   /** Softphone login (TeleCMI user id, e.g. "101_33338836"). The password is never stored — the agent types it per session. */
   telecmiUserId?: string;
+  /** Suspended people cannot sign in. Missing on older records = active. */
+  status?: AccountStatus;
+  /** Per-app capabilities. Missing for an app = the role's defaults (src/lib/access.ts). */
+  capabilities?: Partial<Record<AppId, Capability[]>>;
+  phone?: string;
+  createdTs?: number;
   lastActiveLabel: string;
   todayCalls: number;
   todayConnected: number;
@@ -114,27 +129,6 @@ export const OUTCOME_LIST: { outcome: Outcome; key: string; note?: string }[] = 
   { outcome: 'Using competitor', key: 'i' },
 ];
 
-export type Sentiment = 'positive' | 'neutral' | 'negative' | 'churn_risk';
-
-export interface TranscriptMessage {
-  speaker: 'agent' | 'customer';
-  text: string;
-  offsetSec: number;
-}
-
-export interface CallAnalytics {
-  sentiment: Sentiment;
-  sentimentScore: number;
-  summary: string;
-  keyTopics: string[];
-  actionItems: string[];
-  transcript: TranscriptMessage[];
-  /** True when captured directly from agent's live microphone via browser Web Speech API. */
-  isLiveCaptured?: boolean;
-  /** Origin of the transcript/analytics. */
-  source?: 'live_stt' | 'simulation' | 'server_webhook';
-}
-
 // Telephony details for calls placed through the in-app softphone (absent for calls logged by hand).
 export interface CallTelephony {
   provider: string;
@@ -151,16 +145,8 @@ export interface CallTelephony {
   recordingUrl?: string;
   /** Last WebRTC media-quality sample before the call ended — which audio direction failed. Absent on older entries. */
   quality?: MediaStats;
-}
-
-/** A real speech-to-text transcript of a call recording (never simulated). The recording is mono, so speakers are not separated. */
-export interface CallTranscript {
-  text: string;
-  language?: string;
-  segments: { start: number; end: number; text: string }[];
-  model: string;
-  at: number;
-  source: 'whisper-local';
+  /** Per-second loudness of each side, [seconds, agent, customer] — who spoke when. */
+  levels?: LevelSample[];
 }
 
 export interface CallLogEntry {
@@ -173,10 +159,36 @@ export interface CallLogEntry {
   comment: string;
   auto?: boolean;
   telephony?: CallTelephony;
-  /** AI speech-to-text transcription, sentiment score, and conversational analytics. */
-  analytics?: CallAnalytics;
-  /** Real transcript of the call recording, when transcription has run. */
-  transcript?: CallTranscript;
+  /** Post-call analysis: transcript, summary, sentiment, objections, next step (src/lib/analysis). */
+  analysis?: CallAnalysis;
+  /** Why the last analysis attempt failed, when it did. */
+  analysisError?: string;
+}
+
+export type AuditAction =
+  | 'signed_in'
+  | 'signed_out'
+  | 'user_created'
+  | 'access_changed'
+  | 'user_suspended'
+  | 'user_reactivated'
+  | 'escalation_approved'
+  | 'escalation_declined'
+  | 'owner_reassigned'
+  | 'queues_distributed'
+  | 'payment_marked_paid'
+  | 'data_exported';
+
+/** One line of the change log: who did what to whom. Everything an admin needs to answer "who changed this?". */
+export interface AuditEntry {
+  id: string;
+  ts: number;
+  actorId: string;
+  actorName: string;
+  action: AuditAction;
+  /** Who or what was changed (a person, a customer, a list). */
+  target?: string;
+  detail: string;
 }
 
 export interface TicketRecord {

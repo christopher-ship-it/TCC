@@ -12,17 +12,17 @@ import {
   writeBatch,
 } from 'firebase/firestore';
 import { db, ensureFirebaseAuth } from '../firebase/client';
-import { agentDoc, agentsRef, clearedEscalationsRef, escalationDoc, escalationsRef, overlayDoc, overlayRef } from '../firebase/collections';
+import { agentDoc, agentsRef, auditRef, clearedEscalationsRef, escalationDoc, escalationsRef, overlayDoc, overlayRef } from '../firebase/collections';
 import { stripUndefined } from '../firebase/util';
 import { AGENTS, generateSeed } from '../data/seed';
-import type { AgentAccount, CustomerOverlay, CustomerUser, EscalationRecord } from '../data/types';
+import type { AgentAccount, AuditAction, AuditEntry, CustomerOverlay, CustomerUser, EscalationRecord } from '../data/types';
 import { NEGATIVE_OUTCOMES } from '../data/types';
 import { fmtDay, fmtDayTime } from '../lib/dates';
 import { isReachable } from '../lib/queue';
-import { attachRecording, withTranscript } from '../lib/attachRecording';
+import { attachRecording, withAnalysis } from '../lib/attachRecording';
 import { buildCallLogEntry } from '../lib/callLog';
-import { buildTeleCmiRecordingUrl } from '../lib/telephony';
-import { StoreContext, type Action, type State } from './context';
+import { recordingUrlFor } from '../lib/telephony';
+import { auditEntry, StoreContext, type Action, type State } from './context';
 
 const DAY_MS = 86400000;
 const SESSION_KEY = 'tcc-session-agent-id';
@@ -38,6 +38,7 @@ export function FirestoreStoreProvider({ children }: { children: React.ReactNode
   const [overlayMap, setOverlayMap] = useState<Record<string, CustomerOverlay>>({});
   const [escalations, setEscalations] = useState<EscalationRecord[]>([]);
   const [clearedEscalations, setClearedEscalations] = useState<State['clearedEscalations']>([]);
+  const [audit, setAudit] = useState<AuditEntry[]>([]);
   const [currentAgentId, setCurrentAgentId] = useState<string | null>(() => localStorage.getItem(SESSION_KEY));
   const [authReady, setAuthReady] = useState(false);
 
@@ -97,6 +98,9 @@ export function FirestoreStoreProvider({ children }: { children: React.ReactNode
           return { id: d.id, atLabel: data.atLabel, name: data.name, action: data.action, result: data.result, minutes: data.minutes };
         }));
       }, (err) => console.error('clearedEscalations snapshot error', err)),
+      onSnapshot(query(auditRef(), orderBy('ts', 'desc'), limit(500)), (snap) => {
+        setAudit(snap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<AuditEntry, 'id'>) })));
+      }, (err) => console.error('audit snapshot error', err)),
     ];
     return () => unsubs.forEach((u) => u());
   }, [authReady]);
@@ -105,27 +109,35 @@ export function FirestoreStoreProvider({ children }: { children: React.ReactNode
     setDoc(overlayDoc(userId), stripUndefined(patch), { merge: true }).catch((err) => console.error('overlay write failed', err));
   }
 
+  function writeAudit(actorId: string, action: AuditAction, target: string | undefined, detail: string) {
+    const { id, ...entry } = auditEntry(agentsRefLive.current ?? [], actorId, action, target, detail);
+    void id;
+    addDoc(auditRef(), stripUndefined(entry)).catch((err) => console.error('audit write failed', err));
+  }
+
   async function dispatch(action: Action) {
     switch (action.type) {
       case 'LOGIN': {
         setCurrentAgentId(action.agentId);
         localStorage.setItem(SESSION_KEY, action.agentId);
         updateDoc(agentDoc(action.agentId), { lastActiveLabel: 'now' }).catch(() => {});
+        writeAudit(action.agentId, 'signed_in', undefined, 'Signed in');
         return;
       }
       case 'LOGOUT': {
+        if (currentAgentId) writeAudit(currentAgentId, 'signed_out', undefined, 'Signed out');
         setCurrentAgentId(null);
         localStorage.removeItem(SESSION_KEY);
         return;
       }
       case 'ATTACH_RECORDING': {
-        const hit = attachRecording(usersRef.current, action.file, buildTeleCmiRecordingUrl(action.file), action.callId, Date.now(), action.entryId);
+        const hit = attachRecording(usersRef.current, action.file, recordingUrlFor(action.file), action.callId, Date.now(), action.entryId);
         if (hit) writeOverlay(hit.userId, { callHistory: hit.callHistory });
         return;
       }
-      case 'SET_TRANSCRIPT': {
+      case 'SET_ANALYSIS': {
         const user = usersRef.current.find((u) => u.id === action.userId);
-        if (user) writeOverlay(user.id, { callHistory: withTranscript(user.callHistory, action.entryId, action.transcript) });
+        if (user) writeOverlay(user.id, { callHistory: withAnalysis(user.callHistory, action.entryId, action.analysis, action.error) });
         return;
       }
       case 'LOG_CALL': {
@@ -223,21 +235,38 @@ export function FirestoreStoreProvider({ children }: { children: React.ReactNode
           result: approved ? 'Approved · reassigned' : 'Declined · kept with agent',
           minutes: Math.round((Date.now() - esc.raisedTs) / 60000) || 5,
         }));
+        writeAudit(action.actorId, approved ? 'escalation_approved' : 'escalation_declined', esc.userName, action.resolutionNote || status);
         return;
       }
       case 'CREATE_AGENT': {
         const { id, ...rest } = action.agent;
         await setDoc(agentDoc(id), stripUndefined(rest));
+        writeAudit(action.actorId, 'user_created', action.agent.name, `${action.agent.role} · ${action.agent.apps.join(', ') || 'no apps'}`);
         return;
       }
-      case 'UPDATE_AGENT_QUEUES':
-        await updateDoc(agentDoc(action.agentId), { queues: action.queues });
+      case 'UPDATE_AGENT': {
+        const target = agentsRefLive.current?.find((a) => a.id === action.agentId);
+        await updateDoc(agentDoc(action.agentId), stripUndefined(action.patch as Record<string, unknown>));
+        writeAudit(action.actorId, action.auditAction ?? 'access_changed', target?.name, action.detail);
         return;
-      case 'UPDATE_AGENT_ALLOCATION':
-        await updateDoc(agentDoc(action.agentId), { languages: action.languages, states: action.states });
-        return;
-      case 'REASSIGN_OWNER':
+      }
+      case 'REASSIGN_OWNER': {
         writeOverlay(action.userId, { ownerAgentId: action.agentId });
+        const user = usersRef.current.find((u) => u.id === action.userId);
+        const owner = agentsRefLive.current?.find((a) => a.id === action.agentId);
+        writeAudit(action.actorId, 'owner_reassigned', user?.name, `Now owned by ${owner?.name ?? 'nobody'}`);
+        return;
+      }
+      case 'MARK_PAID': {
+        const user = usersRef.current.find((u) => u.id === action.userId);
+        if (!user) return;
+        await setDoc(overlayDoc(user.id), stripUndefined({ paying: true, plan: 'Paid', stageTag: 'Paying', queue: user.queue === 'payments' ? null : user.queue, mrr: user.mrr ?? user.paymentDue?.amount ?? 999 }), { merge: true });
+        await updateDoc(overlayDoc(user.id), { paymentDue: deleteField() });
+        writeAudit(action.actorId, 'payment_marked_paid', user.name, user.paymentDue ? `₹${user.paymentDue.amount} due ${user.paymentDue.dueLabel}` : 'Marked as paying');
+        return;
+      }
+      case 'LOG_EXPORT':
+        writeAudit(action.actorId, 'data_exported', undefined, action.detail);
         return;
       case 'CLOSE_FOLLOWUP': {
         const user = usersRef.current.find((u) => u.id === action.userId);
@@ -254,7 +283,7 @@ export function FirestoreStoreProvider({ children }: { children: React.ReactNode
       case 'AUTO_DISTRIBUTE': {
         if (!db) return;
         const targets = usersRef.current.filter((u) => !u.ownerAgentId && u.queue);
-        const pool = (agentsRefLive.current ?? []).filter((a) => a.role === 'agent');
+        const pool = (agentsRefLive.current ?? []).filter((a) => a.role === 'agent' && (a.status ?? 'active') === 'active');
         let batch = writeBatch(db);
         let count = 0;
         for (const u of targets) {
@@ -268,6 +297,7 @@ export function FirestoreStoreProvider({ children }: { children: React.ReactNode
           }
         }
         if (count % 400 !== 0) await batch.commit();
+        writeAudit(action.actorId, 'queues_distributed', undefined, `${count} unowned customer${count === 1 ? '' : 's'} given an owner`);
         return;
       }
       case 'RESET':
@@ -287,6 +317,7 @@ export function FirestoreStoreProvider({ children }: { children: React.ReactNode
     users,
     escalations,
     clearedEscalations,
+    audit,
     apps: master.apps,
     states: master.states,
     currentAgentId,
@@ -295,7 +326,7 @@ export function FirestoreStoreProvider({ children }: { children: React.ReactNode
   const value = useMemo(
     () => ({ state, dispatch: dispatch as unknown as React.Dispatch<Action>, currentAgent, ready: agents !== null, backend: 'firestore' as const }),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [agents, users, escalations, clearedEscalations, currentAgentId, currentAgent],
+    [agents, users, escalations, clearedEscalations, audit, currentAgentId, currentAgent],
   );
 
   return <StoreContext.Provider value={value}>{children}</StoreContext.Provider>;

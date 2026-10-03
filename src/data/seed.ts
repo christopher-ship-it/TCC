@@ -1,11 +1,12 @@
 import { Rng } from '../lib/rng';
 import { DAY_MS, fmtDay, fmtDayTime } from '../lib/dates';
-import { buildTeleCmiRecordingUrl } from '../lib/telephony';
+import { recordingUrlFor } from '../lib/telephony';
 import type {
   AgentAccount,
   AppDef,
   AppId,
-  CallAnalytics,
+  AuditEntry,
+  CallAnalysis,
   CallLogEntry,
   CallStatus,
   CustomerUser,
@@ -13,7 +14,6 @@ import type {
   Language,
   Outcome,
   QueueKey,
-  Sentiment,
   StateDef,
   TicketRecord,
 } from './types';
@@ -51,7 +51,7 @@ export const NO_STATE_WEIGHT = 412;
 
 export const AGENTS: AgentAccount[] = [
   {
-    id: 'ravi-s', name: 'Ravi S', username: 'ravi.s', role: 'agent',
+    id: 'ravi-s', name: 'Ravi S', username: 'ravi.s', role: 'agent', status: 'active', createdTs: NOW - 160 * DAY_MS,
     apps: ['realbroks'], queues: ['new', 'followup', 'inactive'],
     languages: ['Tamil', 'Telugu', 'Kannada'],
     states: ['Tamil Nadu', 'Telangana', 'Andhra Pradesh', 'Karnataka'],
@@ -61,7 +61,7 @@ export const AGENTS: AgentAccount[] = [
     workingQueueLabel: 'New registrations',
   },
   {
-    id: 'abhinaya-m', name: 'Abhinaya M', username: 'abhinaya.m', role: 'agent',
+    id: 'abhinaya-m', name: 'Abhinaya M', username: 'abhinaya.m', role: 'agent', status: 'active', createdTs: NOW - 160 * DAY_MS,
     apps: ['realbroks', 'irondrobe'], queues: ['new', 'tickets', 'payments', 'followup', 'errors', 'inactive'],
     languages: ['Tamil', 'Hindi'],
     states: ['Tamil Nadu', 'Maharashtra', 'Delhi', 'Uttar Pradesh', 'Gujarat', 'Rajasthan', 'Madhya Pradesh', 'West Bengal'],
@@ -71,17 +71,18 @@ export const AGENTS: AgentAccount[] = [
     workingQueueLabel: 'Positive follow-up',
   },
   {
-    id: 'karthick-g', name: 'Karthick G', username: 'karthick.g', role: 'agent',
+    id: 'karthick-g', name: 'Karthick G', username: 'karthick.g', role: 'agent', status: 'active', createdTs: NOW - 160 * DAY_MS,
     apps: ['realbroks'], queues: ['payments', 'errors'],
     languages: ['Tamil'],
     states: ['Tamil Nadu'],
     dailyTarget: 50, clickToDial: true, lastActiveLabel: '14 min ago',
     telecmiUserId: '5003_33338836',
+    capabilities: { realbroks: ['call', 'tickets', 'recordings', 'payments'] },
     todayCalls: 51, todayConnected: 31, todayPositive: 14, todaySubscribed: 2, todayOverdue: 11, avgHandleLabel: '4m 02s',
     workingQueueLabel: 'Payments & dues',
   },
   {
-    id: 'divya-p', name: 'Divya P', username: 'divya.p', role: 'agent',
+    id: 'divya-p', name: 'Divya P', username: 'divya.p', role: 'agent', status: 'active', createdTs: NOW - 160 * DAY_MS,
     apps: ['irondrobe'], queues: ['tickets', 'inactive'],
     languages: ['Tamil', 'Malayalam'],
     states: ['Tamil Nadu', 'Kerala'],
@@ -91,17 +92,18 @@ export const AGENTS: AgentAccount[] = [
     workingQueueLabel: 'Tickets & flags',
   },
   {
-    id: 'priya-n', name: 'Priya N', username: 'priya.n', role: 'agent', trainee: true,
+    id: 'priya-n', name: 'Priya N', username: 'priya.n', role: 'agent', trainee: true, status: 'active', createdTs: NOW - 52 * DAY_MS,
     apps: ['irondrobe'], queues: ['new'],
     languages: ['Tamil', 'Telugu'],
     states: ['Tamil Nadu'],
     dailyTarget: 30, clickToDial: true, lastActiveLabel: 'Yesterday',
     telecmiUserId: '5005_33338836',
+    capabilities: { irondrobe: ['call', 'recordings'] },
     todayCalls: 19, todayConnected: 12, todayPositive: 4, todaySubscribed: 0, todayOverdue: 0, avgHandleLabel: '6m 40s',
     workingQueueLabel: 'New registrations',
   },
   {
-    id: 'munees-a', name: 'Munees A', username: 'munees.a', role: 'supervisor',
+    id: 'munees-a', name: 'Munees A', username: 'munees.a', role: 'supervisor', status: 'active', createdTs: NOW - 300 * DAY_MS,
     apps: ['realbroks', 'irondrobe'], queues: ['new', 'tickets', 'payments', 'followup', 'errors', 'inactive'],
     languages: ['Tamil', 'Telugu', 'Kannada', 'Malayalam', 'Hindi', 'Bengali', 'English'],
     states: STATE_DEFS.map((s) => s.name),
@@ -111,7 +113,7 @@ export const AGENTS: AgentAccount[] = [
     workingQueueLabel: '—',
   },
   {
-    id: 'owner-1', name: 'You', username: 'owner', role: 'admin',
+    id: 'owner-1', name: 'Owner', username: 'owner', role: 'admin', status: 'active', createdTs: NOW - 400 * DAY_MS,
     apps: ['realbroks', 'irondrobe', 'influnet', 'vehigo'], queues: [],
     languages: [], states: [],
     dailyTarget: 0, clickToDial: false, lastActiveLabel: 'now',
@@ -170,28 +172,30 @@ function reachableAgent(agents: AgentAccount[], app: AppId, queue: QueueKey | nu
   return matching[0];
 }
 
-export function makeCallAnalytics(
+/**
+ * Demo-only call analysis (source: 'sample') for the generated customers and for calls on the mock line.
+ * Real calls are analysed from their recording on the server (server/analyze.ts) — never from these templates.
+ */
+function makeSampleAnalysis(
   r: Rng,
-  _agentName: string,
+  at: number,
   customerName: string,
   app: AppId,
   outcome: Outcome | undefined,
-  _durationSec: number,
-): CallAnalytics {
+): CallAnalysis {
   const isRealbroks = app === 'realbroks';
   const isPositive = outcome && ['Interested', 'Very interested', 'Ready to subscribe', 'Created first listing'].includes(outcome);
   const isNegative = outcome && ['Not interested', 'Using competitor'].includes(outcome);
   const isIssue = outcome && ['Payment issue', 'Technical issue'].includes(outcome);
 
-  let sentiment: Sentiment = 'neutral';
   let sentimentScore = 0.15;
   let summary = '';
+  let objections: string[] = [];
   let keyTopics: string[] = [];
   let actionItems: string[] = [];
   let transcript: { speaker: 'agent' | 'customer'; text: string; offsetSec: number }[] = [];
 
   if (isPositive) {
-    sentiment = 'positive';
     sentimentScore = Number((0.70 + r.float() * 0.25).toFixed(2));
     if (isRealbroks) {
       summary = `Customer verified listings sync for ${customerName} and requested pricing details on the Pro annual broker plan.`;
@@ -217,11 +221,11 @@ export function makeCallAnalytics(
       ];
     }
   } else if (isNegative) {
-    sentiment = 'churn_risk';
     sentimentScore = Number((-0.50 - r.float() * 0.35).toFixed(2));
     if (outcome === 'Using competitor') {
       summary = `Customer currently using a local competitor due to existing team accounts. Hesitant to switch without data migration.`;
       keyTopics = ['competitor_product', 'data_migration', 'pricing_objection'];
+      objections = ['Already on another app through their association', 'Will not switch without importing old records'];
       actionItems = ['Note competitor usage in CRM', 'Contact again when Excel import is released'];
       transcript = [
         { speaker: 'agent', text: `Hi ${customerName}, checking in from Tecstellar support. How are things going with your setup?`, offsetSec: 4 },
@@ -232,6 +236,7 @@ export function makeCallAnalytics(
     } else {
       summary = `Customer stated business is slow this quarter and declining current subscription offers.`;
       keyTopics = ['budget_constraints', 'declined_offer'];
+      objections = ['Business is slow this quarter — cutting software costs'];
       actionItems = ['Pause active outreach for 30 days', 'Send seasonal discount bulletin'];
       transcript = [
         { speaker: 'agent', text: `Hello ${customerName}, calling to check if you need any help with your account.`, offsetSec: 3 },
@@ -240,7 +245,6 @@ export function makeCallAnalytics(
       ];
     }
   } else if (isIssue) {
-    sentiment = 'neutral';
     sentimentScore = Number((r.float() * 0.2 - 0.1).toFixed(2));
     summary = `Customer reported payment deduction failure on checkout. Awaiting transaction reference screenshot.`;
     keyTopics = ['payment_gateway', 'bank_reconciliation', 'checkout_issue'];
@@ -253,8 +257,7 @@ export function makeCallAnalytics(
       { speaker: 'agent', text: 'On it! I will manually activate your Pro license within 15 minutes of receiving the reference.', offsetSec: 64 },
     ];
   } else {
-    sentiment = 'positive';
-    sentimentScore = 0.45;
+    sentimentScore = 0.25 + r.float() * 0.2;
     summary = `General check-in call with ${customerName}. Customer active and reviewing features.`;
     keyTopics = ['general_inquiry', 'feature_walkthrough'];
     actionItems = ['Send product guide link', 'Follow up next cycle'];
@@ -267,24 +270,23 @@ export function makeCallAnalytics(
   }
 
   return {
-    sentiment,
-    sentimentScore,
+    source: 'sample',
+    at,
+    outcome: outcome ?? 'Call back later',
     summary,
-    keyTopics,
+    keyPoints: keyTopics.map((t) => t.replace(/_/g, ' ')),
+    objections,
     actionItems,
-    transcript,
+    recommendation: actionItems[0],
+    sentiment: Math.round((Math.max(-1, Math.min(1, sentimentScore)) + 1) * 50),
+    languages: ['English'],
+    transcript: transcript.map((l) => ({ speaker: l.speaker, atSec: l.offsetSec, text: l.text })),
   };
 }
 
-export function generateRealtimeAnalytics(
-  agentName: string,
-  customerName: string,
-  app: AppId = 'realbroks',
-  outcome?: Outcome,
-  durationSec: number = 60,
-): CallAnalytics {
-  const r = new Rng(Date.now());
-  return makeCallAnalytics(r, agentName, customerName, app, outcome, durationSec);
+/** Sample analysis for a call just made on the demo line. */
+export function sampleAnalysis(at: number, customerName: string, app: AppId = 'realbroks', outcome?: Outcome): CallAnalysis {
+  return makeSampleAnalysis(new Rng(at), at, customerName, app, outcome);
 }
 
 function makeCallHistory(
@@ -299,8 +301,28 @@ function makeCallHistory(
 ): CallLogEntry[] {
   const entries: CallLogEntry[] = [];
   let ts = NOW - attempts * r.int(1, 3) * DAY_MS;
+  const warm = finalOutcome !== undefined && POSITIVE_STEPS.includes(finalOutcome);
   for (let i = 0; i < attempts - (finalStatus ? 1 : 0); i++) {
     ts += r.int(1, 3) * DAY_MS;
+    // Warm leads (the follow-up chain) had real conversations along the way, not just missed calls.
+    if (warm && r.bool(0.6)) {
+      const agent = r.pick(agentNames);
+      const outcome = r.pick<Outcome>(['Interested', 'Interested', 'Technical issue']);
+      const durationSec = r.int(50, 200);
+      const recFile = `rec_${r.int(100000, 999999)}.wav`;
+      entries.push({
+        id: `cl-${r.int(1, 1e9)}`,
+        atTs: ts,
+        atLabel: fmtDayTime(ts),
+        agentName: agent,
+        status: 'Answered — Followup',
+        outcome,
+        comment: r.pick(COMMENTS_POOL),
+        telephony: { provider: 'telecmi', callId: `cmi-${r.int(100000, 999999)}`, durationSec, ringSec: r.int(8, 22), disposition: 'answered', recordingFile: recFile, recordingUrl: recordingUrlFor(recFile) },
+        analysis: makeSampleAnalysis(r, ts, customerName, app, outcome),
+      });
+      continue;
+    }
     const status = r.pick<CallStatus>(['No Answer', 'Not Reachable', 'No Answer']);
     entries.push({
       id: `cl-${r.int(1, 1e9)}`,
@@ -335,16 +357,28 @@ function makeCallHistory(
             ringSec: r.int(12, 22),
             disposition: 'answered',
             recordingFile: recFile,
-            recordingUrl: recFile ? buildTeleCmiRecordingUrl(recFile) : undefined,
+            recordingUrl: recFile ? recordingUrlFor(recFile) : undefined,
           }
         : undefined,
-      analytics: isAnswered
-        ? makeCallAnalytics(r, agent, customerName, app, finalOutcome, durationSec)
-        : undefined,
+      analysis: isAnswered ? makeSampleAnalysis(r, ts, customerName, app, finalOutcome) : undefined,
     });
+  }
+  // Attempts are spaced forward from a start date, so a long history can run past "now". Shift the whole history
+  // back so the latest call happened at least an hour ago — sample calls must never be dated in the future.
+  const latest = Math.max(...entries.map((e) => e.atTs), 0);
+  const limit = NOW - 3600000;
+  if (latest > limit) {
+    const shift = latest - limit + r.int(0, 72) * 3600000;
+    for (const e of entries) {
+      e.atTs -= shift;
+      e.atLabel = fmtDayTime(e.atTs);
+      if (e.analysis) e.analysis = { ...e.analysis, at: e.atTs };
+    }
   }
   return entries.sort((a, b) => b.atTs - a.atTs);
 }
+
+const POSITIVE_STEPS: Outcome[] = ['Interested', 'Very interested', 'Ready to subscribe', 'Created first listing'];
 
 const COMMENTS_POOL = [
   'Wants to see commission tracking before paying. Asked to call back after 6pm.',
@@ -579,6 +613,17 @@ function buildClearedEscalations(r: Rng) {
   }));
 }
 
+function buildAudit(): AuditEntry[] {
+  const at = (minutesAgo: number) => NOW - minutesAgo * 60000;
+  const rows: Omit<AuditEntry, 'id'>[] = [
+    { ts: at(42), actorId: 'munees-a', actorName: 'Munees A', action: 'access_changed', target: 'Priya N', detail: 'Queues: New registrations (was none)' },
+    { ts: at(180), actorId: 'munees-a', actorName: 'Munees A', action: 'escalation_approved', target: 'Meena R', detail: 'Reroute → Kannada · reassigned' },
+    { ts: at(60 * 26), actorId: 'owner-1', actorName: 'Owner', action: 'access_changed', target: 'Karthick G', detail: 'RealBroks: added Handle payments' },
+    { ts: at(60 * 24 * 52), actorId: 'owner-1', actorName: 'Owner', action: 'user_created', target: 'Priya N', detail: 'Agent · trainee · IronDrobe' },
+  ];
+  return rows.map((r, i) => ({ ...r, id: `audit-seed-${i}` }));
+}
+
 export interface Seed {
   apps: AppDef[];
   states: StateSeedDef[];
@@ -586,6 +631,7 @@ export interface Seed {
   users: CustomerUser[];
   escalations: EscalationRecord[];
   clearedEscalations: ReturnType<typeof buildClearedEscalations>;
+  audit: AuditEntry[];
   generatedAt: number;
 }
 
@@ -607,6 +653,7 @@ export function generateSeed(seedNumber = 20260816): Seed {
     users,
     escalations,
     clearedEscalations: buildClearedEscalations(r),
+    audit: buildAudit(),
     generatedAt: NOW,
   };
 }

@@ -10,6 +10,7 @@ export const AGENTS_COL = 'agents';
 export const CUSTOMER_OVERLAY_COL = 'customerOverlay';
 export const ESCALATIONS_COL = 'escalations';
 export const CLEARED_ESCALATIONS_COL = 'clearedEscalations';
+export const AUDIT_COL = 'audit';
 
 export function agentsRef() {
   if (!db) throw new Error('Firestore is not configured');
@@ -38,4 +39,8 @@ export function escalationDoc(id: string) {
 export function clearedEscalationsRef() {
   if (!db) throw new Error('Firestore is not configured');
   return collection(db, CLEARED_ESCALATIONS_COL);
+}
+export function auditRef() {
+  if (!db) throw new Error('Firestore is not configured');
+  return collection(db, AUDIT_COL);
 }

@@ -59,23 +59,23 @@ export const SIMULATE_CALL_DATA = mode !== 'telecmi';
 const DEMO_AUDIO = 'https://actions.google.com/sounds/v1/ambiences/office_murmur.ogg';
 
 /**
- * Playback URL for a TeleCMI recording — the same public file URL TeleCMI's own dashboard streams from, so no
- * secret is involved. The host is per-account (`VITE_TELECMI_DASHBOARD_HOST`); `inet_no` is the account's App ID
- * (public). Returns '' when it can't be built, so callers show "no recording" rather than a broken player.
+ * Where the player streams a recording from. Real TeleCMI recordings go through TCC's own server
+ * (server/api.ts), which holds the App Secret — TeleCMI's dashboard link now asks for a login.
+ * Demo calls (mock line) have no real audio, so they play a stand-in clip. '' when there is no file.
  */
-export function buildTeleCmiRecordingUrl(filename: string): string {
+export function recordingUrlFor(filename: string | undefined): string {
   if (!filename) return '';
   if (/^https?:\/\//i.test(filename)) return filename;
-  if (SIMULATE_CALL_DATA) return DEMO_AUDIO;
-  const appId = (import.meta.env.VITE_TELECMI_APP_ID as string | undefined)?.trim();
-  const host = (import.meta.env.VITE_TELECMI_DASHBOARD_HOST as string | undefined)?.trim() || 'connle.telecmi.com';
-  return appId ? `https://${host}/connly_voice/download_music/${encodeURIComponent(filename)}?inet_no=${encodeURIComponent(appId)}` : '';
+  if (SIMULATE_CALL_DATA || filename.startsWith('rec_')) return DEMO_AUDIO;
+  return `/api/recordings/${encodeURIComponent(filename)}`;
 }
 
 export function toCallTelephony(r: CallResult): CallTelephony {
   const answered = r.disposition === 'connected' || r.talkSeconds > 0;
   // Real calls only carry a recording once TeleCMI has announced one; the demo line fakes it so the player has something to show.
   const recordingFile = r.recordingFile ?? (SIMULATE_CALL_DATA && answered ? `rec_${r.providerCallId || r.id}.wav` : undefined);
+  // The per-second loudness timeline rides on the last stats sample; store it once, beside the quality summary.
+  const { timeline, ...quality } = r.stats ?? {};
   return {
     provider: r.provider,
     callId: r.providerCallId,
@@ -85,7 +85,8 @@ export function toCallTelephony(r: CallResult): CallTelephony {
     startedAt: r.startedAt,
     remote: r.remote,
     recordingFile,
-    recordingUrl: r.recordingBlobUrl || (recordingFile ? buildTeleCmiRecordingUrl(recordingFile) || undefined : undefined),
-    quality: r.stats ?? undefined,
+    recordingUrl: recordingFile ? recordingUrlFor(recordingFile) || undefined : undefined,
+    quality: r.stats ? quality : undefined,
+    levels: timeline?.length ? timeline : undefined,
   };
 }
