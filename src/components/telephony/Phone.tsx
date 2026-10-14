@@ -180,6 +180,8 @@ export function Phone({ user, agent, onEscalate }: { user: CustomerUser; agent: 
 
   const { snapshot, requiresCredentials, controller } = tel;
   const otherCall = call && call.meta.customerId !== user.id;
+  const redirected = !!TEST_NUMBER && !user.adHoc;
+  const blocked = LIVE_DIAL_BLOCKED && !user.adHoc;
   const ended = !call && session.wrapUp?.customerId === user.id ? session.wrapUp.result : null;
   const ringing = call && (call.state === 'dialing' || call.state === 'ringing');
   const micLabel = stats?.micLabel;
@@ -224,7 +226,7 @@ export function Phone({ user, agent, onEscalate }: { user: CustomerUser; agent: 
           <div className="phone__id">
             <div className={`phone__avatar${ringing ? ' phone__avatar--ringing' : ''}`}>{initials(otherCall ? '?' : user.name)}</div>
             <div className="phone__name">{otherCall ? 'Another call is live' : user.name}</div>
-            <div className="phone__number">{TEST_NUMBER ? `Test line · ${TEST_NUMBER}` : user.phone}</div>
+            <div className="phone__number">{redirected ? `Test line · ${TEST_NUMBER}` : user.phone}</div>
             {call && !otherCall ? (
               call.state === 'connected' ? (
                 <>
@@ -243,8 +245,8 @@ export function Phone({ user, agent, onEscalate }: { user: CustomerUser; agent: 
             )}
           </div>
 
-          {TEST_NUMBER && !call && <div className="phone__note">Test mode — this call rings {TEST_NUMBER}, not {user.name}.</div>}
-          {LIVE_DIAL_BLOCKED && <div className="phone__warn"><AlertTriangle size={15} />Live dialling is off: customer numbers are still sample data. Set VITE_TELEPHONY_TEST_NUMBER to ring your own phone.</div>}
+          {redirected && !call && <div className="phone__note">Test mode — this call rings {TEST_NUMBER}, not {user.name}.</div>}
+          {blocked && <div className="phone__warn"><AlertTriangle size={15} />Live dialling is off: customer numbers are still sample data. Set VITE_TELEPHONY_TEST_NUMBER to ring your own phone.</div>}
           {call?.state === 'connected' && !otherCall && (
             <>
               <div className="phone__levels" aria-label="Audio levels">
@@ -288,7 +290,7 @@ export function Phone({ user, agent, onEscalate }: { user: CustomerUser; agent: 
                 <button type="button" className="phone__big phone__big--end" aria-label={call.state === 'connected' ? 'End call' : 'Cancel call'} disabled={call.hangupRequested} onClick={() => controller.hangup()}><PhoneOff size={26} /></button>
               )
             ) : (
-              <button type="button" className="phone__big phone__big--call" aria-label={`Call ${user.name}`} title="Call · F1" disabled={!!call || LIVE_DIAL_BLOCKED || snapshot.connection !== 'ready' || !!session.wrapUp} onClick={dial}>
+              <button type="button" className="phone__big phone__big--call" aria-label={`Call ${user.name}`} title="Call · F1" disabled={!!call || blocked || snapshot.connection !== 'ready' || !!session.wrapUp} onClick={dial}>
                 <PhoneIcon size={26} />
               </button>
             )}

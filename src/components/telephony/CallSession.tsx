@@ -95,7 +95,7 @@ function Session({ children }: { children: ReactNode }) {
   const dial = useCallback(
     (user: CustomerUser) => {
       if (!currentAgent) return { ok: false as const, message: 'Sign in first.' };
-      if (LIVE_DIAL_BLOCKED) return { ok: false as const, message: 'Live dialling is off while customer numbers are sample data.' };
+      if (LIVE_DIAL_BLOCKED && !user.adHoc) return { ok: false as const, message: 'Live dialling is off while customer numbers are sample data.' };
       if (wrapRef.current) return { ok: false as const, message: 'Log the last call before starting another.' };
       const r = controller.dial(dialNumberFor(user), callMeta(user, currentAgent));
       return r.ok ? { ok: true as const } : { ok: false as const, message: DIAL_ERROR[r.reason] };

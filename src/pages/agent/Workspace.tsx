@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
-import { ArrowRight, Check, CircleDollarSign, Flag, Inbox, Ticket } from 'lucide-react';
+import { ArrowRight, Check, CircleDollarSign, Flag, Inbox, Phone as PhoneIcon, Ticket } from 'lucide-react';
 import { useStore } from '../../store/StoreContext';
 import { APPS } from '../../data/seed';
 import { CALL_STATUS_LIST, NEGATIVE_OUTCOMES, OUTCOME_LIST, POSITIVE_OUTCOMES, QUEUES, type AppId, type CallStatus, type Outcome, type QueueKey } from '../../data/types';
@@ -8,14 +8,15 @@ import { queueCounts, tasksForQueue } from '../../lib/queue';
 import { queueNote } from '../../lib/queueNotes';
 import { whyInQueue } from '../../lib/whyInQueue';
 import { can, LANGUAGE_SCRIPT } from '../../lib/access';
-import { suggestStatus, toCallTelephony } from '../../lib/telephony';
+import { DEFAULT_COUNTRY_CODE, suggestStatus, toCallTelephony } from '../../lib/telephony';
+import { adHocCustomer, adHocId, directDialDigits } from '../../lib/directDial';
 import { formatDuration, useElapsedSeconds, useTelephonyOptional } from '../../telephony';
 import { Phone } from '../../components/telephony/Phone';
 import { useCallSession } from '../../components/telephony/callSessionContext';
 import { EscalateDialog } from '../../components/agent/EscalateDialog';
 import { TicketDialog } from '../../components/agent/TicketDialog';
 import { OutcomeBadge, SentimentBadge } from '../../components/calls/badges';
-import { Badge, Button, Callout, Card, Empty, Kbd, Textarea } from '../../ui/primitives';
+import { Badge, Button, Callout, Card, Empty, Input, Kbd, Textarea } from '../../ui/primitives';
 import { useToast } from '../../ui/toastContext';
 import './agent.css';
 
@@ -56,6 +57,41 @@ function CallStrip({ customerName }: { customerName?: string }) {
         wrap && <span className="muted">{wrap.result.talkSeconds > 0 ? `Talked ${formatDuration(wrap.result.talkSeconds)}` : 'Did not connect'} · pick what happened and save</span>
       )}
     </div>
+  );
+}
+
+/** Call a number that isn't in the customer list; the call is logged, recorded and analysed like any other. */
+function DialNumber({ appId, disabled }: { appId: AppId; disabled: boolean }) {
+  const { state, dispatch } = useStore();
+  const session = useCallSession();
+  const [, setParams] = useSearchParams();
+  const [raw, setRaw] = useState('');
+  const [error, setError] = useState<string | null>(null);
+  const tel = useTelephonyOptional();
+  if (!tel) return null;
+
+  function submit(e: React.FormEvent) {
+    e.preventDefault();
+    const digits = directDialDigits(raw, DEFAULT_COUNTRY_CODE);
+    if (!digits) return setError('That doesn’t look like a phone number.');
+    const user = state.users.find((u) => u.id === adHocId(digits)) ?? adHocCustomer(digits, appId);
+    if (user.app !== appId) return setError(`That number was already dialled under ${user.app}.`);
+    if (!state.users.some((u) => u.id === user.id)) dispatch({ type: 'ADD_CUSTOMER', customer: user });
+    const r = session.dial(user);
+    if (!r.ok) return setError(r.message);
+    setError(null);
+    setRaw('');
+    setParams({ focus: user.id }, { replace: true });
+  }
+
+  return (
+    <form className="row" style={{ gap: 8, padding: '10px 24px', alignItems: 'center', background: 'var(--surface)', borderBottom: '1px solid var(--line)' }} onSubmit={submit}>
+      <PhoneIcon size={15} aria-hidden />
+      <label htmlFor="ws-dial" className="section-label" style={{ margin: 0 }}>Dial a number</label>
+      <Input id="ws-dial" style={{ width: 220 }} inputMode="tel" placeholder="+91 98765 43210" value={raw} disabled={disabled} onChange={(e) => { setRaw(e.target.value); setError(null); }} />
+      <Button type="submit" variant="primary" size="sm" disabled={disabled || !raw.trim()}>Call</Button>
+      {error && <span role="alert" style={{ color: 'var(--danger, #b3261e)', fontSize: 13 }}>{error}</span>}
+    </form>
   );
 }
 
@@ -190,6 +226,7 @@ export default function Workspace() {
   return (
     <div className="ws">
       <CallStrip customerName={user?.name} />
+      <DialNumber appId={appId} disabled={callLive || !!session.wrapUp} />
 
       {myApps.length > 1 && (
         <div className="tabs" style={{ padding: '0 24px', background: 'var(--surface)' }} role="tablist" aria-label="App">
