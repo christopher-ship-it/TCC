@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
-import { BarChart3, ChevronDown, ClipboardList, Flag, Headset, History, Home, LogOut, Map, Phone, RotateCcw, Search, Shuffle, Users, UsersRound } from 'lucide-react';
+import { BarChart3, ChevronDown, ClipboardList, Database, Flag, Headset, History, Home, LogOut, Map, Phone, RotateCcw, Search, Shuffle, Users, UsersRound } from 'lucide-react';
 import { TECSTELLAR_MARK } from '../assets';
 import { APPS } from '../data/seed';
 import type { AppId, Role } from '../data/types';
@@ -41,6 +41,7 @@ function navFor(role: Role, pendingEscalations: number, firstApp: AppId | undefi
   ];
   const people: NavItem[] = [{ to: '/people', label: 'People & access', icon: <UsersRound size={s} /> }];
   if (canExportOrAudit) people.push({ to: '/audit', label: 'Change log', icon: <ClipboardList size={s} /> });
+  if (role === 'admin') people.push({ to: '/customers-import', label: 'Customers', icon: <Database size={s} /> });
   if (role === 'supervisor') return [{ title: 'Team', items: team }, { title: 'Admin', items: people }];
   return [
     { title: 'Business', items: [{ to: '/overview', label: 'Overview', icon: <Home size={s} /> }, { to: '/geography', label: 'Geography', icon: <Map size={s} /> }] },

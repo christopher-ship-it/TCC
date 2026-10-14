@@ -15,6 +15,7 @@ import Escalations from './pages/team/Escalations';
 import Allocation from './pages/team/Allocation';
 import People from './pages/admin/People';
 import AuditLog from './pages/admin/AuditLog';
+import CustomerImport from './pages/admin/CustomerImport';
 import Overview from './pages/owner/Overview';
 import Geography from './pages/owner/Geography';
 import type { Role } from './data/types';
@@ -56,6 +57,7 @@ function Routed() {
         <Route path="/allocation" element={<Only roles={['supervisor', 'admin']}><Allocation /></Only>} />
         <Route path="/people" element={<Only roles={['supervisor', 'admin']}><People /></Only>} />
         <Route path="/audit" element={<Only roles={['supervisor', 'admin']}><AuditLog /></Only>} />
+        <Route path="/customers-import" element={<Only roles={['admin']}><CustomerImport /></Only>} />
         <Route path="/overview" element={<Only roles={['admin']}><Overview /></Only>} />
         <Route path="/geography" element={<Only roles={['admin']}><Geography /></Only>} />
       </Route>
