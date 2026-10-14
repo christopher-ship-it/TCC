@@ -69,6 +69,8 @@ export interface AgentAccount {
   id: string;
   name: string;
   username: string;
+  /** The Firebase Auth login (Firestore backend). Not used by the local demo store. */
+  email?: string;
   role: Role;
   trainee?: boolean;
   apps: AppId[];
@@ -177,7 +179,8 @@ export type AuditAction =
   | 'owner_reassigned'
   | 'queues_distributed'
   | 'payment_marked_paid'
-  | 'data_exported';
+  | 'data_exported'
+  | 'customers_imported';
 
 /** One line of the change log: who did what to whom. Everything an admin needs to answer "who changed this?". */
 export interface AuditEntry {
@@ -265,6 +268,8 @@ export interface CustomerUser {
   hasActiveEscalation?: boolean;
   ownerAgentId: string | null;
   mrr?: number;
+  /** Made on the spot by dialling a number that isn't a customer yet (Workspace › Dial a number). */
+  adHoc?: boolean;
 }
 
 // The subset of CustomerUser that TCC itself owns and writes live to

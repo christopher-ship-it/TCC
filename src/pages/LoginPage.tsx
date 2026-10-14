@@ -12,13 +12,34 @@ import './login.css';
 const ROLE_ORDER: Role[] = ['agent', 'supervisor', 'admin'];
 
 export default function LoginPage() {
-  const { state, dispatch, ready, backend, currentAgent } = useStore();
+  const { state, dispatch, ready, backend, currentAgent, signInWithPassword, sendPasswordReset, accessProblem } = useStore();
+  const live = backend === 'firestore';
   const navigate = useNavigate();
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
+  const [info, setInfo] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
 
   if (ready && currentAgent && isActive(currentAgent)) return <Navigate to={homeFor(currentAgent.role)} replace />;
+
+  async function signInLive() {
+    if (!signInWithPassword || busy) return;
+    setBusy(true);
+    setInfo(null);
+    const r = await signInWithPassword(username, password);
+    setBusy(false);
+    if (!r.ok) setError(r.message);
+  }
+
+  async function forgot() {
+    if (!sendPasswordReset) return;
+    if (!username.trim()) return setError('Type your email first, then choose “Forgot password”.');
+    const r = await sendPasswordReset(username);
+    if (!r.ok) return setError(r.message);
+    setError(null);
+    setInfo('If that email has a login, a link to choose a new password is on its way.');
+  }
 
   function signIn(u?: string) {
     if (!ready) return;
@@ -58,24 +79,29 @@ export default function LoginPage() {
             className="stack"
             onSubmit={(e) => {
               e.preventDefault();
-              signIn();
+              if (live) void signInLive();
+              else signIn();
             }}
           >
-            <Field label="Username" htmlFor="tcc-un">
-              <Input id="tcc-un" value={username} onChange={(e) => { setUsername(e.target.value); setError(null); }} autoComplete="username" autoFocus placeholder="abhinaya.m" />
+            <Field label={live ? 'Email' : 'Username'} htmlFor="tcc-un">
+              <Input id="tcc-un" type={live ? 'email' : 'text'} value={username} onChange={(e) => { setUsername(e.target.value); setError(null); }} autoComplete="username" autoFocus placeholder={live ? 'you@tecstellar.com' : 'abhinaya.m'} />
             </Field>
             <Field label="Password" htmlFor="tcc-pw">
               <Input id="tcc-pw" type="password" value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="current-password" />
             </Field>
-            {error && <Callout tone="danger">{error}</Callout>}
-            <Button type="submit" variant="primary" size="lg" block disabled={!ready || !username.trim()}>Sign in</Button>
+            {(error ?? accessProblem) && <Callout tone="danger">{error ?? accessProblem}</Callout>}
+            {info && <Callout tone="ok">{info}</Callout>}
+            <Button type="submit" variant="primary" size="lg" block disabled={!ready || busy || !username.trim() || (live && !password)}>{busy ? 'Signing in…' : 'Sign in'}</Button>
+            {live && <button type="button" className="btn btn--link" style={{ alignSelf: 'center' }} onClick={() => void forgot()}>Forgot password?</button>}
           </form>
 
-          <Callout tone="warn" icon={<ShieldAlert size={16} />}>
-            Demo sign-in: passwords are not checked yet. Real accounts arrive with the database and hosting step.
-          </Callout>
+          {!live && (
+            <Callout tone="warn" icon={<ShieldAlert size={16} />}>
+              Demo sign-in: no database is connected, so passwords are not checked and the data stays in this browser.
+            </Callout>
+          )}
 
-          <div className="stack" style={{ gap: 10 }}>
+          {!live && <div className="stack" style={{ gap: 10 }}>
             <div className="section-label">Sample accounts</div>
             {!ready ? (
               <span className="muted">Connecting…</span>
@@ -102,7 +128,7 @@ export default function LoginPage() {
                 );
               })
             )}
-          </div>
+          </div>}
           <p className="muted" style={{ fontSize: 12.5 }}>{backend === 'firestore' ? 'Live data · connected to Firestore' : 'Sample data in this browser · no database connected yet'}</p>
         </div>
       </main>

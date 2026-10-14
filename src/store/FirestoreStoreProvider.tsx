@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   addDoc,
   deleteField,
-  getDocs,
+  getDoc,
   limit,
   onSnapshot,
   orderBy,
@@ -11,10 +11,11 @@ import {
   updateDoc,
   writeBatch,
 } from 'firebase/firestore';
-import { db, ensureFirebaseAuth } from '../firebase/client';
-import { agentDoc, agentsRef, auditRef, clearedEscalationsRef, escalationDoc, escalationsRef, overlayDoc, overlayRef } from '../firebase/collections';
+import type { User } from 'firebase/auth';
+import { authMessage, createLogin, db, sendReset, signInWithPassword, signOutOfFirebase, watchAuth } from '../firebase/client';
+import { agentDoc, agentsRef, auditRef, authLinkDoc, clearedEscalationsRef, customerMasterDoc, customersMasterRef, escalationDoc, escalationsRef, overlayDoc, overlayRef } from '../firebase/collections';
 import { stripUndefined } from '../firebase/util';
-import { AGENTS, generateSeed } from '../data/seed';
+import { generateSeed } from '../data/seed';
 import type { AgentAccount, AuditAction, AuditEntry, CustomerOverlay, CustomerUser, EscalationRecord } from '../data/types';
 import { NEGATIVE_OUTCOMES } from '../data/types';
 import { fmtDay, fmtDayTime } from '../lib/dates';
@@ -22,29 +23,40 @@ import { isReachable } from '../lib/queue';
 import { attachRecording, withAnalysis } from '../lib/attachRecording';
 import { buildCallLogEntry } from '../lib/callLog';
 import { recordingUrlFor } from '../lib/telephony';
-import { auditEntry, StoreContext, type Action, type State } from './context';
+import { auditEntry, StoreContext, type AccountResult, type Action, type State } from './context';
 
 const DAY_MS = 86400000;
-const SESSION_KEY = 'tcc-session-agent-id';
 
-// Only the master customer records are generated locally for now (pending the
-// existing app database being wired in). Agents and everything an agent does
-// to a customer record — call logs, tickets, follow-ups, escalations — is
-// live Firestore data in the dedicated TCC project.
-const master = generateSeed();
+// Sample fallback only — used until an admin imports real customers (People/admin › Customers),
+// at which point customersMasterRef() is non-empty and wins. Agents and everything an agent does to
+// a customer record — call logs, tickets, follow-ups, escalations — is live Firestore data either way.
+const sampleSeed = generateSeed();
 
 export function FirestoreStoreProvider({ children }: { children: React.ReactNode }) {
   const [agents, setAgents] = useState<AgentAccount[] | null>(null);
+  const [masterCustomers, setMasterCustomers] = useState<CustomerUser[] | null>(null);
   const [overlayMap, setOverlayMap] = useState<Record<string, CustomerOverlay>>({});
   const [escalations, setEscalations] = useState<EscalationRecord[]>([]);
   const [clearedEscalations, setClearedEscalations] = useState<State['clearedEscalations']>([]);
   const [audit, setAudit] = useState<AuditEntry[]>([]);
-  const [currentAgentId, setCurrentAgentId] = useState<string | null>(() => localStorage.getItem(SESSION_KEY));
-  const [authReady, setAuthReady] = useState(false);
+  // undefined = still checking who is signed in; null = nobody.
+  const [authUser, setAuthUser] = useState<User | null | undefined>(undefined);
+  // The TCC person this login is linked to (authLinks/{uid}); undefined while it is being looked up.
+  const [currentAgentId, setCurrentAgentId] = useState<string | null | undefined>(undefined);
+  const [accessProblem, setAccessProblem] = useState<string | null>(null);
+  const signedInLogged = useRef(false);
+
+  // Numbers dialled directly are master docs too, but they must not switch the sample set off.
+  const importedCustomers = useMemo(() => (masterCustomers ?? []).filter((u) => !u.adHoc), [masterCustomers]);
+  const customerSource: 'sample' | 'imported' = importedCustomers.length > 0 ? 'imported' : 'sample';
+  const master = useMemo(
+    () => [...(customerSource === 'imported' ? importedCustomers : sampleSeed.users), ...(masterCustomers ?? []).filter((u) => u.adHoc)],
+    [customerSource, importedCustomers, masterCustomers],
+  );
 
   const users: CustomerUser[] = useMemo(
-    () => master.users.map((u) => (overlayMap[u.id] ? { ...u, ...overlayMap[u.id] } : u)),
-    [overlayMap],
+    () => master.map((u) => (overlayMap[u.id] ? { ...u, ...overlayMap[u.id] } : u)),
+    [master, overlayMap],
   );
 
   const usersRef = useRef(users);
@@ -54,36 +66,71 @@ export function FirestoreStoreProvider({ children }: { children: React.ReactNode
   const escalationsRefLive = useRef(escalations);
   escalationsRefLive.current = escalations;
 
-  // Auth: TCC accounts aren't Firebase Auth users (they're TCC's own username
-  // records below), so this just gets an authenticated request context so
-  // Firestore rules can require `request.auth != null` without per-agent
-  // Firebase credentials.
-  useEffect(() => {
-    ensureFirebaseAuth().finally(() => setAuthReady(true));
-  }, []);
+  useEffect(() => watchAuth(setAuthUser), []);
 
-  // Bootstrap: if the agents collection is empty (fresh project), seed it
-  // once with the sample roster so login works immediately. Safe to run more
-  // than once — it only writes when the collection is genuinely empty.
+  // A login only means something once it is linked to a TCC person (authLinks/{uid}, written by an admin).
   useEffect(() => {
-    if (!authReady || !db) return;
-    getDocs(agentsRef()).then((snap) => {
-      if (!snap.empty) return;
-      const batch = writeBatch(db!);
-      for (const a of AGENTS) {
-        const { id, ...rest } = a;
-        batch.set(agentDoc(id), stripUndefined(rest));
-      }
-      return batch.commit();
-    }).catch((err) => console.error('Agent bootstrap failed', err));
-  }, [authReady]);
+    if (authUser === undefined) return;
+    if (!authUser) {
+      setCurrentAgentId(null);
+      setAgents(null);
+      return;
+    }
+    let cancelled = false;
+    setCurrentAgentId(undefined);
+    getDoc(authLinkDoc(authUser.uid))
+      .then((snap) => {
+        if (cancelled) return;
+        const agentId = snap.exists() ? (snap.data().agentId as string | undefined) : undefined;
+        if (!agentId) {
+          setAccessProblem('This login is not linked to a Command Center account yet. Ask your admin.');
+          void signOutOfFirebase();
+          return;
+        }
+        setAccessProblem(null);
+        signedInLogged.current = false;
+        setCurrentAgentId(agentId);
+      })
+      .catch((err) => {
+        if (cancelled) return;
+        console.error('authLinks lookup failed', err);
+        setAccessProblem('Could not load your account. Check your connection and try again.');
+        void signOutOfFirebase();
+      });
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [authUser]);
 
+  const listening = !!db && !!authUser && !!currentAgentId;
   useEffect(() => {
-    if (!authReady || !db) return;
+    if (!listening) return;
     const unsubs = [
       onSnapshot(agentsRef(), (snap) => {
-        setAgents(snap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<AgentAccount, 'id'>) })));
-      }, (err) => console.error('agents snapshot error', err)),
+        const list = snap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<AgentAccount, 'id'>) }));
+        const me = list.find((a) => a.id === currentAgentId);
+        if (!me || me.status === 'suspended') {
+          setAccessProblem(me ? 'This account is suspended. Ask your admin to reactivate it.' : 'Your account was removed. Ask your admin.');
+          void signOutOfFirebase();
+          return;
+        }
+        setAgents(list);
+        if (!signedInLogged.current) {
+          signedInLogged.current = true;
+          agentsRefLive.current = list;
+          updateDoc(agentDoc(me.id), { lastActiveLabel: 'now' }).catch(() => {});
+          writeAudit(me.id, 'signed_in', undefined, 'Signed in');
+        }
+      }, (err) => {
+        // Rules turn a suspended or unlinked person into permission errors.
+        console.error('agents snapshot error', err);
+        setAccessProblem('Your access has been turned off. Ask your admin.');
+        void signOutOfFirebase();
+      }),
+      onSnapshot(customersMasterRef(), (snap) => {
+        setMasterCustomers(snap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<CustomerUser, 'id'>) })));
+      }, (err) => console.error('customersMaster snapshot error', err)),
       onSnapshot(overlayRef(), (snap) => {
         const map: Record<string, CustomerOverlay> = {};
         snap.forEach((d) => { map[d.id] = d.data() as CustomerOverlay; });
@@ -98,12 +145,23 @@ export function FirestoreStoreProvider({ children }: { children: React.ReactNode
           return { id: d.id, atLabel: data.atLabel, name: data.name, action: data.action, result: data.result, minutes: data.minutes };
         }));
       }, (err) => console.error('clearedEscalations snapshot error', err)),
-      onSnapshot(query(auditRef(), orderBy('ts', 'desc'), limit(500)), (snap) => {
-        setAudit(snap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<AuditEntry, 'id'>) })));
-      }, (err) => console.error('audit snapshot error', err)),
     ];
     return () => unsubs.forEach((u) => u());
-  }, [authReady]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [listening, currentAgentId]);
+
+  // The change log is for supervisors and admins (firestore.rules); agents never ask for it.
+  const myRole = (agents ?? []).find((a) => a.id === currentAgentId)?.role;
+  const readsAudit = myRole === 'admin' || myRole === 'supervisor';
+  useEffect(() => {
+    if (!listening || !readsAudit) {
+      setAudit([]);
+      return;
+    }
+    return onSnapshot(query(auditRef(), orderBy('ts', 'desc'), limit(500)), (snap) => {
+      setAudit(snap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<AuditEntry, 'id'>) })));
+    }, (err) => console.error('audit snapshot error', err));
+  }, [listening, readsAudit]);
 
   function writeOverlay(userId: string, patch: Partial<CustomerOverlay> & Record<string, unknown>) {
     setDoc(overlayDoc(userId), stripUndefined(patch), { merge: true }).catch((err) => console.error('overlay write failed', err));
@@ -117,17 +175,12 @@ export function FirestoreStoreProvider({ children }: { children: React.ReactNode
 
   async function dispatch(action: Action) {
     switch (action.type) {
-      case 'LOGIN': {
-        setCurrentAgentId(action.agentId);
-        localStorage.setItem(SESSION_KEY, action.agentId);
-        updateDoc(agentDoc(action.agentId), { lastActiveLabel: 'now' }).catch(() => {});
-        writeAudit(action.agentId, 'signed_in', undefined, 'Signed in');
+      case 'LOGIN':
+        // Signing in is signInWithPassword() on this backend; the demo "pick a person" login does not exist here.
         return;
-      }
       case 'LOGOUT': {
         if (currentAgentId) writeAudit(currentAgentId, 'signed_out', undefined, 'Signed out');
-        setCurrentAgentId(null);
-        localStorage.removeItem(SESSION_KEY);
+        await signOutOfFirebase();
         return;
       }
       case 'ATTACH_RECORDING': {
@@ -238,12 +291,6 @@ export function FirestoreStoreProvider({ children }: { children: React.ReactNode
         writeAudit(action.actorId, approved ? 'escalation_approved' : 'escalation_declined', esc.userName, action.resolutionNote || status);
         return;
       }
-      case 'CREATE_AGENT': {
-        const { id, ...rest } = action.agent;
-        await setDoc(agentDoc(id), stripUndefined(rest));
-        writeAudit(action.actorId, 'user_created', action.agent.name, `${action.agent.role} · ${action.agent.apps.join(', ') || 'no apps'}`);
-        return;
-      }
       case 'UPDATE_AGENT': {
         const target = agentsRefLive.current?.find((a) => a.id === action.agentId);
         await updateDoc(agentDoc(action.agentId), stripUndefined(action.patch as Record<string, unknown>));
@@ -268,6 +315,29 @@ export function FirestoreStoreProvider({ children }: { children: React.ReactNode
       case 'LOG_EXPORT':
         writeAudit(action.actorId, 'data_exported', undefined, action.detail);
         return;
+      case 'ADD_CUSTOMER': {
+        const { id, ...rest } = action.customer;
+        if (usersRef.current.some((u) => u.id === id)) return;
+        await setDoc(customerMasterDoc(id), stripUndefined(rest));
+        return;
+      }
+      case 'IMPORT_CUSTOMERS': {
+        if (!db) return;
+        let batch = writeBatch(db);
+        let count = 0;
+        for (const u of action.customers) {
+          const { id, ...rest } = u;
+          batch.set(customerMasterDoc(id), stripUndefined(rest));
+          count += 1;
+          if (count % 400 === 0) {
+            await batch.commit();
+            batch = writeBatch(db);
+          }
+        }
+        if (count % 400 !== 0) await batch.commit();
+        writeAudit(action.actorId, 'customers_imported', undefined, `Imported ${count} real customers (CSV)`);
+        return;
+      }
       case 'CLOSE_FOLLOWUP': {
         const user = usersRef.current.find((u) => u.id === action.userId);
         await setDoc(overlayDoc(action.userId), stripUndefined({
@@ -310,7 +380,52 @@ export function FirestoreStoreProvider({ children }: { children: React.ReactNode
     }
   }
 
+  async function signIn(email: string, password: string): Promise<AccountResult> {
+    setAccessProblem(null);
+    try {
+      await signInWithPassword(email, password);
+      return { ok: true };
+    } catch (e) {
+      return { ok: false, message: authMessage(e) };
+    }
+  }
+
+  async function sendPasswordReset(email: string): Promise<AccountResult> {
+    try {
+      await sendReset(email);
+      return { ok: true };
+    } catch (e) {
+      return { ok: false, message: authMessage(e) };
+    }
+  }
+
+  async function createAgent(agent: AgentAccount, actorId: string): Promise<AccountResult> {
+    if (!db) return { ok: false, message: 'Firestore is not configured.' };
+    const email = agent.email?.trim();
+    if (!email) return { ok: false, message: 'An email address is needed so they can sign in.' };
+    let uid: string;
+    try {
+      uid = await createLogin(email);
+    } catch (e) {
+      return { ok: false, message: authMessage(e) };
+    }
+    try {
+      const { id, ...rest } = agent;
+      const batch = writeBatch(db);
+      batch.set(agentDoc(id), stripUndefined({ ...rest, email }));
+      batch.set(authLinkDoc(uid), { agentId: id });
+      await batch.commit();
+    } catch (e) {
+      console.error('create agent failed', e);
+      return { ok: false, message: `The login for ${email} was created but could not be linked (${(e as Error).message}). Link it by hand in the Firebase console, then retry.` };
+    }
+    writeAudit(actorId, 'user_created', agent.name, `${agent.role} · ${agent.apps.join(', ') || 'no apps'}`);
+    return { ok: true };
+  }
+
   const currentAgent = useMemo(() => (agents ?? []).find((a) => a.id === currentAgentId) ?? null, [agents, currentAgentId]);
+  // Settled once we know whether anyone is signed in and, if so, who (or why they were turned away).
+  const ready = authUser === null || (authUser !== undefined && currentAgentId !== undefined && (currentAgentId === null || agents !== null));
 
   const state: State = {
     agents: agents ?? [],
@@ -318,15 +433,16 @@ export function FirestoreStoreProvider({ children }: { children: React.ReactNode
     escalations,
     clearedEscalations,
     audit,
-    apps: master.apps,
-    states: master.states,
-    currentAgentId,
+    apps: sampleSeed.apps,
+    states: sampleSeed.states,
+    currentAgentId: currentAgentId ?? null,
+    customerSource,
   };
 
   const value = useMemo(
-    () => ({ state, dispatch: dispatch as unknown as React.Dispatch<Action>, currentAgent, ready: agents !== null, backend: 'firestore' as const }),
+    () => ({ state, dispatch: dispatch as unknown as React.Dispatch<Action>, currentAgent, ready, backend: 'firestore' as const, signInWithPassword: signIn, sendPasswordReset, createAgent, accessProblem }),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [agents, users, escalations, clearedEscalations, audit, currentAgentId, currentAgent],
+    [agents, users, escalations, clearedEscalations, audit, currentAgentId, currentAgent, customerSource, ready, accessProblem],
   );
 
   return <StoreContext.Provider value={value}>{children}</StoreContext.Provider>;

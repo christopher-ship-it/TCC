@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useReducer } from 'react';
 import { generateSeed } from '../data/seed';
-import type { CustomerUser, EscalationRecord, QueueKey } from '../data/types';
-import { NEGATIVE_OUTCOMES } from '../data/types';
+import type { AgentAccount, CustomerUser, EscalationRecord, QueueKey } from '../data/types';
+import { NEGATIVE_OUTCOMES, overlayFromUser } from '../data/types';
 import { fmtDay, fmtDayTime } from '../lib/dates';
 import { isReachable } from '../lib/queue';
 import { attachRecording, cleanLegacyCallData, withAnalysis } from '../lib/attachRecording';
@@ -17,13 +17,13 @@ function loadInitial(): State {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (raw) {
       const parsed = JSON.parse(raw) as State;
-      if (parsed.users && parsed.agents) return { ...parsed, audit: parsed.audit ?? [], users: cleanLegacyCallData(parsed.users) };
+      if (parsed.users && parsed.agents) return { ...parsed, audit: parsed.audit ?? [], users: cleanLegacyCallData(parsed.users), customerSource: parsed.customerSource ?? 'sample' };
     }
   } catch {
     // fall through to fresh seed
   }
   const seed = generateSeed();
-  return { ...seed, currentAgentId: null };
+  return { ...seed, currentAgentId: null, customerSource: 'sample' };
 }
 
 const MAX_AUDIT = 2000;
@@ -216,6 +216,21 @@ function reducer(state: State, action: Action): State {
     }
     case 'LOG_EXPORT':
       return withAudit(state, auditEntry(state.agents, action.actorId, 'data_exported', undefined, action.detail));
+    case 'ADD_CUSTOMER':
+      return state.users.some((u) => u.id === action.customer.id) ? state : { ...state, users: [...state.users, action.customer] };
+    case 'IMPORT_CUSTOMERS': {
+      // Keep whatever an agent has already done (call history, tickets, follow-ups, ownership) for
+      // any customer id that reappears in the new file; everything else comes in fresh.
+      const existingById = new Map(state.users.map((u) => [u.id, u]));
+      const users = action.customers.map((u) => {
+        const prev = existingById.get(u.id);
+        return prev ? { ...u, ...overlayFromUser(prev) } : u;
+      });
+      return withAudit(
+        { ...state, users, customerSource: 'imported' },
+        auditEntry(state.agents, action.actorId, 'customers_imported', undefined, `Imported ${users.length} real customers (CSV)`),
+      );
+    }
     case 'CLOSE_FOLLOWUP':
       return {
         ...state,
@@ -241,7 +256,7 @@ function reducer(state: State, action: Action): State {
     case 'RESET': {
       localStorage.removeItem(STORAGE_KEY);
       const seed = generateSeed(Date.now());
-      return { ...seed, currentAgentId: null };
+      return { ...seed, currentAgentId: null, customerSource: 'sample' };
     }
     default:
       return state;
@@ -259,7 +274,14 @@ export function LocalStoreProvider({ children }: { children: React.ReactNode }) 
   }, [state]);
 
   const currentAgent = useMemo(() => state.agents.find((a) => a.id === state.currentAgentId) ?? null, [state.agents, state.currentAgentId]);
-  const value = useMemo(() => ({ state, dispatch, currentAgent, ready: true, backend: 'local' as const }), [state, currentAgent]);
+  const createAgent = useMemo(
+    () => async (agent: AgentAccount, actorId: string) => {
+      dispatch({ type: 'CREATE_AGENT', agent, actorId });
+      return { ok: true as const };
+    },
+    [],
+  );
+  const value = useMemo(() => ({ state, dispatch, currentAgent, ready: true, backend: 'local' as const, createAgent }), [state, currentAgent, createAgent]);
 
   return <StoreContext.Provider value={value}>{children}</StoreContext.Provider>;
 }

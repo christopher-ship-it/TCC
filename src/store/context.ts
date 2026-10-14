@@ -11,6 +11,8 @@ export interface State {
   apps: Seed['apps'];
   states: Seed['states'];
   currentAgentId: string | null;
+  /** 'imported' once an admin has loaded real customers (People/admin › Customers); 'sample' is the generated set. */
+  customerSource: 'sample' | 'imported';
 }
 
 export type Action =
@@ -32,7 +34,14 @@ export type Action =
   | { type: 'MARK_PAID'; userId: string; actorId: string }
   | { type: 'AUTO_DISTRIBUTE'; actorId: string }
   | { type: 'LOG_EXPORT'; actorId: string; detail: string }
+  /** Replaces the fabricated sample customers with a real CSV import, preserving call history etc. for any id already worked. */
+  /** A number dialled directly: adds one customer record without touching the rest. No-op if the id already exists. */
+  | { type: 'ADD_CUSTOMER'; customer: CustomerUser }
+  | { type: 'IMPORT_CUSTOMERS'; customers: CustomerUser[]; actorId: string }
   | { type: 'RESET' };
+
+/** Why an account action did not happen. */
+export type AccountResult = { ok: true } | { ok: false; message: string };
 
 export interface StoreValue {
   state: State;
@@ -40,6 +49,13 @@ export interface StoreValue {
   currentAgent: AgentAccount | null;
   ready: boolean;
   backend: 'local' | 'firestore';
+  /** Firestore backend only: real per-person sign-in. The local demo store has none. */
+  signInWithPassword?: (email: string, password: string) => Promise<AccountResult>;
+  sendPasswordReset?: (email: string) => Promise<AccountResult>;
+  /** Adds a person. On Firestore this also creates their login and emails them a link to choose a password. */
+  createAgent: (agent: AgentAccount, actorId: string) => Promise<AccountResult>;
+  /** Firestore backend: signed in, but this login is not linked to an active TCC person. */
+  accessProblem?: string | null;
 }
 
 export const StoreContext = createContext<StoreValue | null>(null);

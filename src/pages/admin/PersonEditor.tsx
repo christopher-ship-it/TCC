@@ -14,6 +14,7 @@ type Section = 'who' | 'access' | 'reach' | 'line' | 'activity';
 interface Draft {
   name: string;
   username: string;
+  email: string;
   phone: string;
   role: Role;
   trainee: boolean;
@@ -33,11 +34,11 @@ const queueLabel = (q: QueueKey) => QUEUES.find((x) => x.key === q)?.label ?? q;
 function toDraft(a?: AgentAccount): Draft {
   if (!a) {
     const t = ACCESS_TEMPLATES[0];
-    return { name: '', username: '', phone: '', role: t.role, trainee: !!t.trainee, apps: ['realbroks'], capabilities: { realbroks: t.caps }, queues: t.queues, languages: ['Tamil'], states: ['Tamil Nadu'], dailyTarget: t.dailyTarget, clickToDial: true, telecmiUserId: '' };
+    return { name: '', username: '', email: '', phone: '', role: t.role, trainee: !!t.trainee, apps: ['realbroks'], capabilities: { realbroks: t.caps }, queues: t.queues, languages: ['Tamil'], states: ['Tamil Nadu'], dailyTarget: t.dailyTarget, clickToDial: true, telecmiUserId: '' };
   }
   const caps: Partial<Record<AppId, Capability[]>> = {};
   for (const app of a.apps) caps[app] = capsFor(a, app);
-  return { name: a.name, username: a.username, phone: a.phone ?? '', role: a.role, trainee: !!a.trainee, apps: a.apps, capabilities: caps, queues: a.queues, languages: a.languages, states: a.states, dailyTarget: a.dailyTarget, clickToDial: a.clickToDial, telecmiUserId: a.telecmiUserId ?? '' };
+  return { name: a.name, username: a.username, email: a.email ?? '', phone: a.phone ?? '', role: a.role, trainee: !!a.trainee, apps: a.apps, capabilities: caps, queues: a.queues, languages: a.languages, states: a.states, dailyTarget: a.dailyTarget, clickToDial: a.clickToDial, telecmiUserId: a.telecmiUserId ?? '' };
 }
 
 const list = (xs: string[]) => (xs.length ? xs.join(', ') : 'none');
@@ -71,7 +72,9 @@ function diff(before: Draft, after: Draft): string[] {
 }
 
 export function PersonEditor({ person, onClose }: { person?: AgentAccount; onClose: () => void }) {
-  const { state, dispatch, currentAgent } = useStore();
+  const { state, dispatch, currentAgent, createAgent, backend } = useStore();
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
   const toast = useToast();
   const actor = currentAgent!;
   const creating = !person;
@@ -96,8 +99,9 @@ export function PersonEditor({ person, onClose }: { person?: AgentAccount; onClo
     name: !d.name.trim() ? 'Enter their name.' : null,
     username: !/^[a-z0-9._-]{3,}$/.test(d.username.trim()) ? 'Use 3+ lowercase letters, numbers, dots or dashes.' : usernameTaken ? 'Someone already has this username.' : null,
     apps: d.role !== 'admin' && d.apps.length === 0 ? 'Give them at least one app.' : null,
+    email: creating && backend === 'firestore' && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(d.email.trim()) ? 'Enter their work email — they sign in with it.' : null,
   };
-  const valid = !errors.name && !errors.username && !errors.apps;
+  const valid = !errors.name && !errors.username && !errors.apps && !errors.email;
   const activity = useMemo(() => (person ? state.audit.filter((e) => e.target === person.name || e.actorId === person.id).slice(0, 40) : []), [state.audit, person]);
 
   function applyTemplate(id: string) {
@@ -134,12 +138,13 @@ export function PersonEditor({ person, onClose }: { person?: AgentAccount; onClo
   function save() {
     setTried(true);
     if (!valid) {
-      setSection(errors.name || errors.username ? 'who' : 'access');
+      setSection(errors.name || errors.username || errors.email ? 'who' : 'access');
       return;
     }
     const patch: Partial<AgentAccount> = {
       name: d.name.trim(),
       username: d.username.trim().toLowerCase(),
+      ...(creating && d.email.trim() ? { email: d.email.trim().toLowerCase() } : {}),
       phone: d.phone.trim() || undefined,
       role: d.role,
       trainee: d.trainee || undefined,
@@ -154,10 +159,10 @@ export function PersonEditor({ person, onClose }: { person?: AgentAccount; onClo
     };
     if (creating) {
       const id = `${patch.username!.replace(/[^a-z0-9]+/g, '-')}-${Date.now().toString(36).slice(-4)}`;
-      dispatch({
-        type: 'CREATE_AGENT',
-        actorId: actor.id,
-        agent: {
+      setSaving(true);
+      setSaveError(null);
+      createAgent(
+        {
           id,
           ...(patch as Omit<AgentAccount, 'id'>),
           status: 'active',
@@ -171,8 +176,18 @@ export function PersonEditor({ person, onClose }: { person?: AgentAccount; onClo
           avgHandleLabel: '—',
           workingQueueLabel: '—',
         },
+        actor.id,
+      ).then((r) => {
+        setSaving(false);
+        if (!r.ok) {
+          setSaveError(r.message);
+          setSection('who');
+          return;
+        }
+        toast(backend === 'firestore' ? `${patch.name} was emailed a link to choose a password` : `${patch.name} can now sign in as ${patch.username}`);
+        onClose();
       });
-      toast(`${patch.name} can now sign in as ${patch.username}`);
+      return;
     } else {
       if (!changes.length) return onClose();
       dispatch({ type: 'UPDATE_AGENT', agentId: person!.id, patch, actorId: actor.id, detail: changes.join(' · ') });
@@ -202,7 +217,7 @@ export function PersonEditor({ person, onClose }: { person?: AgentAccount; onClo
     <Sheet
       wide
       title={creating ? 'Add a person' : person!.name}
-      desc={creating ? 'They sign in with the username you set here.' : `${person!.username} · ${ROLE_INFO[person!.role].label}${person!.createdTs ? ` · added ${fmtDayTime(person!.createdTs).split(' · ')[0]}` : ''}`}
+      desc={creating ? (backend === 'firestore' ? 'They sign in with their work email and choose their own password.' : 'They sign in with the username you set here.') : `${person!.username} · ${ROLE_INFO[person!.role].label}${person!.createdTs ? ` · added ${fmtDayTime(person!.createdTs).split(' · ')[0]}` : ''}`}
       leading={!creating ? <Avatar name={person!.name} size="lg" /> : undefined}
       onClose={onClose}
       footer={
@@ -213,7 +228,7 @@ export function PersonEditor({ person, onClose }: { person?: AgentAccount; onClo
           {creating && stepIndex < order.length - 1 ? (
             <Button variant="primary" onClick={() => setSection(order[stepIndex + 1])}>Continue</Button>
           ) : (
-            editable && section !== 'activity' && <Button variant="primary" icon={<Check size={15} />} onClick={save} disabled={!creating && !changes.length}>{creating ? 'Add person' : 'Save access'}</Button>
+            editable && section !== 'activity' && <Button variant="primary" icon={<Check size={15} />} onClick={save} disabled={saving || (!creating && !changes.length)}>{saving ? 'Adding…' : creating ? 'Add person' : 'Save access'}</Button>
           )}
         </>
       }
@@ -240,6 +255,12 @@ export function PersonEditor({ person, onClose }: { person?: AgentAccount; onClo
                 <Field label="Username" htmlFor="pe-user" error={tried && errors.username} hint="What they type to sign in.">
                   <Input id="pe-user" value={d.username} invalid={tried && !!errors.username} onChange={(e) => { setUserTouched(true); set('username', e.target.value.toLowerCase()); }} placeholder="kavya.r" />
                 </Field>
+                {saveError && <Callout tone="danger">{saveError}</Callout>}
+                {(creating ? backend === 'firestore' : !!person?.email) && (
+                  <Field label="Work email" htmlFor="pe-email" error={tried && errors.email} hint={creating ? 'Their login. They get an email to choose a password.' : undefined}>
+                    <Input id="pe-email" type="email" value={d.email} readOnly={!creating} invalid={tried && !!errors.email} onChange={(e) => set('email', e.target.value)} placeholder="kavya@tecstellar.com" />
+                  </Field>
+                )}
                 <Field label="Mobile (optional)" htmlFor="pe-phone">
                   <Input id="pe-phone" value={d.phone} onChange={(e) => set('phone', e.target.value)} inputMode="tel" placeholder="+91 98450 12345" />
                 </Field>

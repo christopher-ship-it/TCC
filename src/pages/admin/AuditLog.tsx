@@ -19,13 +19,14 @@ const ACTIONS: Record<AuditAction, { label: string; tone: Tone }> = {
   queues_distributed: { label: 'Queues distributed', tone: 'neutral' },
   payment_marked_paid: { label: 'Marked paid', tone: 'ok' },
   data_exported: { label: 'Data exported', tone: 'warn' },
+  customers_imported: { label: 'Customers imported', tone: 'accent' },
 };
 
 type Kind = 'all' | 'access' | 'sign-in' | 'customers' | 'exports';
 const KIND: Record<Exclude<Kind, 'all'>, AuditAction[]> = {
   access: ['user_created', 'access_changed', 'user_suspended', 'user_reactivated'],
   'sign-in': ['signed_in', 'signed_out'],
-  customers: ['escalation_approved', 'escalation_declined', 'owner_reassigned', 'queues_distributed', 'payment_marked_paid'],
+  customers: ['escalation_approved', 'escalation_declined', 'owner_reassigned', 'queues_distributed', 'payment_marked_paid', 'customers_imported'],
   exports: ['data_exported'],
 };
 
