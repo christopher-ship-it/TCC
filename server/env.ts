@@ -10,6 +10,8 @@ export interface ServerEnv {
   telecmiDashboardHost: string;
   geminiKey?: string;
   geminiModel: string;
+  /** Neon / Postgres connection string. Server only — never a VITE_ variable. Unset = no database. */
+  databaseUrl?: string;
   /** Where downloaded recordings and analyses are cached. */
   dataDir: string;
 }
@@ -21,6 +23,7 @@ export function readServerEnv(vars: Record<string, string | undefined>, root: st
     telecmiAppId: pick(vars.TELECMI_APP_ID) ?? pick(vars.VITE_TELECMI_APP_ID),
     telecmiSecret: pick(vars.TELECMI_APP_SECRET),
     telecmiDashboardHost: pick(vars.TELECMI_DASHBOARD_HOST) ?? pick(vars.VITE_TELECMI_DASHBOARD_HOST) ?? 'connle.telecmi.com',
+    databaseUrl: pick(vars.DATABASE_URL),
     geminiKey: pick(vars.GEMINI_API_KEY),
     geminiModel: pick(vars.GEMINI_MODEL) ?? 'gemini-2.5-flash',
     dataDir: path.join(root, '.data'),

@@ -2,12 +2,14 @@
 // the same functions can move into a hosted function when TCC gets a backend.
 //
 //   GET  /api/health              → which server features are configured
+//   GET  /api/db/health           → Neon connectivity, schema version and row counts (never the connection string)
 //   GET  /api/recordings/:file    → the call recording (Range requests supported, so the player can seek)
 //   POST /api/analyze             → { file, customer?, business?, app?, levels? } → CallAnalysis
 
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { analyzeRecording, NotConfigured, type AnalyzeRequest } from './analyze.ts';
 import type { ServerEnv } from './env.ts';
+import { createDb } from './db.ts';
 import { fetchRecording, RECORDING_FILE_RE } from './recordings.ts';
 
 type Next = (err?: unknown) => void;
@@ -64,6 +66,7 @@ function isLevels(v: unknown): v is [number, number, number][] {
 const text = (v: unknown, max = 200) => (typeof v === 'string' ? v.slice(0, max) : undefined);
 
 export function createApi(env: ServerEnv) {
+  const db = createDb(env.databaseUrl);
   return async function api(req: IncomingMessage, res: ServerResponse, next: Next) {
     const url = new URL(req.url ?? '/', 'http://local');
     if (!url.pathname.startsWith('/api/')) return next();
@@ -76,7 +79,13 @@ export function createApi(env: ServerEnv) {
           analysis: Boolean(env.geminiKey),
           recordings: Boolean(env.telecmiAppId && env.telecmiSecret),
           telecmiAppId: Boolean(env.telecmiAppId),
+          database: db.configured,
         });
+      }
+
+      if (req.method === 'GET' && url.pathname === '/api/db/health') {
+        const h = await db.health();
+        return send(res, h.ok ? 200 : 503, h);
       }
 
       const rec = url.pathname.match(/^\/api\/recordings\/([^/]+)$/);
