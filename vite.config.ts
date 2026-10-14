@@ -25,4 +25,6 @@ function tccApi(): Plugin {
 // https://vite.dev/config/
 export default defineConfig({
   plugins: [react(), tccApi()],
+  // Hosted (Railway) serves the built app with `vite preview`; its public hostname must be accepted.
+  preview: { host: true, allowedHosts: true },
 })

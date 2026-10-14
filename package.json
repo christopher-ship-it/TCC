@@ -8,6 +8,7 @@
     "build": "tsc -b && vite build",
     "lint": "oxlint",
     "preview": "vite preview",
+    "start": "vite preview --host 0.0.0.0 --port ${PORT:-4173} --strictPort",
     "test": "node --test src/telephony/tests/ src/lib/tests/ server/tests/",
     "transcribe": "python3 tools/transcribe/server.py"
   },
