@@ -1,6 +1,7 @@
 import type { MediaStats } from '../telephony';
 import type { CallAnalysis } from '../lib/analysis/model';
 import type { LevelSample } from '../lib/analysis/speakers';
+import { BRAND } from '../brand';
 
 export type { CallAnalysis, LevelSample };
 
@@ -30,16 +31,17 @@ export interface QueueDef {
   short: string;
 }
 
-export const QUEUES: QueueDef[] = [
+export const QUEUES: QueueDef[] = ([
   { key: 'new', order: 1, label: 'New registrations', short: 'New' },
   { key: 'tickets', order: 2, label: 'Tickets & flags', short: 'Tickets' },
   { key: 'payments', order: 3, label: 'Payments & dues', short: 'Payments' },
   { key: 'followup', order: 4, label: 'Positive follow-up', short: 'Follow-up' },
   { key: 'errors', order: 5, label: 'Errors & drop-offs', short: 'Errors' },
   { key: 'inactive', order: 6, label: 'Inactive 30+ days', short: 'Inactive' },
-];
+] as QueueDef[]).map((q) => ({ ...q, ...BRAND.queueLabels[q.key] }));
 
-export type AppId = 'realbroks' | 'irondrobe' | 'influnet' | 'vehigo';
+/** Tecstellar's apps, plus each white-label client's own line of business (src/brand). */
+export type AppId = 'realbroks' | 'irondrobe' | 'influnet' | 'vehigo' | 'vanmoh';
 
 export interface AppDef {
   id: AppId;

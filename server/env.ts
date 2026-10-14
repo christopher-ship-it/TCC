@@ -2,6 +2,7 @@
 // passes them in through loadEnv). Secrets here never reach the browser bundle: only VITE_* variables do.
 
 import path from 'node:path';
+import { brandKey, type BrandKey } from '../src/brand/profiles.ts';
 
 export interface ServerEnv {
   telecmiAppId?: string;
@@ -14,6 +15,8 @@ export interface ServerEnv {
   databaseUrl?: string;
   /** Where downloaded recordings and analyses are cached. */
   dataDir: string;
+  /** The white label this deployment runs as (VITE_BRAND; unset = Tecstellar). Shapes the call-analysis prompt. */
+  brand: BrandKey;
 }
 
 const pick = (v: string | undefined) => (v && v.trim() ? v.trim() : undefined);
@@ -27,5 +30,6 @@ export function readServerEnv(vars: Record<string, string | undefined>, root: st
     geminiKey: pick(vars.GEMINI_API_KEY),
     geminiModel: pick(vars.GEMINI_MODEL) ?? 'gemini-2.5-flash',
     dataDir: path.join(root, '.data'),
+    brand: brandKey(vars.VITE_BRAND),
   };
 }

@@ -2,6 +2,7 @@
 // Pure — imported by the browser and by the server (server/analyze.ts).
 
 import type { TimedLine } from './speakers.ts';
+import { BRANDS, type BrandKey } from '../../brand/profiles.ts';
 
 export type AnalysisSource = 'gemini' | 'whisper' | 'sample';
 
@@ -45,18 +46,20 @@ export interface AnalysisContext {
   speaking?: string;
 }
 
-export function analysisPrompt(ctx: AnalysisContext): string {
-  return `You are the call-quality analyst for Tecstellar Command Center, the team that calls customers of Tecstellar's apps
-(RealBroks — a broker assistant for real-estate agents; IronDrobe — a CRM for laundry and ironing shops; Influnet; Vehigo).
+/** `brand` is the deployment's white label (src/brand); the business context changes, the JSON contract does not. */
+export function analysisPrompt(ctx: AnalysisContext, brand: BrandKey = 'tecstellar'): string {
+  const b = BRANDS[brand].analysis;
+  return `You are the call-quality analyst for ${b.team}
+(${b.products}).
 Listen to the attached recording of an outbound call and return a faithful analysis.
 
 Rules:
-- Transcribe what is ACTUALLY said. Callers speak Tamil, Telugu, Kannada, Malayalam, Hindi, English or a mix. Keep the words
+- Transcribe what is ACTUALLY said. Callers speak ${b.languages}. Keep the words
   as spoken (romanised is fine) and add a short English gloss in brackets only where the meaning would be lost.
-- Label each line "Agent" (the Tecstellar caller) or "Customer". When a measured speaking timeline is given, follow it —
+- Label each line "Agent" (${b.caller}) or "Customer". When a measured speaking timeline is given, follow it —
   never assume a lone voice is the Agent. If it is a voicemail, ringing or silence, say so; never invent a conversation.
 - Each transcript line carries its start time "mm:ss" in the audio.
-- outcome must be exactly one of: ${ANALYSIS_OUTCOMES.join(' | ')}.
+- outcome must be exactly one of: ${ANALYSIS_OUTCOMES.join(' | ')}.${b.outcomeNotes ? `\n${b.outcomeNotes}` : ''}
 - sentiment is an integer 0-100 for how receptive the customer was (50 = neutral).
 - Keep summary to 2-3 plain sentences a supervisor can read in ten seconds.
 

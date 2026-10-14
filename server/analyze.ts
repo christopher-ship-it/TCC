@@ -25,7 +25,7 @@ function cachePath(env: ServerEnv, file: string) {
 
 async function callGemini(env: ServerEnv, audio: Uint8Array, mimeType: string, ctx: AnalysisContext, fetchImpl: typeof fetch): Promise<{ text: string; model: string }> {
   const body = JSON.stringify({
-    contents: [{ role: 'user', parts: [{ text: analysisPrompt(ctx) }, { inline_data: { mime_type: mimeType, data: Buffer.from(audio).toString('base64') } }] }],
+    contents: [{ role: 'user', parts: [{ text: analysisPrompt(ctx, env.brand) }, { inline_data: { mime_type: mimeType, data: Buffer.from(audio).toString('base64') } }] }],
     generationConfig: { responseMimeType: 'application/json', temperature: 0.1 },
   });
   const run = async (model: string) => {

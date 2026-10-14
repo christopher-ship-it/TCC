@@ -8,7 +8,7 @@ export const CUSTOMER_CSV_COLUMNS = [
   'app', 'name', 'phone', 'business', 'city', 'state', 'plan', 'listings', 'buyers', 'registered_at', 'language', 'owner_agent_id',
 ] as const;
 
-const APP_IDS: AppId[] = ['realbroks', 'irondrobe', 'influnet', 'vehigo'];
+const APP_IDS: AppId[] = ['realbroks', 'irondrobe', 'influnet', 'vehigo', 'vanmoh'];
 
 /** Just enough of src/data/seed.ts's StateDef to validate and default from — callers pass the real STATE_DEFS. */
 export interface StateCatalogEntry {
@@ -17,8 +17,8 @@ export interface StateCatalogEntry {
   cities: string[];
 }
 
-export function customerCsvTemplate(): string {
-  const example = 'realbroks,Suresh Kumar,9876543210,Suresh Properties,Chennai,Tamil Nadu,Free,0,0,2026-01-15,Tamil,';
+/** `example` is one sample row; a white-label build passes its own (src/brand). */
+export function customerCsvTemplate(example = 'realbroks,Suresh Kumar,9876543210,Suresh Properties,Chennai,Tamil Nadu,Free,0,0,2026-01-15,Tamil,'): string {
   return `${CUSTOMER_CSV_COLUMNS.join(',')}\n${example}\n`;
 }
 

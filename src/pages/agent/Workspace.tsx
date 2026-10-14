@@ -3,6 +3,9 @@ import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { ArrowRight, Check, CircleDollarSign, Flag, Inbox, Phone as PhoneIcon, Ticket } from 'lucide-react';
 import { useStore } from '../../store/StoreContext';
 import { APPS } from '../../data/seed';
+import { BRAND, outcomeLabel } from '../../brand';
+
+const F = BRAND.fields;
 import { CALL_STATUS_LIST, NEGATIVE_OUTCOMES, OUTCOME_LIST, POSITIVE_OUTCOMES, QUEUES, type AppId, type CallStatus, type Outcome, type QueueKey } from '../../data/types';
 import { queueCounts, tasksForQueue } from '../../lib/queue';
 import { queueNote } from '../../lib/queueNotes';
@@ -295,7 +298,7 @@ export default function Workspace() {
                 <div style={{ color: 'var(--ink-2)', lineHeight: 1.45 }}>{user.business}<br />{user.city}, {user.effectiveState}{user.state ? '' : ' (state not on file)'}</div>
                 <div className="row" style={{ gap: 6 }}>
                   <Badge tone="accent"><span className="chip__script">{LANGUAGE_SCRIPT[user.language]}</span>{user.language !== 'English' ? ` · ${user.language}` : ''}</Badge>
-                  <Badge tone={user.plan === 'Paid' ? 'ok' : 'neutral'}>{user.plan} plan</Badge>
+                  <Badge tone={user.plan === 'Paid' ? 'ok' : 'neutral'}>{F ? (user.plan === 'Paid' ? F.paid : F.free) : `${user.plan} plan`}</Badge>
                   <Badge>{user.stageTag}</Badge>
                   {user.hasActiveEscalation && <Badge tone="warn">Escalation pending</Badge>}
                 </div>
@@ -303,9 +306,19 @@ export default function Workspace() {
             </Card>
             {whyInQueue(user) && <Callout tone="warn">{whyInQueue(user)}</Callout>}
             <div className="ws-facts">
-              <div className="ws-fact"><span>{user.app === 'realbroks' ? 'Listings' : 'Orders'}</span><b className="mono">{user.listings}</b></div>
-              <div className="ws-fact"><span>{user.app === 'realbroks' ? 'Buyers added' : 'Plan'}</span><b className="mono">{user.app === 'realbroks' ? user.buyers : user.planNote ?? user.plan}</b></div>
-              <div className="ws-fact"><span>Last opened app</span><b>{user.lastOpenLabel}</b></div>
+              {F ? (
+                <>
+                  <div className="ws-fact"><span>{F.listings}</span><b className="mono">{user.listings} / {user.buyers}</b></div>
+                  <div className="ws-fact"><span>{F.appVersion}</span><b>{user.appVersion}</b></div>
+                  <div className="ws-fact"><span>{F.lastOpen}</span><b>{user.lastOpenLabel}</b></div>
+                </>
+              ) : (
+                <>
+                  <div className="ws-fact"><span>{user.app === 'realbroks' ? 'Listings' : 'Orders'}</span><b className="mono">{user.listings}</b></div>
+                  <div className="ws-fact"><span>{user.app === 'realbroks' ? 'Buyers added' : 'Plan'}</span><b className="mono">{user.app === 'realbroks' ? user.buyers : user.planNote ?? user.plan}</b></div>
+                  <div className="ws-fact"><span>Last opened app</span><b>{user.lastOpenLabel}</b></div>
+                </>
+              )}
               <div className="ws-fact"><span>Conversion score</span><b className="mono" style={{ color: user.conversionScore >= 60 ? 'var(--ok)' : user.conversionScore < 35 ? 'var(--warn)' : undefined }}>{user.conversionScore}<span className="muted" style={{ fontSize: 12 }}> / 100</span></b></div>
             </div>
             {user.paymentDue && can(agent, user.app, 'payments') && (
@@ -350,7 +363,7 @@ export default function Workspace() {
                         onClick={() => setOutcome(o.outcome)}
                       >
                         <Kbd>{o.key.toUpperCase()}</Kbd>
-                        {o.outcome}
+                        {outcomeLabel(o.outcome)}
                       </button>
                     ))}
                   </div>

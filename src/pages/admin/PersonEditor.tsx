@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react';
 import { Check, ShieldCheck, UserX, UserCheck, X } from 'lucide-react';
 import { useStore } from '../../store/StoreContext';
 import { APPS, STATE_DEFS } from '../../data/seed';
+import { BRAND, WHITE_LABEL } from '../../brand';
 import { QUEUES, type AgentAccount, type AppId, type Capability, type Language, type QueueKey, type Role } from '../../data/types';
 import { ACCESS_TEMPLATES, ALL_LANGUAGES, CAPABILITIES, LANGUAGE_SCRIPT, ROLE_INFO, canManage, capsFor, describeScope, isActive } from '../../lib/access';
 import { reachableCount } from '../../lib/queue';
@@ -34,7 +35,7 @@ const queueLabel = (q: QueueKey) => QUEUES.find((x) => x.key === q)?.label ?? q;
 function toDraft(a?: AgentAccount): Draft {
   if (!a) {
     const t = ACCESS_TEMPLATES[0];
-    return { name: '', username: '', email: '', phone: '', role: t.role, trainee: !!t.trainee, apps: ['realbroks'], capabilities: { realbroks: t.caps }, queues: t.queues, languages: ['Tamil'], states: ['Tamil Nadu'], dailyTarget: t.dailyTarget, clickToDial: true, telecmiUserId: '' };
+    return { name: '', username: '', email: '', phone: '', role: t.role, trainee: !!t.trainee, apps: [APPS[0].id], capabilities: { [APPS[0].id]: t.caps }, queues: t.queues, languages: ['Tamil'], states: ['Tamil Nadu'], dailyTarget: t.dailyTarget, clickToDial: true, telecmiUserId: '' };
   }
   const caps: Partial<Record<AppId, Capability[]>> = {};
   for (const app of a.apps) caps[app] = capsFor(a, app);
@@ -108,7 +109,7 @@ export function PersonEditor({ person, onClose }: { person?: AgentAccount; onClo
     const t = ACCESS_TEMPLATES.find((x) => x.id === id)!;
     setTemplate(id);
     setD((x) => {
-      const apps = t.role === 'admin' ? APPS.map((a) => a.id) : x.apps.length ? x.apps : ['realbroks' as AppId];
+      const apps = t.role === 'admin' ? APPS.map((a) => a.id) : x.apps.length ? x.apps : [APPS[0].id as AppId];
       const caps: Partial<Record<AppId, Capability[]>> = {};
       for (const app of apps) caps[app] = t.caps;
       return { ...x, role: t.role, trainee: !!t.trainee, queues: t.queues, capabilities: caps, apps, dailyTarget: t.dailyTarget };
@@ -258,7 +259,7 @@ export function PersonEditor({ person, onClose }: { person?: AgentAccount; onClo
                 {saveError && <Callout tone="danger">{saveError}</Callout>}
                 {(creating ? backend === 'firestore' : !!person?.email) && (
                   <Field label="Work email" htmlFor="pe-email" error={tried && errors.email} hint={creating ? 'Their login. They get an email to choose a password.' : undefined}>
-                    <Input id="pe-email" type="email" value={d.email} readOnly={!creating} invalid={tried && !!errors.email} onChange={(e) => set('email', e.target.value)} placeholder="kavya@tecstellar.com" />
+                    <Input id="pe-email" type="email" value={d.email} readOnly={!creating} invalid={tried && !!errors.email} onChange={(e) => set('email', e.target.value)} placeholder={BRAND.emailPlaceholder} />
                   </Field>
                 )}
                 <Field label="Mobile (optional)" htmlFor="pe-phone">
@@ -327,7 +328,7 @@ export function PersonEditor({ person, onClose }: { person?: AgentAccount; onClo
                       </tbody>
                     </table>
                   </div>
-                  <span className="muted" style={{ fontSize: 13 }}>Influnet and Vehigo appear here when they go live.</span>
+                  {!WHITE_LABEL && <span className="muted" style={{ fontSize: 13 }}>Influnet and Vehigo appear here when they go live.</span>}
                 </div>
                 <div className="stack" style={{ gap: 8 }}>
                   <span className="section-label">Queues they work</span>

@@ -5,6 +5,9 @@ import { useStore } from '../store/StoreContext';
 import { APPS } from '../data/seed';
 import { QUEUES } from '../data/types';
 import { APP_LOGOS } from '../assets';
+import { BRAND, outcomeLabel } from '../brand';
+
+const F = BRAND.fields;
 import { can, LANGUAGE_SCRIPT } from '../lib/access';
 import { customerJourney, durationLabel, isConnected, journeyVerdict } from '../lib/metrics';
 import { talkShare } from '../lib/analysis/speakers';
@@ -74,7 +77,7 @@ export default function CustomerPage() {
       <div className="row" style={{ gap: 8 }}>
         <img src={APP_LOGOS[app.id]} alt={app.name} style={{ height: 18, width: 96, objectFit: 'contain', objectPosition: 'left center' }} />
         <Badge tone="accent"><span className="chip__script">{LANGUAGE_SCRIPT[user.language]}</span>{user.language !== 'English' ? ` · ${user.language}` : ''}</Badge>
-        <Badge tone={user.plan === 'Paid' ? 'ok' : 'neutral'}>{user.plan} plan</Badge>
+        <Badge tone={user.plan === 'Paid' ? 'ok' : 'neutral'}>{F ? (user.plan === 'Paid' ? F.paid : F.free) : `${user.plan} plan`}</Badge>
         {user.queue && <Badge>In {QUEUES.find((q) => q.key === user.queue)?.label}</Badge>}
         <span className="mono muted" style={{ fontSize: 12.5 }}>{user.shopCode}</span>
       </div>
@@ -102,7 +105,7 @@ export default function CustomerPage() {
                 tip: (
                   <>
                     <div style={{ fontWeight: 600 }}>{p.call.atLabel} · {p.sentiment}</div>
-                    <div>{p.call.outcome ?? p.call.status} · {p.call.agentName}</div>
+                    <div>{p.call.outcome ? outcomeLabel(p.call.outcome) : p.call.status} · {p.call.agentName}</div>
                   </>
                 ),
               }))}
@@ -184,14 +187,28 @@ export default function CustomerPage() {
 
         <div className="stack" style={{ gap: 16 }}>
           <Card title="Profile">
-            <div className="kv"><span>App</span><span>{app.name}</span></div>
-            <div className="kv"><span>Registered</span><span>{user.registeredAtLabel} · {user.registeredDaysAgo}d ago</span></div>
-            <div className="kv"><span>Plan</span><span>{user.plan}{user.planNote ? ` · ${user.planNote}` : ''}</span></div>
-            <div className="kv"><span>{user.app === 'realbroks' ? 'Listings' : 'Orders'}</span><span className="mono">{user.listings}</span></div>
-            {user.app === 'realbroks' && <div className="kv"><span>Buyers added</span><span className="mono">{user.buyers}</span></div>}
-            <div className="kv"><span>Last opened app</span><span>{user.lastOpenLabel}</span></div>
-            <div className="kv"><span>App version</span><span>{user.appVersion}</span></div>
-            {user.mrr ? <div className="kv"><span>Pays</span><span className="mono">₹{user.mrr.toLocaleString('en-IN')} / mo</span></div> : null}
+            {F ? (
+              <>
+                <div className="kv"><span>{F.app}</span><span>{app.name}</span></div>
+                <div className="kv"><span>{F.registered}</span><span>{user.registeredAtLabel} · {user.registeredDaysAgo}d ago</span></div>
+                <div className="kv"><span>{F.plan}</span><span>{user.business}{user.planNote ? ` · ${user.planNote}` : ''}</span></div>
+                <div className="kv"><span>{F.listings}</span><span className="mono">{user.listings} of {user.buyers}</span></div>
+                <div className="kv"><span>{F.lastOpen}</span><span>{user.lastOpenLabel}</span></div>
+                <div className="kv"><span>{F.appVersion}</span><span>{user.appVersion}</span></div>
+                {user.mrr ? <div className="kv"><span>{F.mrr}</span><span className="mono">₹{user.mrr.toLocaleString('en-IN')} / mo</span></div> : null}
+              </>
+            ) : (
+              <>
+                <div className="kv"><span>App</span><span>{app.name}</span></div>
+                <div className="kv"><span>Registered</span><span>{user.registeredAtLabel} · {user.registeredDaysAgo}d ago</span></div>
+                <div className="kv"><span>Plan</span><span>{user.plan}{user.planNote ? ` · ${user.planNote}` : ''}</span></div>
+                <div className="kv"><span>{user.app === 'realbroks' ? 'Listings' : 'Orders'}</span><span className="mono">{user.listings}</span></div>
+                {user.app === 'realbroks' && <div className="kv"><span>Buyers added</span><span className="mono">{user.buyers}</span></div>}
+                <div className="kv"><span>Last opened app</span><span>{user.lastOpenLabel}</span></div>
+                <div className="kv"><span>App version</span><span>{user.appVersion}</span></div>
+                {user.mrr ? <div className="kv"><span>Pays</span><span className="mono">₹{user.mrr.toLocaleString('en-IN')} / mo</span></div> : null}
+              </>
+            )}
           </Card>
           <Card title="Owner">
             <div className="stack" style={{ gap: 10 }}>

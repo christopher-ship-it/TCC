@@ -2,6 +2,7 @@ import { defineConfig, loadEnv, type Plugin } from 'vite'
 import react from '@vitejs/plugin-react'
 import { createApi } from './server/api.ts'
 import { readServerEnv } from './server/env.ts'
+import { BRANDS, brandKey } from './src/brand/profiles.ts'
 
 // Serves /api (recordings, call analysis — see server/api.ts) from the dev and preview servers, so the
 // TeleCMI App Secret and the Gemini key stay on this machine instead of in the browser bundle.
@@ -22,9 +23,28 @@ function tccApi(): Plugin {
   }
 }
 
+// White label (VITE_BRAND, src/brand): the page title, favicon and the data-brand attribute the brand's colours hang
+// off. Tecstellar's build (no VITE_BRAND) leaves index.html exactly as written.
+function brandHtml(): Plugin {
+  let key: ReturnType<typeof brandKey> = 'tecstellar'
+  return {
+    name: 'tcc-brand',
+    configResolved(config) {
+      key = brandKey({ ...loadEnv(config.mode, config.root, ''), ...process.env }.VITE_BRAND)
+    },
+    transformIndexHtml(html) {
+      if (key === 'tecstellar') return html
+      return html
+        .replace('<html lang="en">', `<html lang="en" data-brand="${key}">`)
+        .replace(/<title>.*<\/title>/, `<title>${BRANDS[key].title}</title>`)
+        .replace('<link rel="icon" type="image/svg+xml" href="/favicon.svg" />', `<link rel="icon" type="image/png" href="/brand/${key}-favicon.png" />`)
+    },
+  }
+}
+
 // https://vite.dev/config/
 export default defineConfig({
-  plugins: [react(), tccApi()],
+  plugins: [react(), tccApi(), brandHtml()],
   // Hosted (Railway) serves the built app with `vite preview`; its public hostname must be accepted.
   preview: { host: true, allowedHosts: true },
 })

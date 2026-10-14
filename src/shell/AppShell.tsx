@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { BarChart3, ChevronDown, ClipboardList, Database, Flag, Headset, History, Home, LogOut, Map, Phone, RotateCcw, Search, Shuffle, Users, UsersRound } from 'lucide-react';
-import { TECSTELLAR_MARK } from '../assets';
+import { BRAND_MARK } from '../assets';
 import { APPS } from '../data/seed';
 import type { AppId, Role } from '../data/types';
 import { useStore } from '../store/StoreContext';
@@ -190,7 +190,7 @@ export default function AppShell() {
         <header className="shell-header">
           <div className="shell-header__row">
             <button type="button" className="shell-brand" onClick={() => navigate('/')} aria-label="Command Center home">
-              <img src={TECSTELLAR_MARK} alt="" />
+              <img src={BRAND_MARK} alt="" />
               <span>Command Center</span>
             </button>
             {showScope && (

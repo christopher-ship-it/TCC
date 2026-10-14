@@ -2,7 +2,8 @@ import { useState } from 'react';
 import { Navigate, useNavigate } from 'react-router-dom';
 import { ArrowRight, ShieldAlert } from 'lucide-react';
 import { useStore } from '../store/StoreContext';
-import { TECSTELLAR_MARK } from '../assets';
+import { BRAND_MARK } from '../assets';
+import { BRAND } from '../brand';
 import type { Role } from '../data/types';
 import { ROLE_INFO, isActive } from '../lib/access';
 import { homeFor } from '../lib/routes';
@@ -56,12 +57,12 @@ export default function LoginPage() {
     <div className="login">
       <aside className="login__brand">
         <div className="row" style={{ gap: 12 }}>
-          <img src={TECSTELLAR_MARK} alt="" width={36} height={36} />
-          <span style={{ fontSize: 17, fontWeight: 600 }}>Tecstellar</span>
+          <img className="login__mark" src={BRAND_MARK} alt="" width={36} height={36} />
+          <span style={{ fontSize: 17, fontWeight: 600 }}>{BRAND.name}</span>
         </div>
         <div className="login__pitch">
-          <h1>Command Center</h1>
-          <p>Every customer of RealBroks, IronDrobe, Influnet and Vehigo in one place — calls, recordings, follow-ups, payments and the people who handle them.</p>
+          <h1>{BRAND.loginHeadline}</h1>
+          <p>{BRAND.loginBlurb}</p>
         </div>
         <div className="login__rule" aria-hidden>
           <span />
@@ -84,7 +85,7 @@ export default function LoginPage() {
             }}
           >
             <Field label={live ? 'Email' : 'Username'} htmlFor="tcc-un">
-              <Input id="tcc-un" type={live ? 'email' : 'text'} value={username} onChange={(e) => { setUsername(e.target.value); setError(null); }} autoComplete="username" autoFocus placeholder={live ? 'you@tecstellar.com' : 'abhinaya.m'} />
+              <Input id="tcc-un" type={live ? 'email' : 'text'} value={username} onChange={(e) => { setUsername(e.target.value); setError(null); }} autoComplete="username" autoFocus placeholder={live ? BRAND.emailPlaceholder : BRAND.usernamePlaceholder} />
             </Field>
             <Field label="Password" htmlFor="tcc-pw">
               <Input id="tcc-pw" type="password" value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="current-password" />

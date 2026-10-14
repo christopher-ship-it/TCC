@@ -9,7 +9,7 @@ import { Avatar, Badge, Button, Chip, Empty, Input, PageHead } from '../../ui/pr
 import { PersonEditor } from './PersonEditor';
 import './admin.css';
 
-const ABBR: Record<string, string> = { realbroks: 'RB', irondrobe: 'ID', influnet: 'IN', vehigo: 'VG' };
+const ABBR: Record<string, string> = { realbroks: 'RB', irondrobe: 'ID', influnet: 'IN', vehigo: 'VG', vanmoh: 'VM' };
 
 export default function People() {
   const { state, currentAgent } = useStore();

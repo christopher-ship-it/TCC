@@ -3,7 +3,7 @@
 
 import type { AgentAccount, AppId, Capability, Language, QueueKey, Role } from '../data/types';
 
-export const ALL_APPS: AppId[] = ['realbroks', 'irondrobe', 'influnet', 'vehigo'];
+export const ALL_APPS: AppId[] = ['realbroks', 'irondrobe', 'influnet', 'vehigo', 'vanmoh'];
 
 export const CAPABILITIES: { key: Capability; label: string; short: string; help: string }[] = [
   { key: 'call', label: 'Call customers', short: 'Call', help: 'Work their queues and call from the browser.' },

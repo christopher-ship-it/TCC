@@ -2,6 +2,7 @@ import { useRef, useState } from 'react';
 import { Database, Download, Upload } from 'lucide-react';
 import { useStore } from '../../store/StoreContext';
 import { STATE_DEFS } from '../../data/seed';
+import { BRAND, WHITE_LABEL } from '../../brand';
 import { customerCsvTemplate, parseCustomerCsv, type ImportRowError } from '../../lib/customerImport';
 import type { CustomerUser } from '../../data/types';
 import { downloadText } from '../../lib/metrics';
@@ -58,7 +59,7 @@ export default function CustomerImport() {
     <div className="page">
       <PageHead
         title="Customers"
-        desc="Replace the generated sample customers with a real export from RealBroks or IronDrobe."
+        desc={WHITE_LABEL ? `Replace the sample subscribers with a real export from ${BRAND.name}.` : 'Replace the generated sample customers with a real export from RealBroks or IronDrobe.'}
       />
 
       <Card title="Current data source">
@@ -79,7 +80,7 @@ export default function CustomerImport() {
       <Card title="Import customers" sub="CSV only — in Excel, use File › Save As › CSV UTF-8 before uploading.">
         <div className="stack" style={{ gap: 14 }}>
           <div className="row" style={{ gap: 10 }}>
-            <Button icon={<Download size={15} />} onClick={() => downloadText('tcc-customer-import-template.csv', customerCsvTemplate())}>
+            <Button icon={<Download size={15} />} onClick={() => downloadText('tcc-customer-import-template.csv', WHITE_LABEL ? customerCsvTemplate(`${BRAND.key},Murugan S,9876543210,₹1,00,000 chit · 20 months,Coimbatore,Tamil Nadu,Paid,4,20,2026-06-15,Tamil,`) : customerCsvTemplate())}>
               Download CSV template
             </Button>
             <Button icon={<Upload size={15} />} onClick={() => fileInput.current?.click()}>
@@ -90,7 +91,7 @@ export default function CustomerImport() {
           </div>
 
           <p className="muted" style={{ fontSize: 13 }}>
-            Required columns: <b>app</b> (realbroks or irondrobe), <b>name</b>, <b>phone</b>. Optional: business, city,
+            Required columns: <b>app</b> ({WHITE_LABEL ? BRAND.key : 'realbroks or irondrobe'}), <b>name</b>, <b>phone</b>. Optional: business, city,
             state, plan (Free/Paid), listings, buyers, registered_at, language, owner_agent_id. Each customer is
             matched by phone number — re-importing the same phone updates it in place and keeps its call history.
           </p>

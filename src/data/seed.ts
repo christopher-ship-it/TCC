@@ -17,10 +17,19 @@ import type {
   StateDef,
   TicketRecord,
 } from './types';
+import { BRAND } from '../brand';
+import {
+  COLLECTION_MODES, SCHEMES, SCHEME_WEIGHTS, VANMOH_AGENTS, VANMOH_APPS, VANMOH_AUDIT, VANMOH_CLEARED, VANMOH_CLEARED_ACTIONS,
+  VANMOH_CLEARED_RESULTS, VANMOH_COMMENTS, VANMOH_ESCALATIONS, VANMOH_FAILED, VANMOH_FIRST_NAMES, VANMOH_NO_STATE_WEIGHT,
+  VANMOH_REROUTES, VANMOH_STATES, VANMOH_SURNAMES, VANMOH_TICKETS, schemeLabel, vanmohSampleAnalysis,
+} from './seedVanmoh';
 
 const NOW = Date.now();
 
-export const APPS: AppDef[] = [
+/** The Vanmoh Chit Funds build (VITE_BRAND=vanmoh) generates its own sample subscribers; see seedVanmoh.ts. */
+const VM = BRAND.key === 'vanmoh';
+
+const TECSTELLAR_APPS: AppDef[] = [
   { id: 'realbroks', name: 'RealBroks', tagline: 'Broker assistant · 10K+ installs', logo: 'logo-realbroks.png', live: true },
   { id: 'irondrobe', name: 'IronDrobe', tagline: 'Laundry & ironing CRM · 1K+ installs', logo: 'logo-irondrobe.png', live: true },
   { id: 'influnet', name: 'Influnet', tagline: 'influnet.io · in development', logo: 'logo-influnet.png', live: false },
@@ -32,7 +41,7 @@ interface StateSeedDef extends StateDef {
   cities: string[];
 }
 
-export const STATE_DEFS: StateSeedDef[] = [
+const TECSTELLAR_STATES: StateSeedDef[] = [
   { name: 'Tamil Nadu', lon: 78.4, lat: 11.0, language: 'Tamil', weight: 5768, cities: ['Chennai', 'Coimbatore', 'Madurai', 'Tiruppur', 'Salem', 'Erode', 'Trichy', 'Karur', 'Pollachi', 'Vellore'] },
   { name: 'Karnataka', lon: 76.2, lat: 14.6, language: 'Kannada', weight: 1420, cities: ['Bengaluru', 'Mysuru', 'Hubballi', 'Mangaluru'] },
   { name: 'Telangana', lon: 79.0, lat: 17.9, language: 'Telugu', weight: 980, cities: ['Hyderabad', 'Warangal', 'Nizamabad'] },
@@ -47,9 +56,11 @@ export const STATE_DEFS: StateSeedDef[] = [
   { name: 'Madhya Pradesh', lon: 78.5, lat: 23.5, language: 'Hindi', weight: 50, cities: ['Bhopal', 'Indore'] },
 ];
 
-export const NO_STATE_WEIGHT = 412;
+export const APPS: AppDef[] = VM ? VANMOH_APPS : TECSTELLAR_APPS;
+export const STATE_DEFS: StateSeedDef[] = VM ? VANMOH_STATES : TECSTELLAR_STATES;
+export const NO_STATE_WEIGHT = VM ? VANMOH_NO_STATE_WEIGHT : 412;
 
-export const AGENTS: AgentAccount[] = [
+const TECSTELLAR_AGENTS: AgentAccount[] = [
   {
     id: 'ravi-s', name: 'Ravi S', username: 'ravi.s', role: 'agent', status: 'active', createdTs: NOW - 160 * DAY_MS,
     apps: ['realbroks'], queues: ['new', 'followup', 'inactive'],
@@ -106,7 +117,7 @@ export const AGENTS: AgentAccount[] = [
     id: 'munees-a', name: 'Munees A', username: 'munees.a', role: 'supervisor', status: 'active', createdTs: NOW - 300 * DAY_MS,
     apps: ['realbroks', 'irondrobe'], queues: ['new', 'tickets', 'payments', 'followup', 'errors', 'inactive'],
     languages: ['Tamil', 'Telugu', 'Kannada', 'Malayalam', 'Hindi', 'Bengali', 'English'],
-    states: STATE_DEFS.map((s) => s.name),
+    states: TECSTELLAR_STATES.map((s) => s.name),
     dailyTarget: 0, clickToDial: true, lastActiveLabel: 'now',
     telecmiUserId: '5000_33338836',
     todayCalls: 0, todayConnected: 0, todayPositive: 0, todaySubscribed: 0, todayOverdue: 0, avgHandleLabel: '—',
@@ -121,6 +132,8 @@ export const AGENTS: AgentAccount[] = [
     workingQueueLabel: '—',
   },
 ];
+
+export const AGENTS: AgentAccount[] = VM ? VANMOH_AGENTS : TECSTELLAR_AGENTS;
 
 const FIRST_NAMES = [
   'Suresh', 'Meena', 'Anand', 'Prakash', 'Vijay', 'Lakshmi', 'Mahesh', 'Sanjay', 'Deepa', 'Kavya',
@@ -183,6 +196,7 @@ function makeSampleAnalysis(
   app: AppId,
   outcome: Outcome | undefined,
 ): CallAnalysis {
+  if (VM) return vanmohSampleAnalysis(r, at, customerName, outcome);
   const isRealbroks = app === 'realbroks';
   const isPositive = outcome && ['Interested', 'Very interested', 'Ready to subscribe', 'Created first listing'].includes(outcome);
   const isNegative = outcome && ['Not interested', 'Using competitor'].includes(outcome);
@@ -380,7 +394,7 @@ function makeCallHistory(
 
 const POSITIVE_STEPS: Outcome[] = ['Interested', 'Very interested', 'Ready to subscribe', 'Created first listing'];
 
-const COMMENTS_POOL = [
+const COMMENTS_POOL = VM ? VANMOH_COMMENTS : [
   'Wants to see commission tracking before paying. Asked to call back after 6pm.',
   'Runs 2 branches, interested in the annual plan discount.',
   'Happy with the app so far, just needs a payment reminder next week.',
@@ -406,10 +420,12 @@ function buildUser(opts: {
   const effState = stateDef ? stateDef.name : 'Tamil Nadu';
   const lang: Language = stateDef ? stateDef.language : r.pick<Language>(['Tamil', 'Telugu', 'Hindi', 'Kannada', 'Malayalam']);
   const city = stateDef ? r.pick(stateDef.cities) : r.pick(STATE_DEFS[0].cities);
-  const first = r.pick(FIRST_NAMES);
-  const last = r.pick(SURNAMES);
+  const first = r.pick(VM ? VANMOH_FIRST_NAMES : FIRST_NAMES);
+  const last = r.pick(VM ? VANMOH_SURNAMES : SURNAMES);
   const name = `${first} ${last}`;
-  const business = app === 'realbroks' ? BIZ_TEMPLATES_REALBROKS(last, city, r) : BIZ_TEMPLATES_IRONDROBE(last, city, r);
+  // Vanmoh: the chit scheme they hold or enquired about stands in for the business name.
+  const scheme = VM ? r.weighted(SCHEMES.map((value, i) => ({ value, weight: SCHEME_WEIGHTS[i] }))) : null;
+  const business = scheme ? schemeLabel(scheme) : app === 'realbroks' ? BIZ_TEMPLATES_REALBROKS(last, city, r) : BIZ_TEMPLATES_IRONDROBE(last, city, r);
   const registeredDaysAgo = queue === 'inactive' ? r.int(35, 220) : queue === 'new' ? r.int(0, 4) : r.int(1, 260);
   const registeredTs = NOW - registeredDaysAgo * DAY_MS;
   const shopCode = `TS${2026060000 + r.int(1, 999999)}`;
@@ -417,7 +433,10 @@ function buildUser(opts: {
   const owner = reachableAgent(agents, app, queue, effState, lang, hasState);
   const ownerNames = owner ? [owner.name] : ['Ravi S', 'Abhinaya M'];
 
-  const paying = queue === null ? r.bool(0.18) : queue === 'payments' ? r.bool(0.85) : false;
+  // Vanmoh: subscribers pay instalments; enquiries, warm leads and lapsed subscribers don't.
+  const paying = VM
+    ? queue === 'payments' || queue === 'tickets' || queue === 'errors' || (queue === null && r.bool(0.8))
+    : queue === null ? r.bool(0.18) : queue === 'payments' ? r.bool(0.85) : false;
   const active = queue === 'inactive' ? false : r.bool(0.7);
   const conversionScore = queue === 'followup' ? r.int(55, 92) : queue === 'new' ? r.int(20, 75) : r.int(10, 60);
 
@@ -444,7 +463,7 @@ function buildUser(opts: {
       const slaBreached = r.bool(0.3);
       tickets = [{
         id: `tk-${r.int(1, 1e9)}`,
-        subject: r.pick(['App crashes on checkout', 'Payment deducted, subscription not active', 'Cannot upload listing photos', 'OTP not received', 'Wrong plan applied', 'Refund not processed']),
+        subject: VM ? r.pick(VANMOH_TICKETS) : r.pick(['App crashes on checkout', 'Payment deducted, subscription not active', 'Cannot upload listing photos', 'OTP not received', 'Wrong plan applied', 'Refund not processed']),
         raisedAtLabel: fmtDay(NOW - r.int(0, 6) * DAY_MS),
         slaBreached,
       }];
@@ -459,7 +478,7 @@ function buildUser(opts: {
         { value: 'expired' as const, weight: 2 },
       ]);
       paymentDue = {
-        amount: r.pick([499, 999, 1499, 2499, 4999]),
+        amount: scheme ? scheme.monthly : r.pick([499, 999, 1499, 2499, 4999]),
         dueLabel: fmtDay(NOW + (status === 'upcoming' ? r.int(1, 10) : -r.int(1, 20)) * DAY_MS),
         status,
       };
@@ -484,7 +503,7 @@ function buildUser(opts: {
       break;
     }
     case 'errors': {
-      stageTag = r.pick(['Payment failed', 'Tried to subscribe', 'App crash on pay']);
+      stageTag = r.pick(VM ? VANMOH_FAILED : ['Payment failed', 'Tried to subscribe', 'App crash on pay']);
       callHistory = makeCallHistory(r, ownerNames, 1, null, undefined, comment, app, name);
       break;
     }
@@ -497,6 +516,44 @@ function buildUser(opts: {
       stageTag = paying ? 'Paying' : active ? 'Active' : 'Dormant';
       break;
     }
+  }
+
+  if (scheme) {
+    const group = r.int(1, 18);
+    const ticket = r.int(1, scheme.months);
+    const subscriber = paying || queue === 'inactive';
+    return {
+      id: `u-${app}-${idx}`,
+      shopCode: subscriber ? `VCF-${scheme.months}${String(group).padStart(2, '0')}-${ticket}` : `ENQ-${r.int(1000, 9999)}`,
+      name,
+      business,
+      app,
+      phone,
+      city,
+      state: stateDef ? stateDef.name : null,
+      effectiveState: effState,
+      language: lang,
+      registeredAtLabel: fmtDay(registeredTs),
+      registeredDaysAgo,
+      plan: paying ? 'Paid' : 'Free',
+      planNote: subscriber ? `Group V${scheme.months}-${String(group).padStart(2, '0')} · ticket ${ticket}` : 'Not joined yet',
+      listings: subscriber ? r.int(1, scheme.months - 1) : 0,
+      buyers: scheme.months,
+      lastOpenLabel: !subscriber ? '—' : queue === 'inactive' ? `${r.int(31, 90)}d ago` : `${r.int(1, 25)}d ago`,
+      appVersion: subscriber ? r.pick(COLLECTION_MODES) : 'Not started',
+      conversionScore,
+      stageTag: queue === null ? (paying ? 'Subscriber' : 'Prized · paid out') : stageTag,
+      queue,
+      attempt,
+      callHistory,
+      tickets,
+      paymentDue,
+      followUp,
+      paying,
+      active,
+      ownerAgentId: owner ? owner.id : null,
+      mrr: paying ? scheme.monthly : undefined,
+    };
   }
 
   return {
@@ -544,6 +601,7 @@ interface QueueCounts {
 }
 
 const REALBROKS_COUNTS: QueueCounts = { new: 40, tickets: 10, payments: 18, followup: 26, errors: 6, inactive: 140, rest: 410 };
+const VANMOH_COUNTS: QueueCounts = { new: 30, tickets: 8, payments: 40, followup: 18, errors: 6, inactive: 30, rest: 250 };
 const IRONDROBE_COUNTS: QueueCounts = { new: 5, tickets: 3, payments: 4, followup: 3, errors: 0, inactive: 30, rest: 115 };
 
 function buildAppUsers(app: AppId, counts: QueueCounts, agents: AgentAccount[], r: Rng): CustomerUser[] {
@@ -568,10 +626,10 @@ function buildAppUsers(app: AppId, counts: QueueCounts, agents: AgentAccount[], 
 }
 
 function buildEscalations(users: CustomerUser[], agents: AgentAccount[], r: Rng): EscalationRecord[] {
-  const candidates = users.filter((u) => u.app === 'realbroks' || u.app === 'irondrobe').filter((u) => u.queue === 'new' || u.queue === 'tickets');
+  const candidates = users.filter((u) => u.app === 'realbroks' || u.app === 'irondrobe' || u.app === 'vanmoh').filter((u) => u.queue === 'new' || u.queue === 'tickets');
   const chosen = r.shuffle(candidates).slice(0, 5);
   const list: EscalationRecord[] = [];
-  const rerouteReasons = [
+  const rerouteReasons = VM ? VANMOH_REROUTES : [
     { lang: 'Telugu' as Language, reason: 'Speaks Telugu, agent has Tamil only' },
     { lang: 'Hindi' as Language, reason: 'Hindi — agent holds Tamil only' },
     { lang: 'Kannada' as Language, reason: 'Prefers Kannada, current agent is Tamil-only' },
@@ -592,7 +650,7 @@ function buildEscalations(users: CustomerUser[], agents: AgentAccount[], r: Rng)
       list.push({
         id: `esc-${i}`, type: 'escalation', userId: u.id, userName: u.name, userCity: `${u.city}, ${u.effectiveState}`, app: u.app,
         raisedAtLabel: fmtDayTime(raisedTs).split(' · ')[1], raisedTs,
-        raisedByAgentId: owner.id, reason: r.pick(['Refund request — paid twice', 'Wants to negotiate annual pricing', 'Wants the manager', 'Billing dispute']),
+        raisedByAgentId: owner.id, reason: r.pick(VM ? VANMOH_ESCALATIONS : ['Refund request — paid twice', 'Wants to negotiate annual pricing', 'Wants the manager', 'Billing dispute']),
         urgency: r.bool(0.3) ? 'urgent' : 'normal',
         note: r.pick(COMMENTS_POOL), status: 'pending',
       });
@@ -602,19 +660,20 @@ function buildEscalations(users: CustomerUser[], agents: AgentAccount[], r: Rng)
 }
 
 function buildClearedEscalations(r: Rng) {
-  const names = ['Meena R', 'Vijay Homes', 'S. Lakshmi', 'Anand Realty', 'K. Prakash'];
+  const names = VM ? VANMOH_CLEARED : ['Meena R', 'Vijay Homes', 'S. Lakshmi', 'Anand Realty', 'K. Prakash'];
   return names.slice(0, 3).map((n, i) => ({
     id: `cleared-${i}`,
     atLabel: i === 0 ? fmtDayTime(NOW - r.int(1, 4) * 3600000).split(' · ')[1] : 'Yesterday',
     name: n,
-    action: r.pick(['Reroute → Kannada', 'Escalation → pricing', 'Reroute → Hindi', 'Escalation → refund']),
-    result: r.pick(['Approved · reassigned', 'Closed · 10% annual offer', 'Declined · handled in English', 'Approved · refund issued']),
+    action: r.pick(VM ? VANMOH_CLEARED_ACTIONS : ['Reroute → Kannada', 'Escalation → pricing', 'Reroute → Hindi', 'Escalation → refund']),
+    result: r.pick(VM ? VANMOH_CLEARED_RESULTS : ['Approved · reassigned', 'Closed · 10% annual offer', 'Declined · handled in English', 'Approved · refund issued']),
     minutes: r.int(15, 90),
   }));
 }
 
 function buildAudit(): AuditEntry[] {
   const at = (minutesAgo: number) => NOW - minutesAgo * 60000;
+  if (VM) return VANMOH_AUDIT.map(({ minutesAgo, ...row }, i) => ({ ...row, ts: at(minutesAgo), id: `audit-seed-${i}` }));
   const rows: Omit<AuditEntry, 'id'>[] = [
     { ts: at(42), actorId: 'munees-a', actorName: 'Munees A', action: 'access_changed', target: 'Priya N', detail: 'Queues: New registrations (was none)' },
     { ts: at(180), actorId: 'munees-a', actorName: 'Munees A', action: 'escalation_approved', target: 'Meena R', detail: 'Reroute → Kannada · reassigned' },
@@ -637,10 +696,12 @@ export interface Seed {
 
 export function generateSeed(seedNumber = 20260816): Seed {
   const r = new Rng(seedNumber);
-  const users = [
-    ...buildAppUsers('realbroks', REALBROKS_COUNTS, AGENTS, r),
-    ...buildAppUsers('irondrobe', IRONDROBE_COUNTS, AGENTS, r),
-  ];
+  const users = VM
+    ? buildAppUsers('vanmoh', VANMOH_COUNTS, AGENTS, r)
+    : [
+        ...buildAppUsers('realbroks', REALBROKS_COUNTS, AGENTS, r),
+        ...buildAppUsers('irondrobe', IRONDROBE_COUNTS, AGENTS, r),
+      ];
   const escalations = buildEscalations(users, AGENTS, r);
   escalations.forEach((e) => {
     const u = users.find((x) => x.id === e.userId);

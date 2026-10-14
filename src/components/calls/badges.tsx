@@ -2,6 +2,7 @@ import type { CallLogEntry } from '../../data/types';
 import { outcomeTone } from '../../lib/callStatus';
 import { sentimentBand } from '../../lib/analysis/model';
 import { Badge, type Tone } from '../../ui/primitives';
+import { outcomeLabel } from '../../brand';
 
 
 export function SentimentBadge({ score }: { score: number | null | undefined }) {
@@ -13,5 +14,5 @@ export function SentimentBadge({ score }: { score: number | null | undefined }) 
 }
 
 export function OutcomeBadge({ call }: { call: CallLogEntry }) {
-  return <Badge tone={outcomeTone(call)}>{call.outcome ?? call.status}</Badge>;
+  return <Badge tone={outcomeTone(call)}>{call.outcome ? outcomeLabel(call.outcome) : call.status}</Badge>;
 }

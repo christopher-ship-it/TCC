@@ -3,6 +3,7 @@ import { Link, useParams } from 'react-router-dom';
 import { AlertTriangle, CheckCircle2, Loader2, Lock, MessageSquareWarning, RotateCcw, Sparkles } from 'lucide-react';
 import { useStore } from '../store/StoreContext';
 import { APPS } from '../data/seed';
+import { outcomeLabel } from '../brand';
 import { telephonyQualitySummary } from '../data/types';
 import { can } from '../lib/access';
 import { hasRealRecording } from '../lib/attachRecording';
@@ -146,7 +147,7 @@ export default function CallDetail() {
                     <SentimentBadge score={a.sentiment} />
                   </div>
                   <Meter value={a.sentiment} color={band === 'positive' ? 'var(--ok)' : band === 'negative' ? 'var(--danger)' : 'var(--warn)'} />
-                  {a.outcome && <span className="muted" style={{ fontSize: 13 }}>Read of the call: <b style={{ color: 'var(--ink)' }}>{a.outcome}</b>{call.outcome && a.outcome !== call.outcome ? ` — the agent logged “${call.outcome}”` : ''}</span>}
+                  {a.outcome && <span className="muted" style={{ fontSize: 13 }}>Read of the call: <b style={{ color: 'var(--ink)' }}>{outcomeLabel(a.outcome)}</b>{call.outcome && a.outcome !== call.outcome ? ` — the agent logged “${outcomeLabel(call.outcome)}”` : ''}</span>}
                 </div>
               </Card>
             )}
@@ -193,7 +194,7 @@ export default function CallDetail() {
 
             <Card title="Logged by the agent">
               <div className="kv"><span>Status</span><span>{call.status}</span></div>
-              {call.outcome && <div className="kv"><span>Outcome</span><span>{call.outcome}</span></div>}
+              {call.outcome && <div className="kv"><span>Outcome</span><span>{outcomeLabel(call.outcome)}</span></div>}
               {t?.ringSec ? <div className="kv"><span>Rang for</span><span className="mono">{t.ringSec}s</span></div> : null}
               {quality && <div className="kv"><span>Line</span><span>{quality}</span></div>}
               {call.comment && <p style={{ marginTop: 10, color: 'var(--ink-2)' }}>“{call.comment}”</p>}
