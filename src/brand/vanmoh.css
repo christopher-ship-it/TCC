@@ -1,0 +1,30 @@
+/*
+ * Vanmoh Chit Funds — applies only when the build sets <html data-brand="vanmoh"> (VITE_BRAND=vanmoh, see
+ * vite.config.ts). Colours from Vanmoh's logo (#0c52a6 blue, #333 charcoal) and website (#018bd8).
+ */
+:root[data-brand="vanmoh"] {
+  --navy: #0a2a55;
+  --navy-2: #123769;
+  --navy-3: #1d467d;
+  --navy-text: #bccbe0;
+  --navy-muted: #8196b5;
+
+  --brand-green: #ffffff;
+  --brand-blue: #018bd8;
+
+  --accent: #0c52a6;
+  --accent-hover: #0a4589;
+  --accent-soft: #e6eef8;
+  --accent-line: #a7bfe2;
+  --accent-ink: #093e7e;
+
+  --series-1: #0c52a6;
+}
+
+/* The mark has charcoal in it, so it sits on a white tile against the navy header. */
+:root[data-brand="vanmoh"] .shell-brand img,
+:root[data-brand="vanmoh"] .login__mark {
+  background: #fff;
+  border-radius: 5px;
+  padding: 2px;
+}

@@ -1,16 +1,79 @@
 rules_version = '2';
 
-// TCC's operational data (agents, customerOverlay, escalations,
-// clearedEscalations). Requires request.auth != null — the app signs every
-// browser in anonymously on load, so this blocks the open internet without
-// needing real per-agent Firebase Auth accounts yet.
+// Access is decided by who the signed-in login is linked to, not by being signed in at all:
+//   authLinks/{uid}  -> { agentId }      written by admins only
+//   agents/{agentId} -> { role, status } written by admins only
+// A login with no link, or whose person is suspended, can read and write nothing.
 //
-// To apply: Firebase Console -> Firestore Database -> Rules -> paste this -> Publish.
-// Also needed once: Authentication -> Sign-in method -> enable "Anonymous".
+// First admin (one-time, from the Firebase console — see docs/AUTH.md): create the login under Authentication,
+// then add agents/<id> {role:'admin', status:'active', ...} and authLinks/<uid> {agentId:'<id>'}.
 service cloud.firestore {
   match /databases/{database}/documents {
-    match /{document=**} {
-      allow read, write: if request.auth != null;
+
+    function linkPath() { return /databases/$(database)/documents/authLinks/$(request.auth.uid); }
+    function myId() { return get(linkPath()).data.agentId; }
+    function myPath() { return /databases/$(database)/documents/agents/$(myId()); }
+
+    function active() {
+      return request.auth != null
+        && exists(linkPath())
+        && exists(myPath())
+        && get(myPath()).data.get('status', 'active') == 'active';
+    }
+    function role() { return get(myPath()).data.role; }
+    function isAdmin() { return active() && role() == 'admin'; }
+    function isLead() { return active() && (role() == 'admin' || role() == 'supervisor'); }
+
+    // Your own link, so the app can find out who you are. Only admins can create or change links.
+    match /authLinks/{uid} {
+      allow get: if request.auth != null && request.auth.uid == uid;
+      allow read, write: if isAdmin();
+    }
+
+    match /agents/{agentId} {
+      allow read: if active();
+      allow create, delete: if isAdmin();
+      allow update: if isAdmin()
+        // Anyone may stamp their own "last active"; nothing else on their own record.
+        || (active() && agentId == myId() && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['lastActiveLabel']));
+    }
+
+    // Customers: real ones come from an admin's CSV import; a number dialled on the spot is the one thing an agent may add.
+    match /customersMaster/{id} {
+      allow read: if active();
+      allow create: if isAdmin() || (active() && request.resource.data.get('adHoc', false) == true);
+      allow update, delete: if isAdmin();
+    }
+
+    // Everything an agent does to a customer. Changing who owns a customer is for supervisors and admins.
+    match /customerOverlay/{id} {
+      allow read: if active();
+      allow create: if active() && (isLead() || request.resource.data.get('ownerAgentId', null) == null);
+      allow update: if active() && (isLead() || request.resource.data.get('ownerAgentId', null) == resource.data.get('ownerAgentId', null));
+      allow delete: if false;
+    }
+
+    match /escalations/{id} {
+      allow read: if active();
+      allow create: if active();
+      allow update, delete: if isLead();
+    }
+
+    match /clearedEscalations/{id} {
+      allow read: if active();
+      allow create: if isLead();
+      allow update, delete: if false;
+    }
+
+    // The change log: leads can read it; anyone can add a line, but only as themselves, and no line can be edited or removed.
+    match /audit/{id} {
+      allow read: if isLead();
+      allow create: if active() && request.resource.data.actorId == myId();
+      allow update, delete: if false;
+    }
+
+    match /{other=**} {
+      allow read, write: if false;
     }
   }
 }

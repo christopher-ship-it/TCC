@@ -1,0 +1,255 @@
+import { useMemo, useState } from 'react';
+import { Link, useNavigate, useParams } from 'react-router-dom';
+import { ArrowRight, CircleDollarSign, Headset, Lock, PhoneOff, Ticket } from 'lucide-react';
+import { useStore } from '../store/StoreContext';
+import { APPS } from '../data/seed';
+import { QUEUES } from '../data/types';
+import { APP_LOGOS } from '../assets';
+import { BRAND, outcomeLabel } from '../brand';
+
+const F = BRAND.fields;
+import { can, LANGUAGE_SCRIPT } from '../lib/access';
+import { customerJourney, durationLabel, isConnected, journeyVerdict } from '../lib/metrics';
+import { talkShare } from '../lib/analysis/speakers';
+import { whyInQueue } from '../lib/whyInQueue';
+import { formatDuration } from '../telephony';
+import { OutcomeBadge, SentimentBadge } from '../components/calls/badges';
+import { analysisState } from '../lib/callStatus';
+import { TicketDialog } from '../components/agent/TicketDialog';
+import { ColumnChart, Legend, LineChart } from '../ui/charts';
+import { Badge, Button, Callout, Card, Empty, PageHead, Select, Stat } from '../ui/primitives';
+import { useToast } from '../ui/toastContext';
+import './customer.css';
+
+export default function CustomerPage() {
+  const { id } = useParams<{ id: string }>();
+  const { state, dispatch, currentAgent } = useStore();
+  const navigate = useNavigate();
+  const toast = useToast();
+  const agent = currentAgent!;
+  const user = state.users.find((u) => u.id === id);
+  const [ticket, setTicket] = useState(false);
+  const journey = useMemo(() => (user ? customerJourney(user) : []), [user]);
+
+  if (!user) return <div className="page"><Empty title="Customer not found" action={<Link to="/" className="btn">Go home</Link>} /></div>;
+  if (agent.role !== 'admin' && !agent.apps.includes(user.app)) {
+    return <div className="page"><Empty icon={<Lock size={22} />} title="Not in your apps">This customer belongs to an app you don’t have access to.</Empty></div>;
+  }
+
+  const app = APPS.find((a) => a.id === user.app)!;
+  const hear = can(agent, user.app, 'recordings');
+  const verdict = journeyVerdict(user);
+  const owner = state.agents.find((a) => a.id === user.ownerAgentId);
+  const connectedCalls = user.callHistory.filter(isConnected);
+  const talk = user.callHistory.reduce((n, c) => n + (c.telephony?.durationSec ?? 0), 0);
+  const scored = journey.filter((p) => p.sentiment !== null);
+  const avg = scored.length ? Math.round(scored.reduce((n, p) => n + (p.sentiment ?? 0), 0) / scored.length) : null;
+  const trend = scored.length >= 2 ? (scored[scored.length - 1].sentiment ?? 0) - (scored[0].sentiment ?? 0) : null;
+  const answered = journey.filter((p) => p.talkSec > 0);
+  const canCall = agent.role === 'agent' && can(agent, user.app, 'call');
+  const manage = agent.role !== 'agent';
+  const reassignable = state.agents.filter((a) => a.role === 'agent' && a.apps.includes(user.app) && (a.status ?? 'active') === 'active');
+
+  return (
+    <div className="page">
+      <PageHead
+        eyebrow={<button type="button" className="btn btn--link" onClick={() => navigate(-1)}>← Back</button>}
+        title={
+          <span className="row" style={{ gap: 12 }}>
+            {user.name}
+            <Badge tone={verdict.tone}>{verdict.label}</Badge>
+          </span>
+        }
+        desc={`${user.business} · ${user.city}, ${user.effectiveState} · ${user.phone}`}
+        actions={
+          <>
+            {canCall && <Button variant="primary" icon={<Headset size={16} />} onClick={() => navigate(`/work/${user.app}?${user.queue ? `queue=${user.queue}&` : ''}focus=${user.id}`)}>Call {user.name.split(' ')[0]}</Button>}
+            {can(agent, user.app, 'tickets') && <Button icon={<Ticket size={15} />} onClick={() => setTicket(true)}>Raise ticket</Button>}
+            {user.paymentDue && can(agent, user.app, 'payments') && (
+              <Button icon={<CircleDollarSign size={15} />} onClick={() => { dispatch({ type: 'MARK_PAID', userId: user.id, actorId: agent.id }); toast('Marked as paid'); }}>
+                Mark ₹{user.paymentDue.amount.toLocaleString('en-IN')} paid
+              </Button>
+            )}
+          </>
+        }
+      />
+
+      <div className="row" style={{ gap: 8 }}>
+        <img src={APP_LOGOS[app.id]} alt={app.name} style={{ height: 18, width: 96, objectFit: 'contain', objectPosition: 'left center' }} />
+        <Badge tone="accent"><span className="chip__script">{LANGUAGE_SCRIPT[user.language]}</span>{user.language !== 'English' ? ` · ${user.language}` : ''}</Badge>
+        <Badge tone={user.plan === 'Paid' ? 'ok' : 'neutral'}>{F ? (user.plan === 'Paid' ? F.paid : F.free) : `${user.plan} plan`}</Badge>
+        {user.queue && <Badge>In {QUEUES.find((q) => q.key === user.queue)?.label}</Badge>}
+        <span className="mono muted" style={{ fontSize: 12.5 }}>{user.shopCode}</span>
+      </div>
+
+      {whyInQueue(user) && <Callout tone="warn">{whyInQueue(user)}</Callout>}
+
+      <div className="stats">
+        <Stat label="Calls" value={user.callHistory.length} note={`${connectedCalls.length} connected`} />
+        <Stat label="Talk time" value={durationLabel(talk)} note={connectedCalls.length ? `${formatDuration(Math.round(talk / Math.max(1, connectedCalls.length)))} average` : 'Not reached yet'} />
+        <Stat label="Average sentiment" value={avg ?? '—'} tone={avg === null ? undefined : avg >= 60 ? 'ok' : avg <= 40 ? 'danger' : undefined} note={trend === null ? `${scored.length} analysed call${scored.length === 1 ? '' : 's'}` : `${trend >= 0 ? '+' : ''}${trend} since first analysed call`} />
+        <Stat label="Conversion score" value={user.conversionScore} note="Out of 100, from app activity" />
+      </div>
+
+      <div className="grid-2">
+        <Card title="Sentiment across calls" sub="How receptive the customer was on each analysed call (0–100)">
+          {scored.length === 0 ? (
+            <Empty title="No analysed calls yet">Each recorded call is analysed after it ends; the trend appears here.</Empty>
+          ) : (
+            <LineChart
+              ariaLabel={`Sentiment across ${scored.length} calls`}
+              bands={[{ from: 60, to: 100, label: 'Positive' }]}
+              points={scored.map((p) => ({
+                label: p.call.atLabel.split(' · ')[0],
+                value: p.sentiment,
+                tip: (
+                  <>
+                    <div style={{ fontWeight: 600 }}>{p.call.atLabel} · {p.sentiment}</div>
+                    <div>{p.call.outcome ? outcomeLabel(p.call.outcome) : p.call.status} · {p.call.agentName}</div>
+                  </>
+                ),
+              }))}
+            />
+          )}
+        </Card>
+        <Card title="Who talked, call by call" sub="Minutes on each answered call, split between agent and customer" actions={<Legend items={[{ label: 'Agent', color: 'var(--series-1)' }, { label: 'Customer', color: 'var(--series-2)' }]} />}>
+          {answered.length === 0 ? (
+            <Empty title="No answered calls yet" />
+          ) : (
+            <ColumnChart
+              ariaLabel="Talk time per call"
+              unit="m"
+              series={[{ label: 'Agent', color: 'var(--series-1)' }, { label: 'Customer', color: 'var(--series-2)' }]}
+              data={answered.map((p) => {
+                const share = p.agentShare ?? 0.5;
+                const mins = p.talkSec / 60;
+                const a = Math.round(mins * share * 10) / 10;
+                const c = Math.round((mins - a) * 10) / 10;
+                return {
+                  label: p.call.atLabel.split(' · ')[0],
+                  values: [a, c],
+                  tip: (
+                    <>
+                      <div style={{ fontWeight: 600 }}>{p.call.atLabel} · {formatDuration(p.talkSec)}</div>
+                      {p.agentShare === null ? <div>Split unknown — not analysed</div> : <div>Agent {Math.round(share * 100)}% · Customer {100 - Math.round(share * 100)}%</div>}
+                    </>
+                  ),
+                };
+              })}
+            />
+          )}
+        </Card>
+      </div>
+
+      <div className="cust-layout">
+        <Card title="Call journey" sub="Newest first" pad={false}>
+          {user.callHistory.length === 0 ? (
+            <Empty icon={<PhoneOff size={22} />} title="No calls yet" />
+          ) : (
+            <ol className="journey">
+              {user.callHistory.map((c) => {
+                const st = analysisState(c);
+                const share = c.analysis ? talkShare(c.telephony?.levels, c.analysis.transcript) : null;
+                return (
+                  <li key={c.id} className={`journey__item${isConnected(c) ? '' : ' journey__item--missed'}`}>
+                    <span className="journey__dot" aria-hidden />
+                    <div className="journey__body">
+                      <div className="row" style={{ justifyContent: 'space-between' }}>
+                        <span className="muted" style={{ fontSize: 13 }}>{c.atLabel} · {c.agentName}{c.telephony?.durationSec ? ` · ${formatDuration(c.telephony.durationSec)}` : ''}</span>
+                        <span className="row" style={{ gap: 6 }}>
+                          <SentimentBadge score={c.analysis?.sentiment} />
+                          <OutcomeBadge call={c} />
+                        </span>
+                      </div>
+                      {hear && c.analysis?.summary ? <p>{c.analysis.summary}</p> : c.comment ? <p className="journey__note">“{c.comment}”</p> : null}
+                      {hear && c.analysis && (c.analysis.objections[0] || c.analysis.recommendation) && (
+                        <div className="journey__meta">
+                          {c.analysis.objections[0] && <span><b>Objection:</b> {c.analysis.objections[0]}</span>}
+                          {c.analysis.recommendation && <span><b>Next step:</b> {c.analysis.recommendation}</span>}
+                        </div>
+                      )}
+                      {share && share.agent + share.customer > 0 && hear && (
+                        <span className="muted" style={{ fontSize: 12.5 }}>Customer spoke {Math.round((share.customer / (share.agent + share.customer)) * 100)}% of the time{share.measured ? '' : ' (estimated)'}</span>
+                      )}
+                      {(isConnected(c) || st) && (
+                        <div className="row" style={{ gap: 8 }}>
+                          {st && <Badge tone={st.tone}>{st.label}</Badge>}
+                          <Link to={`/customers/${user.id}/calls/${c.id}`} className="btn btn--sm">{hear ? 'Recording, transcript & analysis' : 'Call details'} <ArrowRight size={14} /></Link>
+                        </div>
+                      )}
+                    </div>
+                  </li>
+                );
+              })}
+            </ol>
+          )}
+        </Card>
+
+        <div className="stack" style={{ gap: 16 }}>
+          <Card title="Profile">
+            {F ? (
+              <>
+                <div className="kv"><span>{F.app}</span><span>{app.name}</span></div>
+                <div className="kv"><span>{F.registered}</span><span>{user.registeredAtLabel} · {user.registeredDaysAgo}d ago</span></div>
+                <div className="kv"><span>{F.plan}</span><span>{user.business}{user.planNote ? ` · ${user.planNote}` : ''}</span></div>
+                <div className="kv"><span>{F.listings}</span><span className="mono">{user.listings} of {user.buyers}</span></div>
+                <div className="kv"><span>{F.lastOpen}</span><span>{user.lastOpenLabel}</span></div>
+                <div className="kv"><span>{F.appVersion}</span><span>{user.appVersion}</span></div>
+                {user.mrr ? <div className="kv"><span>{F.mrr}</span><span className="mono">₹{user.mrr.toLocaleString('en-IN')} / mo</span></div> : null}
+              </>
+            ) : (
+              <>
+                <div className="kv"><span>App</span><span>{app.name}</span></div>
+                <div className="kv"><span>Registered</span><span>{user.registeredAtLabel} · {user.registeredDaysAgo}d ago</span></div>
+                <div className="kv"><span>Plan</span><span>{user.plan}{user.planNote ? ` · ${user.planNote}` : ''}</span></div>
+                <div className="kv"><span>{user.app === 'realbroks' ? 'Listings' : 'Orders'}</span><span className="mono">{user.listings}</span></div>
+                {user.app === 'realbroks' && <div className="kv"><span>Buyers added</span><span className="mono">{user.buyers}</span></div>}
+                <div className="kv"><span>Last opened app</span><span>{user.lastOpenLabel}</span></div>
+                <div className="kv"><span>App version</span><span>{user.appVersion}</span></div>
+                {user.mrr ? <div className="kv"><span>Pays</span><span className="mono">₹{user.mrr.toLocaleString('en-IN')} / mo</span></div> : null}
+              </>
+            )}
+          </Card>
+          <Card title="Owner">
+            <div className="stack" style={{ gap: 10 }}>
+              <span>{owner ? <><b>{owner.name}</b> <span className="muted">· {owner.languages.join(', ')}</span></> : <span className="muted">No owner — the queue decides who calls next.</span>}</span>
+              {manage && (
+                <Select
+                  aria-label="Change owner"
+                  value={user.ownerAgentId ?? ''}
+                  onChange={(e) => {
+                    dispatch({ type: 'REASSIGN_OWNER', userId: user.id, agentId: e.target.value, actorId: agent.id });
+                    toast('Owner changed');
+                  }}
+                >
+                  <option value="" disabled>Give to…</option>
+                  {reassignable.map((a) => <option key={a.id} value={a.id}>{a.name} — {a.languages.join(', ')}</option>)}
+                </Select>
+              )}
+            </div>
+          </Card>
+          {user.paymentDue && (
+            <Card title="Payment">
+              <div className="kv"><span>Amount</span><span className="mono">₹{user.paymentDue.amount.toLocaleString('en-IN')}</span></div>
+              <div className="kv"><span>Due</span><span>{user.paymentDue.dueLabel}</span></div>
+              <div className="kv"><span>Status</span><Badge tone={user.paymentDue.status === 'upcoming' ? 'neutral' : 'warn'}>{user.paymentDue.status}</Badge></div>
+            </Card>
+          )}
+          {user.followUp && (
+            <Card title="Follow-up chain">
+              <div className="kv"><span>Week</span><span className="mono">{user.followUp.weekNumber}</span></div>
+              <div className="kv"><span>Next call</span><span>{user.followUp.nextDueLabel}</span></div>
+              <div className="kv"><span>Marked positive</span><span>{user.followUp.markedPositiveLabel}</span></div>
+            </Card>
+          )}
+          <Card title="Tickets" sub={user.tickets.length ? undefined : 'None open'}>
+            {user.tickets.length === 0 ? <span className="muted">No tickets.</span> : user.tickets.map((t) => (
+              <div key={t.id} className="kv"><span style={{ color: 'var(--ink)' }}>{t.subject}</span><span>{t.slaBreached ? <Badge tone="danger">Past SLA</Badge> : t.raisedAtLabel}</span></div>
+            ))}
+          </Card>
+        </div>
+      </div>
+      {ticket && <TicketDialog user={user} onClose={() => setTicket(false)} />}
+    </div>
+  );
+}

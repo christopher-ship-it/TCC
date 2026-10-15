@@ -7,19 +7,29 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "lint": "oxlint",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "start": "vite preview --host 0.0.0.0 --port ${PORT:-4173} --strictPort",
+    "test": "node --test src/telephony/tests/ src/lib/tests/ server/tests/",
+    "transcribe": "python3 tools/transcribe/server.py",
+    "test:rules": "npx -y firebase-tools@14.27.0 emulators:exec --only firestore --project tcc-rules \"node --test server/tests/rules.test.ts\"",
+    "emulators": "npx -y firebase-tools@14.27.0 emulators:start --only auth,firestore --project tcc-local"
   },
   "dependencies": {
     "d3": "^7.9.0",
     "firebase": "^12.18.0",
+    "lucide-react": "^0.475.0",
+    "pg": "^8.23.1",
+    "piopiyjs": "^0.15.0",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
     "react-router-dom": "^7.18.2",
     "topojson-client": "^3.1.0"
   },
   "devDependencies": {
+    "@firebase/rules-unit-testing": "^5.0.2",
     "@types/d3": "^7.4.3",
     "@types/node": "^24.13.3",
+    "@types/pg": "^8.23.1",
     "@types/react": "^19.2.17",
     "@types/react-dom": "^19.2.3",
     "@types/topojson-client": "^3.1.5",

@@ -1,102 +1,138 @@
 import { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { Navigate, useNavigate } from 'react-router-dom';
+import { ArrowRight, ShieldAlert } from 'lucide-react';
 import { useStore } from '../store/StoreContext';
-import { TECSTELLAR_MARK, TECSTELLAR_WORDMARK } from '../assets';
-import type { AgentAccount } from '../data/types';
+import { BRAND_MARK } from '../assets';
+import { BRAND } from '../brand';
+import type { Role } from '../data/types';
+import { ROLE_INFO, isActive } from '../lib/access';
+import { homeFor } from '../lib/routes';
+import { Avatar, Button, Callout, Field, Input } from '../ui/primitives';
+import './login.css';
 
-function landingFor(role: AgentAccount['role']) {
-  if (role === 'agent') return '/launcher';
-  if (role === 'supervisor') return '/supervisor';
-  return '/owner';
-}
+const ROLE_ORDER: Role[] = ['agent', 'supervisor', 'admin'];
 
 export default function LoginPage() {
-  const { state, dispatch, ready, backend } = useStore();
+  const { state, dispatch, ready, backend, currentAgent, signInWithPassword, sendPasswordReset, accessProblem } = useStore();
+  const live = backend === 'firestore';
   const navigate = useNavigate();
-  const [username, setUsername] = useState('abhinaya.m');
-  const [password, setPassword] = useState('••••••••••');
+  const [username, setUsername] = useState('');
+  const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
+  const [info, setInfo] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  if (ready && currentAgent && isActive(currentAgent)) return <Navigate to={homeFor(currentAgent.role)} replace />;
+
+  async function signInLive() {
+    if (!signInWithPassword || busy) return;
+    setBusy(true);
+    setInfo(null);
+    const r = await signInWithPassword(username, password);
+    setBusy(false);
+    if (!r.ok) setError(r.message);
+  }
+
+  async function forgot() {
+    if (!sendPasswordReset) return;
+    if (!username.trim()) return setError('Type your email first, then choose “Forgot password”.');
+    const r = await sendPasswordReset(username);
+    if (!r.ok) return setError(r.message);
+    setError(null);
+    setInfo('If that email has a login, a link to choose a new password is on its way.');
+  }
 
   function signIn(u?: string) {
     if (!ready) return;
-    const uname = (u ?? username).trim().toLowerCase();
-    const account = state.agents.find((a) => a.username.toLowerCase() === uname);
-    if (!account) {
-      setError(state.agents.length ? 'No account with that username. Try one of the accounts below.' : 'No accounts found yet.');
-      return;
-    }
+    const name = (u ?? username).trim().toLowerCase();
+    const account = state.agents.find((a) => a.username.toLowerCase() === name);
+    if (!account) return setError('No account with that username. Check the spelling, or ask your admin to add you.');
+    if ((account.status ?? 'active') === 'suspended') return setError('This account is suspended. Ask your admin to reactivate it.');
+    if (account.status === 'invited') return setError('This account has not been set up yet. Use the invite link your admin sent you.');
     dispatch({ type: 'LOGIN', agentId: account.id });
-    navigate(landingFor(account.role));
+    navigate(homeFor(account.role));
   }
 
   return (
-    <div style={{ minHeight: '100vh', display: 'grid', placeItems: 'center', padding: 24 }}>
-      <div className="elev-lg" style={{ width: 880, maxWidth: '100%', background: 'var(--color-bg)' }}>
-        <div style={{ display: 'grid', gridTemplateColumns: '360px 1fr', minHeight: 460 }}>
-          <div style={{ background: 'var(--brand-gradient)', color: 'var(--color-bg)', padding: 'var(--space-6)', display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
-            <img src={TECSTELLAR_MARK} alt="Tecstellar" style={{ width: 52, height: 52, objectFit: 'contain', marginBottom: 'var(--space-4)' }} />
-            <div style={{ fontFamily: 'var(--font-heading)', fontWeight: 800, fontSize: 40, lineHeight: 0.95, letterSpacing: '-.03em' }}>
-              Tecstellar<br />Command<br />Center
-            </div>
-            <div>
-              <div style={{ height: 2, background: 'var(--color-bg)', opacity: 0.5, marginBottom: 'var(--space-3)' }} />
-              <div style={{ fontSize: 13, lineHeight: 1.5 }}>One console for every app we ship. Users, payments, tickets and follow-ups — no more app-by-app dashboards.</div>
-              <div style={{ fontFamily: 'ui-monospace,Menlo,monospace', fontSize: 11, marginTop: 'var(--space-4)', opacity: 0.8 }}>tcc.tecstellar.com</div>
-            </div>
-          </div>
-          <div style={{ padding: 'var(--space-8) var(--space-6)', display: 'flex', flexDirection: 'column', justifyContent: 'center', background: 'var(--color-neutral-100)' }}>
-            <img src={TECSTELLAR_WORDMARK} alt="Tecstellar" style={{ width: 190, height: 'auto', marginBottom: 'var(--space-6)' }} />
-            <div className="eyebrow">Sign in</div>
-            <h3 style={{ margin: 'var(--space-2) 0 var(--space-6)' }}>Agent, supervisor or admin</h3>
-            <form
-              onSubmit={(e) => {
-                e.preventDefault();
-                signIn();
-              }}
-            >
-              <div className="field" style={{ marginBottom: 'var(--space-4)' }}>
-                <label htmlFor="tcc-un">Username</label>
-                <input className="input" id="tcc-un" type="text" value={username} onChange={(e) => setUsername(e.target.value)} />
-              </div>
-              <div className="field" style={{ marginBottom: 'var(--space-3)' }}>
-                <label htmlFor="tcc-pw">Password</label>
-                <input className="input" id="tcc-pw" type="password" value={password} onChange={(e) => setPassword(e.target.value)} />
-              </div>
-              {error && <div style={{ color: '#a3271b', fontSize: 12, marginBottom: 'var(--space-3)' }}>{error}</div>}
-              <button className="btn btn-primary btn-block" type="submit">Sign in</button>
-            </form>
-            <div style={{ height: 1, background: 'var(--color-divider)', margin: 'var(--space-6) 0 var(--space-3)' }} />
-            <div className="eyebrow" style={{ marginBottom: 'var(--space-2)' }}>Quick sign-in · sample accounts</div>
-            {!ready ? (
-              <div style={{ fontSize: 12, color: 'var(--color-neutral-700)' }}>Connecting to TCC…</div>
-            ) : (
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-                {state.agents.map((a) => (
-                  <button
-                    key={a.id}
-                    type="button"
-                    className="tag tag-outline"
-                    style={{ cursor: 'pointer', background: 'none', border: '1px solid var(--color-accent)' }}
-                    onClick={() => {
-                      setUsername(a.username);
-                      signIn(a.username);
-                    }}
-                  >
-                    {a.name} · {a.role}
-                  </button>
-                ))}
-                {state.agents.length === 0 && <div style={{ fontSize: 12, color: 'var(--color-neutral-700)' }}>No accounts yet — create one from Supervisor → Team &amp; access.</div>}
-              </div>
-            )}
-            <div style={{ fontSize: 12, color: 'var(--color-neutral-700)', lineHeight: 1.6, marginTop: 'var(--space-4)' }}>
-              Agents land on their queue. Supervisors land on team performance. Admins land on the all-app dashboard.
-            </div>
-            <div style={{ fontSize: 11, color: 'var(--color-neutral-600)', marginTop: 'var(--space-2)' }}>
-              {backend === 'firestore' ? 'Live · connected to Firestore' : 'Local demo data · no Firebase project configured'}
-            </div>
-          </div>
+    <div className="login">
+      <aside className="login__brand">
+        <div className="row" style={{ gap: 12 }}>
+          <img className="login__mark" src={BRAND_MARK} alt="" width={36} height={36} />
+          <span style={{ fontSize: 17, fontWeight: 600 }}>{BRAND.name}</span>
         </div>
-      </div>
+        <div className="login__pitch">
+          <h1>{BRAND.loginHeadline}</h1>
+          <p>{BRAND.loginBlurb}</p>
+        </div>
+        <div className="login__rule" aria-hidden>
+          <span />
+          <span />
+        </div>
+      </aside>
+
+      <main className="login__panel">
+        <div className="login__card">
+          <div>
+            <h2 style={{ fontSize: 22 }}>Sign in</h2>
+            <p className="muted" style={{ marginTop: 4 }}>Agents land on today’s queue, supervisors on their team, admins on the overview.</p>
+          </div>
+          <form
+            className="stack"
+            onSubmit={(e) => {
+              e.preventDefault();
+              if (live) void signInLive();
+              else signIn();
+            }}
+          >
+            <Field label={live ? 'Email' : 'Username'} htmlFor="tcc-un">
+              <Input id="tcc-un" type={live ? 'email' : 'text'} value={username} onChange={(e) => { setUsername(e.target.value); setError(null); }} autoComplete="username" autoFocus placeholder={live ? BRAND.emailPlaceholder : BRAND.usernamePlaceholder} />
+            </Field>
+            <Field label="Password" htmlFor="tcc-pw">
+              <Input id="tcc-pw" type="password" value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="current-password" />
+            </Field>
+            {(error ?? accessProblem) && <Callout tone="danger">{error ?? accessProblem}</Callout>}
+            {info && <Callout tone="ok">{info}</Callout>}
+            <Button type="submit" variant="primary" size="lg" block disabled={!ready || busy || !username.trim() || (live && !password)}>{busy ? 'Signing in…' : 'Sign in'}</Button>
+            {live && <button type="button" className="btn btn--link" style={{ alignSelf: 'center' }} onClick={() => void forgot()}>Forgot password?</button>}
+          </form>
+
+          {!live && (
+            <Callout tone="warn" icon={<ShieldAlert size={16} />}>
+              Demo sign-in: no database is connected, so passwords are not checked and the data stays in this browser.
+            </Callout>
+          )}
+
+          {!live && <div className="stack" style={{ gap: 10 }}>
+            <div className="section-label">Sample accounts</div>
+            {!ready ? (
+              <span className="muted">Connecting…</span>
+            ) : (
+              ROLE_ORDER.map((role) => {
+                const people = state.agents.filter((a) => a.role === role && isActive(a));
+                if (!people.length) return null;
+                return (
+                  <div key={role} className="login__group">
+                    <span className="login__role">{ROLE_INFO[role].label}s</span>
+                    <div className="login__people">
+                      {people.map((a) => (
+                        <button key={a.id} type="button" className="login__person" onClick={() => signIn(a.username)}>
+                          <Avatar name={a.name} />
+                          <span style={{ minWidth: 0, textAlign: 'left' }}>
+                            <span className="truncate" style={{ display: 'block', fontWeight: 500 }}>{a.name}{a.trainee ? ' · trainee' : ''}</span>
+                            <span className="truncate muted" style={{ display: 'block', fontSize: 12.5 }}>{a.languages.slice(0, 3).join(', ') || 'All apps'}</span>
+                          </span>
+                          <ArrowRight size={15} className="login__go" />
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                );
+              })
+            )}
+          </div>}
+          <p className="muted" style={{ fontSize: 12.5 }}>{backend === 'firestore' ? 'Live data · connected to Firestore' : 'Sample data in this browser · no database connected yet'}</p>
+        </div>
+      </main>
     </div>
   );
 }

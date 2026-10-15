@@ -66,3 +66,14 @@ export function nextTask(agent: AgentAccount, users: CustomerUser[], appId: AppI
   }
   return null;
 }
+
+/** Customers in queues that someone with this scope could be served (apps × states × languages). */
+export function reachableCount(scope: Pick<AgentAccount, 'apps' | 'languages' | 'states'>, users: CustomerUser[]): number {
+  let n = 0;
+  for (const u of users) {
+    if (!u.queue || !scope.apps.includes(u.app) || !scope.states.includes(u.effectiveState)) continue;
+    if (u.state !== null && !scope.languages.includes(u.language)) continue;
+    n++;
+  }
+  return n;
+}

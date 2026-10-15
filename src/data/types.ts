@@ -1,4 +1,28 @@
+import type { MediaStats } from '../telephony';
+import type { CallAnalysis } from '../lib/analysis/model';
+import type { LevelSample } from '../lib/analysis/speakers';
+import { BRAND } from '../brand';
+
+export type { CallAnalysis, LevelSample };
+
 export type QueueKey = 'new' | 'tickets' | 'payments' | 'followup' | 'errors' | 'inactive';
+
+/** One-line diagnosis of which audio direction failed, from the last WebRTC stats sample. */
+export function telephonyQualitySummary(q: MediaStats | undefined | null): string | null {
+  if (!q) return null;
+  const sent = q.packetsSent;
+  const received = q.packetsReceived;
+  const pct = (v: number) => `${Math.round(v * 100)}%`;
+  const delay = q.roundTripSec !== undefined ? ` · delay ${Math.round(q.roundTripSec * 1000)}ms` : '';
+  if (sent === 0 && received === 0) return 'No media';
+  if (sent === 0) return 'No audio sent — microphone uplink is dead';
+  if (q.remoteFractionLost !== undefined && q.remoteFractionLost >= 0.5) return `One-way audio — they received almost nothing (${pct(q.remoteFractionLost)} lost)`;
+  if (received === 0) return 'No audio received — you would not hear them';
+  const downLost = q.packetsLost !== undefined && q.packetsReceived !== undefined ? q.packetsLost / (q.packetsLost + q.packetsReceived) : undefined;
+  if (downLost !== undefined && downLost >= 0.05) return `Loss ${pct(downLost)}${delay}`;
+  if (q.jitterSec !== undefined && q.jitterSec >= 0.06) return `Jitter ${Math.round(q.jitterSec * 1000)}ms${delay}`;
+  return 'Both directions flowing';
+}
 
 export interface QueueDef {
   key: QueueKey;
@@ -7,16 +31,17 @@ export interface QueueDef {
   short: string;
 }
 
-export const QUEUES: QueueDef[] = [
+export const QUEUES: QueueDef[] = ([
   { key: 'new', order: 1, label: 'New registrations', short: 'New' },
   { key: 'tickets', order: 2, label: 'Tickets & flags', short: 'Tickets' },
   { key: 'payments', order: 3, label: 'Payments & dues', short: 'Payments' },
   { key: 'followup', order: 4, label: 'Positive follow-up', short: 'Follow-up' },
   { key: 'errors', order: 5, label: 'Errors & drop-offs', short: 'Errors' },
   { key: 'inactive', order: 6, label: 'Inactive 30+ days', short: 'Inactive' },
-];
+] as QueueDef[]).map((q) => ({ ...q, ...BRAND.queueLabels[q.key] }));
 
-export type AppId = 'realbroks' | 'irondrobe' | 'influnet' | 'vehigo';
+/** Tecstellar's apps, plus each white-label client's own line of business (src/brand). */
+export type AppId = 'realbroks' | 'irondrobe' | 'influnet' | 'vehigo' | 'vanmoh';
 
 export interface AppDef {
   id: AppId;
@@ -37,10 +62,17 @@ export interface StateDef {
 
 export type Role = 'agent' | 'supervisor' | 'admin';
 
+/** What a person may do inside one app. Queues, languages and states then narrow which customers they see. */
+export type Capability = 'call' | 'tickets' | 'payments' | 'recordings' | 'export';
+
+export type AccountStatus = 'active' | 'invited' | 'suspended';
+
 export interface AgentAccount {
   id: string;
   name: string;
   username: string;
+  /** The Firebase Auth login (Firestore backend). Not used by the local demo store. */
+  email?: string;
   role: Role;
   trainee?: boolean;
   apps: AppId[];
@@ -49,6 +81,14 @@ export interface AgentAccount {
   states: string[];
   dailyTarget: number;
   clickToDial: boolean;
+  /** Softphone login (TeleCMI user id, e.g. "101_33338836"). The password is never stored — the agent types it per session. */
+  telecmiUserId?: string;
+  /** Suspended people cannot sign in. Missing on older records = active. */
+  status?: AccountStatus;
+  /** Per-app capabilities. Missing for an app = the role's defaults (src/lib/access.ts). */
+  capabilities?: Partial<Record<AppId, Capability[]>>;
+  phone?: string;
+  createdTs?: number;
   lastActiveLabel: string;
   todayCalls: number;
   todayConnected: number;
@@ -93,6 +133,26 @@ export const OUTCOME_LIST: { outcome: Outcome; key: string; note?: string }[] = 
   { outcome: 'Using competitor', key: 'i' },
 ];
 
+// Telephony details for calls placed through the in-app softphone (absent for calls logged by hand).
+export interface CallTelephony {
+  provider: string;
+  callId: string | null;
+  durationSec: number;
+  ringSec: number;
+  disposition: string;
+  /** When the call started (epoch ms) and the number dialled — what a recording lookup is matched on. */
+  startedAt?: number;
+  remote?: string;
+  /** Audio recording filename as reported by TeleCMI (e.g. "rec_123456.wav"). */
+  recordingFile?: string;
+  /** Full streamable/downloadable URL for the call recording. */
+  recordingUrl?: string;
+  /** Last WebRTC media-quality sample before the call ended — which audio direction failed. Absent on older entries. */
+  quality?: MediaStats;
+  /** Per-second loudness of each side, [seconds, agent, customer] — who spoke when. */
+  levels?: LevelSample[];
+}
+
 export interface CallLogEntry {
   id: string;
   atLabel: string;
@@ -102,6 +162,38 @@ export interface CallLogEntry {
   outcome?: Outcome;
   comment: string;
   auto?: boolean;
+  telephony?: CallTelephony;
+  /** Post-call analysis: transcript, summary, sentiment, objections, next step (src/lib/analysis). */
+  analysis?: CallAnalysis;
+  /** Why the last analysis attempt failed, when it did. */
+  analysisError?: string;
+}
+
+export type AuditAction =
+  | 'signed_in'
+  | 'signed_out'
+  | 'user_created'
+  | 'access_changed'
+  | 'user_suspended'
+  | 'user_reactivated'
+  | 'escalation_approved'
+  | 'escalation_declined'
+  | 'owner_reassigned'
+  | 'queues_distributed'
+  | 'payment_marked_paid'
+  | 'data_exported'
+  | 'customers_imported';
+
+/** One line of the change log: who did what to whom. Everything an admin needs to answer "who changed this?". */
+export interface AuditEntry {
+  id: string;
+  ts: number;
+  actorId: string;
+  actorName: string;
+  action: AuditAction;
+  /** Who or what was changed (a person, a customer, a list). */
+  target?: string;
+  detail: string;
 }
 
 export interface TicketRecord {
@@ -178,6 +270,8 @@ export interface CustomerUser {
   hasActiveEscalation?: boolean;
   ownerAgentId: string | null;
   mrr?: number;
+  /** Made on the spot by dialling a number that isn't a customer yet (Workspace › Dial a number). */
+  adHoc?: boolean;
 }
 
 // The subset of CustomerUser that TCC itself owns and writes live to
