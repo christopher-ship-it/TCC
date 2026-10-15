@@ -87,7 +87,7 @@ export default function CallDetail() {
               {src ? (
                 <RecordingPlayer src={src} durationHint={t?.durationSec} onTime={setPlayhead} registerSeek={registerSeek} sample={!real} />
               ) : t?.durationSec ? (
-                <Callout icon={<Loader2 size={16} className="spin" />}>Waiting for TeleCMI to finish the recording — usually under a minute after the call ends.</Callout>
+                <Callout icon={<Loader2 size={16} className="spin" />}>Waiting for the call recording to finish the recording — usually under a minute after the call ends.</Callout>
               ) : (
                 <span className="muted">The call didn’t connect, so there is nothing to record.</span>
               )}

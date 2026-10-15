@@ -60,7 +60,7 @@ function SignIn({ agent, failed }: { agent: AgentAccount; failed?: string | null
   }
   return (
     <form onSubmit={submit} style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-      <div className="phone__note">Sign in to your TeleCMI line once per session to call from the browser.</div>
+      <div className="phone__note">Sign in to your phone line once per session to call from the browser.</div>
       {failed && <div className="phone__warn"><AlertTriangle size={15} />Couldn’t connect — {failed}</div>}
       <Field label="Softphone user ID" htmlFor="sp-user">
         <Input id="sp-user" value={userId} onChange={(e) => setUserId(e.target.value)} placeholder="5002_33338836" autoComplete="username" />

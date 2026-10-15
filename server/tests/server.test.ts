@@ -36,7 +36,7 @@ test('recording sources refuse anything but a bare file name', () => {
 test('a carrier error page is reported without leaking the secret, and audio is cached', async () => {
   const e = env();
   const htmlOnly = (async () => new Response('<html>please log in</html>', { status: 200 })) as typeof fetch;
-  await assert.rejects(fetchRecording('a.mp3', e, htmlOnly), (err: Error) => !err.message.includes('s3cret') && err.message.includes('please log in'));
+  await assert.rejects(fetchRecording('a.mp3', e, htmlOnly), (err: Error) => !err.message.includes('s3cret') && !/telecmi/i.test(err.message) && !err.message.includes('please log in'));
 
   let calls = 0;
   const ok = (async () => {

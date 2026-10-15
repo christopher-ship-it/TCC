@@ -178,16 +178,16 @@ function installMediaTap(): void {
       // pure silence — the call connects and the far side hears nothing. Prefer a real microphone.
       const mic = await acquireMicrophone({ getUserMedia: origGetUserMedia, enumerateDevices: origEnumerateDevices }, callAudioConstraints(constraints));
       stream = mic.stream;
-      if (mic.replacedVirtual) console.warn('[telecmi mic] Default input was a virtual device; using', mic.label);
-      console.debug('[telecmi mic] Capturing from:', mic.label);
+      if (mic.replacedVirtual) console.warn('[phone mic] Default input was a virtual device; using', mic.label);
+      console.debug('[phone mic] Capturing from:', mic.label);
     } catch (err) {
-      console.warn('[telecmi mic] Microphone selection failed, falling back to basic audio', err);
+      console.warn('[phone mic] Microphone selection failed, falling back to basic audio', err);
       stream = await origGetUserMedia({ audio: true, video: false });
     }
     stream.getAudioTracks().forEach((track) => {
       track.enabled = true;
-      track.addEventListener('mute', () => console.warn('[telecmi mic] Audio track was MUTED by system:', track.label));
-      track.addEventListener('unmute', () => console.debug('[telecmi mic] Audio track UNMUTED:', track.label));
+      track.addEventListener('mute', () => console.warn('[phone mic] Audio track was MUTED by system:', track.label));
+      track.addEventListener('unmute', () => console.debug('[phone mic] Audio track UNMUTED:', track.label));
     });
     return stream;
   };
@@ -232,9 +232,9 @@ function playRemote(stream: MediaStream): void {
   el.muted = false;
   el.volume = 1;
   el.play()
-    .then(() => console.debug('[telecmi audio] Playing their audio'))
+    .then(() => console.debug('[phone audio] Playing their audio'))
     .catch((err: unknown) => {
-      console.warn('[telecmi audio] Browser refused to play their audio — will retry on the next click', err);
+      console.warn('[phone audio] Browser refused to play their audio — will retry on the next click', err);
       if (resumeArmed) return;
       resumeArmed = true;
       const retry = () => {
@@ -259,7 +259,7 @@ function capturePeer(peer: RTCPeerConnection): void {
       peer.getSenders().forEach((s) => {
         if (s.track && s.track.kind === 'audio') {
           s.track.enabled = true;
-          console.debug('[telecmi peer] Verified audio sender track enabled:', s.track.label, 'muted:', s.track.muted);
+          console.debug('[phone peer] Verified audio sender track enabled:', s.track.label, 'muted:', s.track.muted);
         }
       });
     }
@@ -281,10 +281,10 @@ function installPeerTap(): void {
       if (track.kind === 'audio') {
         track.enabled = true;
         track.addEventListener('mute', () => {
-          console.warn('[telecmi audio track] Track MUTED by system/browser! Label:', track.label);
+          console.warn('[phone audio track] Track MUTED by system/browser! Label:', track.label);
         });
         track.addEventListener('unmute', () => {
-          console.log('[telecmi audio track] Track UNMUTED. Label:', track.label);
+          console.log('[phone audio track] Track UNMUTED. Label:', track.label);
         });
       }
       return super.addTrack(track, ...streams);
@@ -320,7 +320,7 @@ function loadSdk(scriptUrl: string): Promise<PiopiyCtor> {
   const existing = pick();
   if (existing) return Promise.resolve(existing);
   const doc = g.document;
-  if (!doc) return Promise.reject(new Error('TeleCMI softphone needs a browser'));
+  if (!doc) return Promise.reject(new Error('The softphone needs a browser'));
   return new Promise((resolve, reject) => {
     const el = doc.createElement('script');
     el.src = scriptUrl;
@@ -330,7 +330,7 @@ function loadSdk(scriptUrl: string): Promise<PiopiyCtor> {
       if (ctor) resolve(ctor);
       else reject(new Error('piopiy.min.js loaded but exposed no PIOPIY constructor'));
     };
-    el.onerror = () => reject(new Error(`Could not load the TeleCMI SDK from ${scriptUrl}`));
+    el.onerror = () => reject(new Error('Could not load the softphone'));
     doc.head.appendChild(el);
   });
 }
@@ -379,7 +379,7 @@ export class TeleCmiProvider implements TelephonyProvider {
     this.desiredConnected = true;
     void fetchUserToken(credentials.userId, credentials.password).then((token) => {
       this.userToken = token;
-      if (this.config.debug) console.debug('[telecmi] REST token', token ? 'obtained' : 'NOT obtained — recordings cannot be looked up');
+      if (this.config.debug) console.debug('[phone] REST token', token ? 'obtained' : 'NOT obtained — recordings cannot be looked up');
     });
     this.ensureSdk(credentials.displayName)
       .then((sdk) => {
@@ -448,7 +448,7 @@ export class TeleCmiProvider implements TelephonyProvider {
     const entries = await fetchOutgoingCdr(this.userToken, q.startedAt - 5 * 60_000, q.startedAt + 10 * 60_000);
     const file = pickRecording(entries, q, this.claimedRecordings);
     if (file) this.claimedRecordings.add(file);
-    if (this.config.debug) console.debug('[telecmi] out_cdr', { returned: entries.length, picked: file ?? null });
+    if (this.config.debug) console.debug('[phone] out_cdr', { returned: entries.length, picked: file ?? null });
     return file;
   }
 
@@ -461,12 +461,12 @@ export class TeleCmiProvider implements TelephonyProvider {
     const delays = [3000, 5000, 8000, 12000, 20000]; // ≈ 48 s in total
     const attempt = async (i: number): Promise<void> => {
       const file = await this.findRecording(query).catch((e: unknown) => {
-        if (this.config.debug) console.debug('[telecmi] out_cdr failed', e);
+        if (this.config.debug) console.debug('[phone] out_cdr failed', e);
         return undefined;
       });
       if (file) this.emit({ type: 'recording', file });
       else if (i + 1 < delays.length) setTimeout(() => void attempt(i + 1), delays[i + 1]);
-      else console.warn('[telecmi] No recording found for the call after', delays.length, 'lookups');
+      else console.warn('[phone] No recording found for the call after', delays.length, 'lookups');
     };
     setTimeout(() => void attempt(0), delays[0]);
   }
@@ -492,10 +492,10 @@ export class TeleCmiProvider implements TelephonyProvider {
     if (this.micChecked || !stats.micLabel) return;
     this.micChecked = true;
     if (!isVirtualInput(stats.micLabel) || savedMicChoice()) return;
-    console.warn(`[telecmi mic] Call is sending from a virtual input (${stats.micLabel}) — switching to a real microphone`);
+    console.warn(`[phone mic] Call is sending from a virtual input (${stats.micLabel}) — switching to a real microphone`);
     this.setMicrophone(null)
-      .then((label) => console.debug('[telecmi mic] Now sending from', label))
-      .catch((e) => console.warn('[telecmi mic] Could not switch microphone', e));
+      .then((label) => console.debug('[phone mic] Now sending from', label))
+      .catch((e) => console.warn('[phone mic] Could not switch microphone', e));
   }
 
   getCallId(): string | null {
@@ -548,7 +548,7 @@ export class TeleCmiProvider implements TelephonyProvider {
   private logMediaSummary(): void {
     const s = this.lastStats;
     if (!s) return;
-    console.info('[telecmi] call media summary', {
+    console.info('[phone] call media summary', {
       mic: s.micLabel ?? 'unknown',
       micLevel: s.audioLevel,
       packetsSent: s.packetsSent,
@@ -579,7 +579,7 @@ export class TeleCmiProvider implements TelephonyProvider {
   private wire(sdk: PiopiySdk): void {
     const on = (name: string, fn: (d: Record<string, unknown>) => ProviderEvent | Promise<ProviderEvent | null> | null) =>
       sdk.on(name, (d) => {
-        if (this.config.debug) console.debug(`[telecmi] ${name}`, d); // raw SDK payloads — how the unverified event assumptions get checked
+        if (this.config.debug) console.debug(`[phone] ${name}`, d); // raw SDK payloads — how the unverified event assumptions get checked
         const e = fn(d ?? {});
         if (e && typeof (e as Promise<unknown>).then === 'function') {
           (e as Promise<ProviderEvent | null>).then((ev) => {
@@ -636,7 +636,7 @@ export class TeleCmiProvider implements TelephonyProvider {
     // (e.g. a future SDK that stops exposing the peer connection). Normalised
     // and merged by the caller, like the poll's output.
     sdk.on('RTCStats', (d) => {
-      if (this.config.debug) console.debug('[telecmi] RTCStats', d);
+      if (this.config.debug) console.debug('[phone] RTCStats', d);
       const stats = sdkStatsToMediaStats(d ?? {});
       this.lastStats = { ...this.lastStats, ...stats };
       this.emit({ type: 'stats', stats: this.lastStats });
@@ -644,7 +644,7 @@ export class TeleCmiProvider implements TelephonyProvider {
     // ICE-level connectivity changes, distinct from SIP signalling — this is what
     // "the call was up but the network path died" looks like.
     sdk.on('RTC', (d) => {
-      if (this.config.debug) console.debug('[telecmi] RTC', d);
+      if (this.config.debug) console.debug('[phone] RTC', d);
       if ((d as { state?: unknown } | null)?.state === 'disconnected') this.emit({ type: 'error', code: 1004, message: 'Media connection lost (network changed?)' });
     });
   }

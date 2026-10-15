@@ -60,7 +60,7 @@ export async function fetchRecording(file: string, env: ServerEnv, fetchImpl: ty
   } catch {
     // not cached yet
   }
-  if (!sources.length) throw new Error('Recordings need the TeleCMI App ID (VITE_TELECMI_APP_ID) and App Secret (TELECMI_APP_SECRET) in .env.local.');
+  if (!sources.length) throw new Error('Call recordings are not available right now.');
 
   const answers: string[] = [];
   for (const url of sources) {
@@ -83,8 +83,6 @@ export async function fetchRecording(file: string, env: ServerEnv, fetchImpl: ty
       answers.push(e instanceof Error ? e.message : 'request failed');
     }
   }
-  const hint = env.telecmiSecret
-    ? 'TeleCMI did not return audio — check TELECMI_APP_SECRET is the App Secret from TeleCMI Dashboard › Developer.'
-    : 'TELECMI_APP_SECRET is not set, and TeleCMI’s dashboard link needs a login.';
-  throw new Error(`${hint} (${answers.join(' | ')})`);
+  console.error(`[tcc api] recording ${file} not retrieved${env.telecmiSecret ? '' : ' (App Secret not set)'}: ${answers.join(' | ')}`);
+  throw new Error('The recording is not available yet.');
 }

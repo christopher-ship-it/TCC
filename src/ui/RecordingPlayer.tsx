@@ -103,7 +103,7 @@ export function RecordingPlayer({ src, durationHint, onTime, registerSeek, sampl
           onTime?.(e.currentTarget.currentTime);
         }}
         onLoadedMetadata={(e) => Number.isFinite(e.currentTarget.duration) && setDuration(e.currentTarget.duration)}
-        onError={() => setError(src.startsWith('/api/') ? 'The recording could not be fetched from TeleCMI — the server needs TELECMI_APP_SECRET, or the file is not ready yet.' : 'This recording could not be played.')}
+        onError={() => setError(src.startsWith('/api/') ? 'The recording is not available yet — try again in a minute.' : 'This recording could not be played.')}
       />
     </div>
   );

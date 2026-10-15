@@ -373,9 +373,9 @@ export function PersonEditor({ person, onClose }: { person?: AgentAccount; onClo
 
           {section === 'line' && (
             <>
-              <Toggle checked={d.clickToDial} onChange={(v) => set('clickToDial', v)} label="Call from the browser" help="Uses their TeleCMI line. Off: they dial from their own mobile and log the call here." />
+              <Toggle checked={d.clickToDial} onChange={(v) => set('clickToDial', v)} label="Call from the browser" help="Uses their phone line. Off: they dial from their own mobile and log the call here." />
               <div className="grid-2" style={{ gap: 12 }}>
-                <Field label="TeleCMI user ID" htmlFor="pe-cmi" hint="From TeleCMI › Users. They type their own password when the line connects — it is never stored here.">
+                <Field label="Phone line ID" htmlFor="pe-cmi" hint="They type their own password when the line connects — it is never stored here.">
                   <Input id="pe-cmi" value={d.telecmiUserId} onChange={(e) => set('telecmiUserId', e.target.value)} placeholder="5006_33338836" />
                 </Field>
                 <Field label="Daily call target" htmlFor="pe-target">
