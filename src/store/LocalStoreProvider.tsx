@@ -49,7 +49,8 @@ function reducer(state: State, action: Action): State {
         const next: CustomerUser = { ...u, callHistory };
 
         if (!action.outcome) {
-          next.attempt = u.attempt + 1;
+          // A call they made to us is not one of our attempts at reaching them.
+          if (action.telephony?.direction !== 'inbound') next.attempt = u.attempt + 1;
           return next;
         }
         if (NEGATIVE_OUTCOMES.includes(action.outcome)) {
@@ -204,6 +205,8 @@ function reducer(state: State, action: Action): State {
       const users = state.users.map((u) => (u.id === action.userId ? { ...u, ownerAgentId: action.agentId } : u));
       return withAudit({ ...state, users }, auditEntry(state.agents, action.actorId, 'owner_reassigned', user?.name, `Now owned by ${owner?.name ?? 'nobody'}`));
     }
+    case 'SET_CUSTOMER_TYPE':
+      return { ...state, users: state.users.map((u) => (u.id === action.userId ? { ...u, customerType: action.customerType } : u)) };
     case 'MARK_PAID': {
       const user = state.users.find((u) => u.id === action.userId);
       if (!user) return state;

@@ -16,6 +16,13 @@ export const telephonyProvider: TelephonyProviderContract | null =
       ? new MockProvider({ stats: { packetsSent: 50, packetsReceived: 50, bytesSent: 4000, bytesReceived: 4000, roundTripSec: 0.04, jitterSec: 0.005, codec: 'audio/opus', network: 'wifi' } })
       : null;
 
+// Demo line only: ring the agent from the browser console — `tccSimulateIncoming('9876543210')`, then
+// `tccSimulateHangup()` to have the caller give up (a missed call).
+if (telephonyProvider instanceof MockProvider && typeof window !== 'undefined') {
+  const mock = telephonyProvider;
+  Object.assign(window, { tccSimulateIncoming: (from: string) => mock.simulateIncoming(from), tccSimulateHangup: () => mock.simulateRemoteHangup() });
+}
+
 // TCC's customer phone numbers are still generated sample data (see README), so a real provider would ring strangers.
 // Until real customer data is wired in, live dialling needs an explicit choice:
 //   VITE_TELEPHONY_TEST_NUMBER=<your number>  → every call is redirected to that number, whoever the customer is
@@ -82,6 +89,7 @@ export function toCallTelephony(r: CallResult): CallTelephony {
     durationSec: r.talkSeconds,
     ringSec: r.ringSeconds,
     disposition: r.disposition,
+    ...(r.direction === 'inbound' ? { direction: 'inbound' as const } : {}),
     startedAt: r.startedAt,
     remote: r.remote,
     recordingFile,

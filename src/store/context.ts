@@ -32,6 +32,7 @@ export type Action =
   | { type: 'REASSIGN_OWNER'; userId: string; agentId: string; actorId: string }
   | { type: 'CLOSE_FOLLOWUP'; userId: string; converted: boolean }
   | { type: 'MARK_PAID'; userId: string; actorId: string }
+  | { type: 'SET_CUSTOMER_TYPE'; userId: string; customerType: string }
   | { type: 'AUTO_DISTRIBUTE'; actorId: string }
   | { type: 'LOG_EXPORT'; actorId: string; detail: string }
   /** Replaces the fabricated sample customers with a real CSV import, preserving call history etc. for any id already worked. */

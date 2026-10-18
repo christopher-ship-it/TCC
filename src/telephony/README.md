@@ -55,6 +55,16 @@ Verified with live SIP calls on App ID `33338836`:
 - Virtual input fallback: detects silent inputs (BlackHole, Teams, etc.) and routes to the real hardware mic.
 - Post-call recording retrieval: fetches recording file from `out_cdr` using the agent's REST token without requiring the TeleCMI App Secret in the browser.
 
+## Incoming calls
+
+An inbound call only reaches a browser whose line is signed in, and only if the provider routes the number to that
+agent (TeleCMI: the number's call flow must ring the agent's softphone user). It arrives as `call.state === 'incoming'`
+with the caller in `call.remote` (normalised like a dialled number). The app decides who it is and calls
+`controller.tag({ customerId, … })`, so the tags ride into the `CallResult` as they do for a dialled call. After an
+answered inbound call, the recording is looked up in TeleCMI's incoming records (`in_cdr`) and matched on the caller.
+TCC's wiring: `src/components/telephony/IncomingCall.tsx` (pop-up, ringtone) and `CallSession.tsx` (matching, logging).
+On the mock line, `tccSimulateIncoming('98765 43210')` / `tccSimulateHangup()` in the browser console ring the agent.
+
 ## Known limits
 
 - The SDK is single-session and a page-level singleton: one call at a time, one signed-in user per browser tab.

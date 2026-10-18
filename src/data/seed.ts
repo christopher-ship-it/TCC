@@ -18,6 +18,7 @@ import type {
   TicketRecord,
 } from './types';
 import { BRAND } from '../brand';
+import { customerTypesFor } from './products';
 import {
   COLLECTION_MODES, SCHEMES, SCHEME_WEIGHTS, VANMOH_AGENTS, VANMOH_APPS, VANMOH_AUDIT, VANMOH_CLEARED, VANMOH_CLEARED_ACTIONS,
   VANMOH_CLEARED_RESULTS, VANMOH_COMMENTS, VANMOH_ESCALATIONS, VANMOH_FAILED, VANMOH_FIRST_NAMES, VANMOH_NO_STATE_WEIGHT,
@@ -577,6 +578,7 @@ function buildUser(opts: {
     appVersion: r.pick(APP_VERSIONS),
     conversionScore,
     stageTag,
+    customerType: customerTypesFor(app)[r.int(0, 2)],
     queue,
     attempt,
     callHistory,

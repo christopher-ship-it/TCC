@@ -4,6 +4,7 @@
 
 import type { CallAnalysis, CallLogEntry, CustomerUser, Language } from '../data/types';
 import { TEST_NUMBER } from './telephony';
+import { customerTypesFor } from '../data/products';
 
 export const TRANSCRIBE_URL = ((import.meta.env.VITE_TRANSCRIBE_URL as string | undefined)?.trim() || 'http://127.0.0.1:8787').replace(/\/$/, '');
 
@@ -42,6 +43,7 @@ async function viaServer(entry: CallLogEntry, user: CustomerUser): Promise<CallA
       customer: TEST_NUMBER ? undefined : user.name,
       business: TEST_NUMBER ? undefined : user.business,
       app: user.app,
+      customerTypes: customerTypesFor(user.app),
       levels: entry.telephony?.levels,
     }),
   });

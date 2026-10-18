@@ -202,7 +202,8 @@ export function FirestoreStoreProvider({ children }: { children: React.ReactNode
         const callHistory = [entry, ...user.callHistory];
 
         if (!action.outcome) {
-          writeOverlay(user.id, { callHistory, attempt: user.attempt + 1 });
+          // A call they made to us is not one of our attempts at reaching them.
+          writeOverlay(user.id, action.telephony?.direction === 'inbound' ? { callHistory } : { callHistory, attempt: user.attempt + 1 });
           return;
         }
         if (NEGATIVE_OUTCOMES.includes(action.outcome)) {
@@ -304,6 +305,9 @@ export function FirestoreStoreProvider({ children }: { children: React.ReactNode
         writeAudit(action.actorId, 'owner_reassigned', user?.name, `Now owned by ${owner?.name ?? 'nobody'}`);
         return;
       }
+      case 'SET_CUSTOMER_TYPE':
+        writeOverlay(action.userId, { customerType: action.customerType });
+        return;
       case 'MARK_PAID': {
         const user = usersRef.current.find((u) => u.id === action.userId);
         if (!user) return;

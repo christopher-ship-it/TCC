@@ -1,5 +1,6 @@
 import { useMemo } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, Navigate, useNavigate } from 'react-router-dom';
+import { FEATURES } from '../../lib/features';
 import { ArrowRight, CalendarClock, Headset, Inbox } from 'lucide-react';
 import { useStore } from '../../store/StoreContext';
 import { APPS } from '../../data/seed';
@@ -19,7 +20,7 @@ function greeting() {
   return h < 12 ? 'Good morning' : h < 17 ? 'Good afternoon' : 'Good evening';
 }
 
-export default function Today() {
+function TodayPage() {
   const { state, currentAgent } = useStore();
   const navigate = useNavigate();
   const agent = currentAgent!;
@@ -128,4 +129,12 @@ export default function Today() {
       </div>
     </div>
   );
+}
+
+/** Agents land on their call queue unless the Today page is switched on (src/lib/features.ts). */
+export default function Today() {
+  const { currentAgent } = useStore();
+  const first = APPS.find((a) => a.live && currentAgent && can(currentAgent, a.id, 'call'));
+  if (!FEATURES.todayPage && first) return <Navigate to={`/work/${first.id}`} replace />;
+  return <TodayPage />;
 }

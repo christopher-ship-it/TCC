@@ -5,12 +5,14 @@
 //   GET  /api/db/health           → Neon connectivity, schema version and row counts (never the connection string)
 //   GET  /api/recordings/:file    → the call recording (Range requests supported, so the player can seek)
 //   POST /api/analyze             → { file, customer?, business?, app?, levels? } → CallAnalysis
+//   POST /api/telephony/status    → { id, password, status: online|offline } → the agent's TeleCMI availability
 
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { analyzeRecording, NotConfigured, type AnalyzeRequest } from './analyze.ts';
 import type { ServerEnv } from './env.ts';
 import { createDb } from './db.ts';
 import { fetchRecording, RECORDING_FILE_RE } from './recordings.ts';
+import { PresenceError, setAgentStatus } from './presence.ts';
 
 type Next = (err?: unknown) => void;
 
@@ -48,12 +50,14 @@ function readJson(req: IncomingMessage): Promise<unknown> {
   });
 }
 
-/** Another site in the same browser must not be able to spend this machine's Gemini or TeleCMI quota. */
-function sameOrigin(req: IncomingMessage): boolean {
+/** Another site in the same browser must not be able to spend this machine's Gemini or TeleCMI quota. A proxy
+ *  that forwards a public address here rewrites Host, so that address is accepted only when configured. */
+function sameOrigin(req: IncomingMessage, publicHosts: string[]): boolean {
   const origin = req.headers.origin;
   if (!origin) return true;
   try {
-    return new URL(origin).host === req.headers.host;
+    const host = new URL(origin).host.toLowerCase();
+    return host === req.headers.host?.toLowerCase() || publicHosts.includes(host);
   } catch {
     return false;
   }
@@ -70,7 +74,7 @@ export function createApi(env: ServerEnv) {
   return async function api(req: IncomingMessage, res: ServerResponse, next: Next) {
     const url = new URL(req.url ?? '/', 'http://local');
     if (!url.pathname.startsWith('/api/')) return next();
-    if (!sameOrigin(req)) return send(res, 403, { error: 'Cross-site request refused.' });
+    if (!sameOrigin(req, env.publicHosts)) return send(res, 403, { error: 'Cross-site request refused.' });
 
     try {
       if (req.method === 'GET' && url.pathname === '/api/health') {
@@ -125,13 +129,20 @@ export function createApi(env: ServerEnv) {
           customer: text(body.customer),
           business: text(body.business),
           app: text(body.app, 40),
+          customerTypes: Array.isArray(body.customerTypes) ? body.customerTypes.filter((t): t is string => typeof t === 'string').slice(0, 8).map((t) => t.slice(0, 40)) : undefined,
           levels: isLevels(body.levels) ? body.levels : undefined,
         };
         return send(res, 200, { analysis: await analyzeRecording(request, env) });
       }
 
+      if (req.method === 'POST' && url.pathname === '/api/telephony/status') {
+        const body = (await readJson(req)) as Record<string, unknown>;
+        return send(res, 200, { status: await setAgentStatus(body, env) });
+      }
+
       return send(res, 404, { error: 'Not found.' });
     } catch (e) {
+      if (e instanceof PresenceError) return send(res, e.status, { error: e.message });
       if (e instanceof NotConfigured) return send(res, 501, { error: e.message, notConfigured: true });
       const message = e instanceof Error ? e.message : 'Request failed.';
       console.error(`[tcc api] ${req.method} ${url.pathname}: ${message}`);

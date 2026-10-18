@@ -117,6 +117,16 @@ test('api refuses cross-site requests and reports health', async () => {
       void api(req, res, () => resolve({ status: 0, body: '' }));
     });
   assert.equal((await run({ origin: 'https://evil.example' })).status, 403);
+  const proxied = createApi(readServerEnv({ TCC_PUBLIC_HOSTS: 'vanmohchitfunds.buziness365.com' }, tmp()));
+  const viaProxy = (origin: string) =>
+    new Promise<number>((resolve) => {
+      let status = 200;
+      const req = { url: '/api/health', method: 'GET', headers: { host: 'tcc-vanmoh-production.up.railway.app', origin } } as never;
+      const res = { set statusCode(s: number) { status = s; }, setHeader() {}, end() { resolve(status); } } as never;
+      void proxied(req, res, () => resolve(0));
+    });
+  assert.equal(await viaProxy('https://vanmohchitfunds.buziness365.com'), 200, 'the forwarded public address is the same site');
+  assert.equal(await viaProxy('https://evil.example'), 403);
   const ok = await run({ origin: 'http://localhost:5173' });
   assert.equal(ok.status, 200);
   assert.deepEqual(JSON.parse(ok.body), { ok: true, analysis: true, recordings: false, telecmiAppId: false, database: false });

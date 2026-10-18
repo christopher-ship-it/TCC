@@ -133,7 +133,7 @@ export default function Calls() {
                     <td className="mono" style={{ whiteSpace: 'nowrap', fontSize: 13 }}>{call.atLabel}</td>
                     <td>
                       <a href={`#/customers/${user.id}/calls/${call.id}`} onClick={(e) => e.stopPropagation()} style={{ color: 'var(--ink)', fontWeight: 500, textDecoration: 'none' }}>{user.name}</a>
-                      <div className="muted" style={{ fontSize: 12.5 }}>{appName(user.app)} · {user.city}</div>
+                      <div className="muted" style={{ fontSize: 12.5 }}>{call.telephony?.direction === 'inbound' ? 'Incoming call · ' : ''}{appName(user.app)} · {user.city}</div>
                     </td>
                     {!isAgent && <td>{call.agentName}</td>}
                     <td><OutcomeBadge call={call} /></td>

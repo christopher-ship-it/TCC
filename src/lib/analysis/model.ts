@@ -18,6 +18,8 @@ export interface CallAnalysis {
   objections: string[];
   actionItems: string[];
   recommendation?: string;
+  /** Who the customer is, from the product's own list, when the call made it clear. */
+  customerType?: string;
   /** Customer receptiveness, 0–100. Null when nothing judged it (a bare transcript). */
   sentiment: number | null;
   languages: string[];
@@ -42,6 +44,8 @@ export interface AnalysisContext {
   customer?: string;
   business?: string;
   app?: string;
+  /** The product's customer types; the model picks one when the call makes it clear. */
+  customerTypes?: string[];
   /** Measured "who was audible when", from speakingSummary(). */
   speaking?: string;
 }
@@ -60,6 +64,7 @@ Rules:
   never assume a lone voice is the Agent. If it is a voicemail, ringing or silence, say so; never invent a conversation.
 - Each transcript line carries its start time "mm:ss" in the audio.
 - outcome must be exactly one of: ${ANALYSIS_OUTCOMES.join(' | ')}.${b.outcomeNotes ? `\n${b.outcomeNotes}` : ''}
+- customerType: ${ctx.customerTypes?.length ? `exactly one of ${ctx.customerTypes.join(' | ')}, or "" when the call does not make it clear` : '""'}.
 - sentiment is an integer 0-100 for how receptive the customer was (50 = neutral).
 - Keep summary to 2-3 plain sentences a supervisor can read in ten seconds.
 
@@ -68,7 +73,7 @@ ${ctx.speaking ? `Measured on the line (each side recorded separately, so this i
 
 Return ONLY JSON:
 {"outcome":"...","summary":"...","keyPoints":["..."],"objections":["..."],"actionItems":["..."],"recommendation":"one next step",
- "sentiment":60,"languages":["Tamil"],"transcript":[{"speaker":"Agent","at":"00:02","text":"..."}]}`;
+"customerType":"","sentiment":60,"languages":["Tamil"],"transcript":[{"speaker":"Agent","at":"00:02","text":"..."}]}`;
 }
 
 const strings = (v: unknown): string[] =>
@@ -120,6 +125,7 @@ export function parseAnalysis(raw: string, model: string, now = Date.now()): Cal
     keyPoints: strings(p.keyPoints ?? p.bullets),
     objections: strings(p.objections),
     actionItems: strings(p.actionItems),
+    customerType: typeof p.customerType === 'string' && p.customerType.trim() ? p.customerType.trim() : undefined,
     recommendation: typeof p.recommendation === 'string' && p.recommendation.trim() ? p.recommendation.trim() : undefined,
     sentiment,
     languages: strings(p.languages ?? p.detectedLanguages),

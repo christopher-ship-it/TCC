@@ -1,6 +1,6 @@
 /**
- * Agent-scoped call records (TeleCMI `POST /v2/user/out_cdr`, authenticated with the agent's own login
- * token — no App Secret) and picking the recording that belongs to a call we just made.
+ * Agent-scoped call records (TeleCMI `POST /v2/user/out_cdr` and `/v2/user/in_cdr`, authenticated with the
+ * agent's own login token — no App Secret) and picking the recording that belongs to a call we just made or took.
  *
  * Documented response fields per record: cmiuid, duration, billedsec, filename, rate, record, name, from,
  * to, time, region. Parsing is defensive because the exact envelope (`cdr` vs `data`) and the unit of
@@ -16,6 +16,7 @@ export type { RecordingQuery };
 export interface CdrEntry {
   id?: string;
   filename: string;
+  from?: string;
   to?: string;
   timeMs?: number;
   duration?: number;
@@ -40,6 +41,7 @@ export function parseCdr(body: unknown): CdrEntry[] {
     out.push({
       id: typeof raw.cmiuid === 'string' ? raw.cmiuid : typeof raw.cmiuuid === 'string' ? raw.cmiuuid : undefined,
       filename,
+      from: raw.from !== undefined ? digits(raw.from) : undefined,
       to: raw.to !== undefined ? digits(raw.to) : undefined,
       timeMs: t === undefined ? undefined : t < 1e12 ? t * 1000 : t, // seconds → ms
       duration: asNumber(raw.duration ?? raw.answer_sec),
@@ -51,7 +53,7 @@ export function parseCdr(body: unknown): CdrEntry[] {
 const WINDOW_MS = 3 * 60_000;
 
 /**
- * The recording for a call: same dialled number, started within 3 minutes, closest in time (call length breaks ties).
+ * The recording for a call: same other party (the dialled number, or the caller for an inbound call), started within 3 minutes, closest in time (call length breaks ties).
  * `claimed` holds file names already given to earlier calls so two back-to-back calls never share a recording.
  */
 export function pickRecording(entries: CdrEntry[], q: RecordingQuery, claimed: ReadonlySet<string> = new Set()): string | undefined {
@@ -59,7 +61,8 @@ export function pickRecording(entries: CdrEntry[], q: RecordingQuery, claimed: R
   let best: { file: string; score: number } | undefined;
   for (const e of entries) {
     if (claimed.has(e.filename)) continue;
-    if (e.to !== undefined && want && tail(e.to) !== want) continue;
+    const party = q.direction === 'inbound' ? e.from : e.to;
+    if (party !== undefined && want && tail(party) !== want) continue;
     if (e.timeMs === undefined) continue;
     const dt = Math.abs(e.timeMs - q.startedAt);
     if (dt > WINDOW_MS) continue;
@@ -81,16 +84,25 @@ export async function fetchUserToken(id: string, password: string, fetchImpl: ty
   }
 }
 
-/** Answered outgoing calls for the token's agent between two instants. */
-export async function fetchOutgoingCdr(token: string, fromMs: number, toMs: number, fetchImpl: typeof fetch = fetch): Promise<CdrEntry[]> {
-  const res = await fetchImpl(`${TELECMI_REST}/user/out_cdr`, {
+async function fetchCdr(kind: 'out_cdr' | 'in_cdr', token: string, fromMs: number, toMs: number, fetchImpl: typeof fetch): Promise<CdrEntry[]> {
+  const res = await fetchImpl(`${TELECMI_REST}/user/${kind}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ type: 1, token, from: fromMs, to: toMs, page: 1, limit: 10 }),
   });
-  if (!res.ok) throw new Error(`out_cdr ${res.status}`);
+  if (!res.ok) throw new Error(`${kind} ${res.status}`);
   const body = (await res.json()) as { error?: unknown; code?: unknown; message?: unknown; msg?: unknown };
   // ...and API errors likewise arrive as HTTP 200 with {error:true, code, message}.
-  if (body?.error || (typeof body?.code === 'number' && body.code >= 400)) throw new Error(`out_cdr ${String(body.code)}: ${String(body.message ?? body.msg ?? 'error')}`);
+  if (body?.error || (typeof body?.code === 'number' && body.code >= 400)) throw new Error(`${kind} ${String(body.code)}: ${String(body.message ?? body.msg ?? 'error')}`);
   return parseCdr(body);
+}
+
+/** Answered outgoing calls for the token's agent between two instants. */
+export function fetchOutgoingCdr(token: string, fromMs: number, toMs: number, fetchImpl: typeof fetch = fetch): Promise<CdrEntry[]> {
+  return fetchCdr('out_cdr', token, fromMs, toMs, fetchImpl);
+}
+
+/** Answered incoming calls for the token's agent between two instants. */
+export function fetchIncomingCdr(token: string, fromMs: number, toMs: number, fetchImpl: typeof fetch = fetch): Promise<CdrEntry[]> {
+  return fetchCdr('in_cdr', token, fromMs, toMs, fetchImpl);
 }

@@ -10,6 +10,7 @@ import type { AgentAccount, CustomerUser } from '../../data/types';
 import { LIVE_DIAL_BLOCKED, TEST_NUMBER } from '../../lib/telephony';
 import { Button, Field, Input, Select } from '../../ui/primitives';
 import { useCallSession } from './callSessionContext';
+import { announcePresence, forgetLine, rememberLine } from '../../lib/presence';
 
 const KEYS: [string, string][] = [['1', ''], ['2', 'ABC'], ['3', 'DEF'], ['4', 'GHI'], ['5', 'JKL'], ['6', 'MNO'], ['7', 'PQRS'], ['8', 'TUV'], ['9', 'WXYZ'], ['*', ''], ['0', '+'], ['#', '']];
 
@@ -38,7 +39,8 @@ function Key({ label, icon, onClick, pressed, disabled }: { label: string; icon:
   );
 }
 
-function SignIn({ agent, failed }: { agent: AgentAccount; failed?: string | null }) {
+/** The softphone login. Incoming calls only reach an agent whose line is connected. */
+export function SignIn({ agent, failed }: { agent: AgentAccount; failed?: string | null }) {
   const tel = useTelephonyOptional()!;
   const [userId, setUserId] = useState(() => {
     try {
@@ -56,11 +58,14 @@ function SignIn({ agent, failed }: { agent: AgentAccount; failed?: string | null
     } catch {
       /* private mode */
     }
+    // Ask now, while the agent is clicking: a call ringing in a background tab can then raise a system notification.
+    if (typeof Notification !== 'undefined' && Notification.permission === 'default') void Notification.requestPermission().catch(() => undefined);
+    rememberLine(userId.trim(), password); // so the line can be marked available for incoming calls once it connects
     tel.controller.connect({ userId: userId.trim(), password });
   }
   return (
     <form onSubmit={submit} style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-      <div className="phone__note">Sign in to your phone line once per session to call from the browser.</div>
+      <div className="phone__note">Sign in to your phone line once per session to make calls and receive incoming ones in the browser.</div>
       {failed && <div className="phone__warn"><AlertTriangle size={15} />Couldn’t connect — {failed}</div>}
       <Field label="Softphone user ID" htmlFor="sp-user">
         <Input id="sp-user" value={userId} onChange={(e) => setUserId(e.target.value)} placeholder="5002_33338836" autoComplete="username" />
@@ -90,7 +95,7 @@ function AudioSettings({ inCall, onBack }: { inCall: boolean; onBack: () => void
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
       <Button variant="ghost" size="sm" icon={<ChevronLeft size={15} />} onClick={onBack} style={{ alignSelf: 'flex-start' }}>Back</Button>
-      <Field label="Microphone" htmlFor="sp-mic" hint={<span style={{ color: 'var(--navy-text)' }}>Automatic skips virtual devices that carry no sound.</span>}>
+      <Field label="Microphone" htmlFor="sp-mic" hint={<span style={{ color: 'var(--muted)' }}>Automatic skips virtual devices that carry no sound.</span>}>
         <Select
           id="sp-mic"
           value={selectedDeviceId}
@@ -180,10 +185,12 @@ export function Phone({ user, agent, onEscalate }: { user: CustomerUser; agent: 
 
   const { snapshot, requiresCredentials, controller } = tel;
   const otherCall = call && call.meta.customerId !== user.id;
-  const redirected = !!TEST_NUMBER && !user.adHoc;
+  const inbound = call?.direction === 'inbound' && !otherCall;
+  const callerNumber = call && /^\d{8,15}$/.test(call.remote) ? `+${call.remote}` : (call?.remote ?? '');
+  const redirected = !!TEST_NUMBER && !user.adHoc && !inbound;
   const blocked = LIVE_DIAL_BLOCKED && !user.adHoc;
   const ended = !call && session.wrapUp?.customerId === user.id ? session.wrapUp.result : null;
-  const ringing = call && (call.state === 'dialing' || call.state === 'ringing');
+  const ringing = call && (call.state === 'dialing' || call.state === 'ringing' || call.state === 'incoming');
   const micLabel = stats?.micLabel;
   const micProblem = stats?.micMuted
     ? 'Your browser reports the microphone as muted — check system microphone privacy or a hardware switch.'
@@ -210,7 +217,7 @@ export function Phone({ user, agent, onEscalate }: { user: CustomerUser; agent: 
         {snapshot.connection === 'ready' && !call && (
           <span className="row" style={{ gap: 2 }}>
             <Button variant="ghost" size="sm" iconOnly aria-label="Audio settings" icon={<Settings2 size={15} />} onClick={() => setView(view === 'audio' ? 'controls' : 'audio')} />
-            {requiresCredentials && <Button variant="ghost" size="sm" onClick={() => controller.disconnect()}>Sign out</Button>}
+            {requiresCredentials && <Button variant="ghost" size="sm" onClick={() => void announcePresence('offline').then(() => { forgetLine(); controller.disconnect(); })}>Sign out</Button>}
           </span>
         )}
       </div>
@@ -226,7 +233,7 @@ export function Phone({ user, agent, onEscalate }: { user: CustomerUser; agent: 
           <div className="phone__id">
             <div className={`phone__avatar${ringing ? ' phone__avatar--ringing' : ''}`}>{initials(otherCall ? '?' : user.name)}</div>
             <div className="phone__name">{otherCall ? 'Another call is live' : user.name}</div>
-            <div className="phone__number">{redirected ? `Test line · ${TEST_NUMBER}` : user.phone}</div>
+            <div className="phone__number">{inbound ? `Calling you · ${callerNumber}` : redirected ? `Test line · ${TEST_NUMBER}` : user.phone}</div>
             {call && !otherCall ? (
               call.state === 'connected' ? (
                 <>
@@ -295,7 +302,7 @@ export function Phone({ user, agent, onEscalate }: { user: CustomerUser; agent: 
               </button>
             )}
           </div>
-          {!call && !ended && !session.wrapUp && snapshot.connection === 'ready' && <div style={{ textAlign: 'center', fontSize: 12, color: 'var(--navy-text)' }}>Press <kbd className="kbd" style={{ background: 'transparent', color: '#fff', borderColor: 'rgba(255,255,255,.3)' }}>F1</kbd> to call</div>}
+          {!call && !ended && !session.wrapUp && snapshot.connection === 'ready' && <div style={{ textAlign: 'center', fontSize: 12, color: 'var(--muted)' }}>Press <kbd className="kbd">F1</kbd> to call</div>}
           {session.wrapUp && session.wrapUp.customerId !== user.id && !call && <div className="phone__note">Log your last call before starting another.</div>}
           {(error || (snapshot.error && !call)) && <div className="phone__warn" role="alert"><AlertTriangle size={15} />{error ?? snapshot.error?.message}</div>}
           {!call && !ended && <Button variant="ghost" size="sm" icon={<Flag size={14} />} onClick={onEscalate} style={{ alignSelf: 'center' }}>Reroute or escalate</Button>}

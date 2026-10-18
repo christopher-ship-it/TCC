@@ -34,6 +34,8 @@ export interface RecordingQuery {
   /** When the call started, epoch ms. */
   startedAt: number;
   talkSeconds?: number;
+  /** Inbound calls are matched on the caller (and looked up in the provider's incoming records). Default outbound. */
+  direction?: CallDirection;
 }
 
 export interface CallSession {

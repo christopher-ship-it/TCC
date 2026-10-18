@@ -140,6 +140,8 @@ export interface CallTelephony {
   durationSec: number;
   ringSec: number;
   disposition: string;
+  /** 'inbound' for a call the agent took; absent (outbound) on calls the agent placed and on older entries. */
+  direction?: 'inbound' | 'outbound';
   /** When the call started (epoch ms) and the number dialled — what a recording lookup is matched on. */
   startedAt?: number;
   remote?: string;
@@ -270,6 +272,8 @@ export interface CustomerUser {
   hasActiveEscalation?: boolean;
   ownerAgentId: string | null;
   mrr?: number;
+  /** Who they are, from the product's own list (src/data/products.ts). Unset until imported or an agent picks it. */
+  customerType?: string;
   /** Made on the spot by dialling a number that isn't a customer yet (Workspace › Dial a number). */
   adHoc?: boolean;
 }
@@ -279,7 +283,7 @@ export interface CustomerUser {
 // data — generated for now, destined to come from the existing app database.
 export type CustomerOverlay = Pick<
   CustomerUser,
-  'queue' | 'attempt' | 'callHistory' | 'tickets' | 'paymentDue' | 'followUp' | 'paying' | 'plan' | 'planNote' | 'mrr' | 'stageTag' | 'ownerAgentId' | 'hasActiveEscalation' | 'language'
+  'queue' | 'attempt' | 'callHistory' | 'tickets' | 'paymentDue' | 'followUp' | 'paying' | 'plan' | 'planNote' | 'mrr' | 'stageTag' | 'ownerAgentId' | 'hasActiveEscalation' | 'language' | 'customerType'
 >;
 
 export function overlayFromUser(u: CustomerUser): CustomerOverlay {
@@ -298,5 +302,6 @@ export function overlayFromUser(u: CustomerUser): CustomerOverlay {
     ownerAgentId: u.ownerAgentId,
     hasActiveEscalation: u.hasActiveEscalation,
     language: u.language,
+    customerType: u.customerType,
   };
 }

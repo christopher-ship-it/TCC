@@ -8,7 +8,11 @@ import { useStore } from '../store/StoreContext';
 import { ROLE_INFO, canAnywhere } from '../lib/access';
 import { formatDuration, useElapsedSeconds, useTelephonyOptional } from '../telephony';
 import { useCallSession } from '../components/telephony/callSessionContext';
+import { LineStatus } from '../components/telephony/LineStatus';
 import { Avatar } from '../ui/primitives';
+import { BRAND } from '../brand';
+import { FEATURES } from '../lib/features';
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { ScopeContext, type ScopeValue } from './scope';
 import './shell.css';
 
@@ -26,7 +30,7 @@ function navFor(role: Role, pendingEscalations: number, firstApp: AppId | undefi
     return [
       {
         items: [
-          { to: '/home', label: 'Today', icon: <Home size={s} /> },
+          ...(FEATURES.todayPage ? [{ to: '/home', label: 'Today', icon: <Home size={s} /> }] : []),
           { to: firstApp ? `/work/${firstApp}` : '/home', label: 'Call queue', icon: <Headset size={s} /> },
           { to: '/calls', label: 'My calls', icon: <History size={s} /> },
         ],
@@ -106,13 +110,13 @@ function CustomerSearch({ apps }: { apps: AppId[] }) {
           if (e.key === 'Enter' && results[active]) go(results[active].id);
           if (e.key === 'Escape') input.current?.blur();
         }}
-        placeholder="Search customers by name, phone or shop code"
+        placeholder="Quick search…"
         aria-label="Search customers"
         role="combobox"
         aria-expanded={open && results.length > 0}
         aria-controls="shell-search-results"
       />
-      <kbd className="kbd shell-search__kbd">/</kbd>
+      <kbd className="kbd shell-search__kbd">⌘K</kbd>
       {open && q.trim().length >= 2 && (
         <ul id="shell-search-results" role="listbox" className="shell-search__menu">
           {results.length === 0 && <li className="shell-search__empty">No customer matches “{q}”.</li>}
@@ -150,7 +154,7 @@ function CallPill() {
       <span className={`dot ${call ? 'dot--live' : 'dot--warn'}`} />
       {call ? (
         <>
-          {call.state === 'connected' ? 'On a call' : 'Calling'} · <span className="mono">{formatDuration(elapsed)}</span>
+          {call.state === 'connected' ? 'On a call' : call.state === 'incoming' ? 'Incoming call' : 'Calling'} · <span className="mono">{formatDuration(elapsed)}</span>
         </>
       ) : (
         <>Log your call with {user?.name.split(' ')[0] ?? 'the customer'}</>
@@ -163,7 +167,6 @@ export default function AppShell() {
   const { state, currentAgent, dispatch, backend } = useStore();
   const navigate = useNavigate();
   const location = useLocation();
-  const [menuOpen, setMenuOpen] = useState(false);
 
   const visibleApps = useMemo<AppId[]>(() => {
     if (!currentAgent) return [];
@@ -174,7 +177,6 @@ export default function AppShell() {
   const scope = useMemo<ScopeValue>(() => ({ app, setApp, visibleApps, apps: app === 'all' ? visibleApps : [app] }), [app, visibleApps]);
 
   useEffect(() => {
-    setMenuOpen(false);
     window.scrollTo(0, 0);
   }, [location.pathname]);
 
@@ -187,76 +189,15 @@ export default function AppShell() {
   return (
     <ScopeContext.Provider value={scope}>
       <div className="shell">
-        <header className="shell-header">
-          <div className="shell-header__row">
-            <button type="button" className="shell-brand" onClick={() => navigate('/')} aria-label="Command Center home">
-              <img src={BRAND_MARK} alt="" />
-              <span>Command Center</span>
-            </button>
-            {showScope && (
-              <label className="shell-scope">
-                <span className="sr-only">Show numbers for</span>
-                <select value={app} onChange={(e) => setApp(e.target.value as AppId | 'all')}>
-                  <option value="all">All apps</option>
-                  {visibleApps.map((id) => (
-                    <option key={id} value={id}>{APPS.find((a) => a.id === id)?.name}{APPS.find((a) => a.id === id)?.live ? '' : ' (not live)'}</option>
-                  ))}
-                </select>
-                <ChevronDown size={14} aria-hidden />
-              </label>
-            )}
-            <CustomerSearch apps={visibleApps} />
-            <div className="shell-header__right">
-              <CallPill />
-              <div className="shell-user">
-                <button type="button" className="shell-user__btn" aria-expanded={menuOpen} aria-haspopup="menu" onClick={() => setMenuOpen((o) => !o)}>
-                  <Avatar name={currentAgent.name} />
-                  <span className="shell-user__name">
-                    <span>{currentAgent.name}</span>
-                    <small>{ROLE_INFO[currentAgent.role].label}{currentAgent.trainee ? ' · trainee' : ''}</small>
-                  </span>
-                  <ChevronDown size={14} />
-                </button>
-                {menuOpen && (
-                  <div className="shell-user__menu" role="menu">
-                    <div className="shell-user__meta">
-                      <b>{currentAgent.name}</b>
-                      <span className="mono">{currentAgent.username}</span>
-                    </div>
-                    {backend === 'local' && currentAgent.role === 'admin' && (
-                      <button
-                        type="button"
-                        role="menuitem"
-                        onClick={() => {
-                          if (!window.confirm('Replace every customer, call and change in this browser with fresh sample data?')) return;
-                          dispatch({ type: 'RESET' });
-                          navigate('/');
-                        }}
-                      >
-                        <RotateCcw size={15} /> Reset sample data
-                      </button>
-                    )}
-                    <button
-                      type="button"
-                      role="menuitem"
-                      onClick={() => {
-                        dispatch({ type: 'LOGOUT' });
-                        navigate('/');
-                      }}
-                    >
-                      <LogOut size={15} /> Sign out
-                    </button>
-                  </div>
-                )}
-              </div>
-            </div>
-          </div>
-          <div className="shell-rule" aria-hidden>
-            <span />
-            <span />
-          </div>
-        </header>
-        <div className="shell-body">
+        <aside className="shell-side">
+          <button type="button" className="shell-brand" onClick={() => navigate('/')} aria-label="Command Center home">
+            <img src={BRAND_MARK} alt="" />
+            <span>
+              <b>{BRAND.key === 'tecstellar' ? 'Tecstellar' : BRAND.title}</b>
+              <small>Calling desk</small>
+            </span>
+          </button>
+          <CustomerSearch apps={visibleApps} />
           <nav className="shell-nav" aria-label="Main">
             {nav.map((group, gi) => (
               <div key={gi} className="shell-nav__group">
@@ -279,6 +220,61 @@ export default function AppShell() {
               </div>
             )}
           </nav>
+        </aside>
+        <div className="shell-col">
+          <header className="shell-top">
+            {showScope && (
+              <label className="shell-scope">
+                <span className="sr-only">Show numbers for</span>
+                <select value={app} onChange={(e) => setApp(e.target.value as AppId | 'all')}>
+                  <option value="all">All products</option>
+                  {visibleApps.map((id) => (
+                    <option key={id} value={id}>{APPS.find((a) => a.id === id)?.name}{APPS.find((a) => a.id === id)?.live ? '' : ' (not live)'}</option>
+                  ))}
+                </select>
+                <ChevronDown size={14} aria-hidden />
+              </label>
+            )}
+            <div className="shell-top__right">
+              <CallPill />
+              <LineStatus />
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <button type="button" className="shell-user__btn">
+                    <Avatar name={currentAgent.name} />
+                    <span className="shell-user__name">
+                      <span>{currentAgent.name}</span>
+                      <small>{ROLE_INFO[currentAgent.role].label}{currentAgent.trainee ? ' · trainee' : ''}</small>
+                    </span>
+                    <ChevronDown size={14} />
+                  </button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end">
+                  <DropdownMenuLabel>{currentAgent.username}</DropdownMenuLabel>
+                  {backend === 'local' && currentAgent.role === 'admin' && (
+                    <DropdownMenuItem
+                      onSelect={() => {
+                        if (!window.confirm('Replace every customer, call and change in this browser with fresh sample data?')) return;
+                        dispatch({ type: 'RESET' });
+                        navigate('/');
+                      }}
+                    >
+                      <RotateCcw /> Reset sample data
+                    </DropdownMenuItem>
+                  )}
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem
+                    onSelect={() => {
+                      dispatch({ type: 'LOGOUT' });
+                      navigate('/');
+                    }}
+                  >
+                    <LogOut /> Sign out
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            </div>
+          </header>
           <main className="shell-main" id="main">
             <Outlet />
           </main>

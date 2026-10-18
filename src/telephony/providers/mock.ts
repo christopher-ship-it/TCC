@@ -132,6 +132,14 @@ export class MockProvider implements TelephonyProvider {
     this.emit({ type: 'incoming', from, callId: this.callId, team });
     this.emit({ type: 'ringing' });
   }
+
+  /** Test/demo helper: the far side hangs up (before answer this is a missed call). */
+  simulateRemoteHangup(): void {
+    this.cancelTimers();
+    this.callId = null;
+    this.emit({ type: 'ended', code: 487, stats: this.lastStats ?? undefined });
+  }
+
   answer(): void {
     this.emit({ type: 'answered' });
     this.startStats();

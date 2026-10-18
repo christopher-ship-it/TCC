@@ -17,6 +17,9 @@ export interface ServerEnv {
   dataDir: string;
   /** The white label this deployment runs as (VITE_BRAND; unset = Tecstellar). Shapes the call-analysis prompt. */
   brand: BrandKey;
+  /** Extra addresses the app is served at through a proxy that rewrites the Host header (TCC_PUBLIC_HOSTS,
+   *  comma-separated) — e.g. vanmohchitfunds.buziness365.com, forwarded by BusinessOS to this service. */
+  publicHosts: string[];
 }
 
 const pick = (v: string | undefined) => (v && v.trim() ? v.trim() : undefined);
@@ -31,5 +34,6 @@ export function readServerEnv(vars: Record<string, string | undefined>, root: st
     geminiModel: pick(vars.GEMINI_MODEL) ?? 'gemini-2.5-flash',
     dataDir: path.join(root, '.data'),
     brand: brandKey(vars.VITE_BRAND),
+    publicHosts: (vars.TCC_PUBLIC_HOSTS ?? '').split(',').map((h) => h.trim().toLowerCase()).filter(Boolean),
   };
 }

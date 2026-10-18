@@ -3,6 +3,7 @@
 // (src/data/seed.ts). Excel: "Save As" → CSV UTF-8 before uploading.
 import { normalizePhone } from '../telephony/core/phone-number.ts';
 import type { AppId, CustomerUser, Language } from '../data/types.ts';
+import { customerTypesFor } from '../data/products.ts';
 
 export const CUSTOMER_CSV_COLUMNS = [
   'app', 'name', 'phone', 'business', 'city', 'state', 'plan', 'listings', 'buyers', 'registered_at', 'language', 'owner_agent_id',
@@ -51,6 +52,12 @@ export interface ParsedCustomerImport {
   errors: ImportRowError[];
 }
 
+/** The product's own spelling of a type the file wrote (any case); empty when the file has none or it is unknown. */
+function matchType(app: AppId, raw: string): string | undefined {
+  const t = raw.trim().toLowerCase();
+  return t ? customerTypesFor(app).find((x) => x.toLowerCase() === t) : undefined;
+}
+
 /**
  * Parses a CSV export into CustomerUser records with the defaults a brand-new real customer
  * should start with (unworked queue, no call history, no fabricated drama). Each row becomes one
@@ -68,7 +75,7 @@ export function parseCustomerCsv(text: string, stateDefs: StateCatalogEntry[]): 
     app: col('app'), name: col('name'), phone: col('phone'), business: col('business'),
     city: col('city'), state: col('state'), plan: col('plan'), listings: col('listings'),
     buyers: col('buyers'), registeredAt: col('registered_at'), language: col('language'),
-    ownerAgentId: col('owner_agent_id'),
+    ownerAgentId: col('owner_agent_id'), customerType: col('type'),
   };
   if (idx.app === -1 || idx.name === -1 || idx.phone === -1) {
     return { customers: [], errors: [{ row: 1, message: 'Header must include at least: app, name, phone.' }] };
@@ -147,6 +154,7 @@ export function parseCustomerCsv(text: string, stateDefs: StateCatalogEntry[]): 
       active: true,
       hasActiveEscalation: false,
       ownerAgentId,
+      customerType: matchType(app, get(idx.customerType)),
     });
   }
 

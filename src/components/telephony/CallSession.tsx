@@ -7,9 +7,15 @@ import { TelephonyProvider, useTelephony, type CallResult } from '../../telephon
 import { useStore } from '../../store/StoreContext';
 import type { CustomerUser } from '../../data/types';
 import { hasRealRecording } from '../../lib/attachRecording';
-import { DEFAULT_COUNTRY_CODE, LIVE_DIAL_BLOCKED, callMeta, dialNumberFor, telephonyProvider } from '../../lib/telephony';
+import { DEFAULT_COUNTRY_CODE, LIVE_DIAL_BLOCKED, callMeta, dialNumberFor, suggestStatus, telephonyProvider, toCallTelephony } from '../../lib/telephony';
+import { resolveCaller } from '../../lib/inbound';
+import { announcePresence } from '../../lib/presence';
+import { can } from '../../lib/access';
+import { APPS } from '../../data/seed';
 import { analyzeCall, AnalysisUnavailable } from '../../lib/transcription';
 import { CallSessionContext, type CallSessionValue } from './callSessionContext';
+import { IncomingCall } from './IncomingCall';
+import { CallModal } from './CallModal';
 
 // The mock line needs no login; a real provider makes the agent sign in through the phone panel.
 const MOCK_CREDENTIALS = { userId: 'mock-agent', password: '' };
@@ -28,15 +34,44 @@ function Session({ children }: { children: ReactNode }) {
   const [wrapUp, setWrapUp] = useState<CallSessionValue['wrapUp']>(null);
   const wrapRef = useRef(wrapUp);
   wrapRef.current = wrapUp;
+  const agentRef = useRef(currentAgent);
+  agentRef.current = currentAgent;
 
-  // A finished call waits here until the agent logs it.
+  // A call ringing in: work out who it is and tag the call with them, so everything downstream (the phone panel, the
+  // call pill, the wrap-up, the log) treats it like a call to that customer. An unknown number gets a minimal record.
+  const call = snapshot.call;
+  const resolved = useRef<string | null>(null);
+  useEffect(() => {
+    if (!call || call.direction !== 'inbound' || call.meta.customerId || !currentAgent || resolved.current === call.id) return;
+    resolved.current = call.id;
+    const apps = APPS.filter((a) => a.live && can(currentAgent, a.id, 'call')).map((a) => a.id);
+    const caller = resolveCaller(state.users, call.remote, apps);
+    if (!caller) return; // withheld number, or an agent with no app to file it under: it still rings, it just can't be logged
+    if (caller.isNew) dispatch({ type: 'ADD_CUSTOMER', customer: caller.customer });
+    controller.tag({ customerId: caller.customer.id, app: caller.customer.app, agentId: currentAgent.id, direction: 'inbound' });
+  }, [call, currentAgent, state.users, dispatch, controller]);
+
+  // A finished call waits here until the agent logs it. A missed or declined incoming call has nothing to wrap up,
+  // so it is logged straight away.
   useEffect(
     () =>
       controller.onCallEnded((result: CallResult) => {
         const customerId = result.meta.customerId;
-        if (customerId) setWrapUp({ result, customerId });
+        const agent = agentRef.current;
+        if (!customerId || !agent) return;
+        const log = (r: CallResult, id: string, comment: string) =>
+          dispatch({ type: 'LOG_CALL', userId: id, status: suggestStatus(r), comment, agentId: agent.id, telephony: toCallTelephony(r) });
+        if (result.direction === 'inbound' && result.disposition !== 'connected') {
+          log(result, customerId, result.disposition === 'rejected' ? 'Declined incoming call' : 'Missed incoming call');
+          controller.clearResult();
+          return;
+        }
+        // An incoming call can arrive before the last one was logged; keep that one rather than overwrite it.
+        const pending = wrapRef.current;
+        if (pending && pending.result.id !== result.id) log(pending.result, pending.customerId, 'Logged automatically — another call came in before this one was logged');
+        setWrapUp({ result, customerId });
       }),
-    [controller],
+    [controller, dispatch],
   );
 
   // TeleCMI announces the recording after hangup — usually before the agent has finished logging. Unlogged: it rides
@@ -70,7 +105,7 @@ function Session({ children }: { children: ReactNode }) {
         const tries = lookups.current.get(call.id) ?? 0;
         if (tries >= LOOKUP_DELAYS_MS.length || Date.now() - call.atTs < LOOKUP_DELAYS_MS[tries]) continue;
         lookups.current.set(call.id, tries + 1);
-        void controller.findRecording({ remote: t.remote, startedAt: t.startedAt, talkSeconds: t.durationSec }).then((file) => {
+        void controller.findRecording({ remote: t.remote, startedAt: t.startedAt, talkSeconds: t.durationSec, direction: t.direction }).then((file) => {
           if (file) dispatch({ type: 'ATTACH_RECORDING', file, entryId: call.id });
         });
       }
@@ -108,11 +143,50 @@ function Session({ children }: { children: ReactNode }) {
     controller.clearResult();
   }, [controller]);
 
+  const attachRecording = useCallback((file: string) => setWrapUp((w) => (w ? { ...w, result: { ...w.result, recordingFile: file } } : w)), []);
+  // Completing a call in the card clears it and tells the queue to move on.
+  const completeWrapUp = useCallback(() => {
+    setWrapUp(null);
+    controller.clearResult();
+    window.dispatchEvent(new Event('tcc:call-completed'));
+  }, [controller]);
+
+  // TeleCMI only rings agents marked online, and it can mark them offline on its own (a dropped connection, the
+  // end of a call). So: mark the agent online when the line connects, after each call, and every few minutes.
+  const [presenceError, setPresenceError] = useState<string | null>(null);
+  const idleOnLine = connection === 'ready' && !snapshot.call;
+  useEffect(() => {
+    if (!idleOnLine) return;
+    let cancelled = false;
+    const mark = () => void announcePresence('online').then((err) => !cancelled && setPresenceError(err));
+    mark();
+    const id = setInterval(mark, 3 * 60_000);
+    return () => {
+      cancelled = true;
+      clearInterval(id);
+    };
+  }, [idleOnLine]);
+  useEffect(() => {
+    if (connection !== 'ready') setPresenceError(null);
+  }, [connection]);
+  // Closing or reloading the tab drops the line (the password is not kept), so stop TeleCMI ringing this agent.
+  useEffect(() => {
+    const off = () => void announcePresence('offline');
+    window.addEventListener('pagehide', off);
+    return () => window.removeEventListener('pagehide', off);
+  }, []);
+
   const value = useMemo<CallSessionValue>(
-    () => ({ available: true, liveCustomerId: snapshot.call?.meta.customerId ?? null, wrapUp, dial, clearWrapUp }),
-    [snapshot.call?.meta.customerId, wrapUp, dial, clearWrapUp],
+    () => ({ available: true, liveCustomerId: snapshot.call?.meta.customerId ?? null, wrapUp, dial, clearWrapUp, completeWrapUp, attachRecording, presenceError }),
+    [snapshot.call?.meta.customerId, wrapUp, dial, clearWrapUp, completeWrapUp, attachRecording, presenceError],
   );
-  return <CallSessionContext.Provider value={value}>{children}</CallSessionContext.Provider>;
+  return (
+    <CallSessionContext.Provider value={value}>
+      {children}
+      <IncomingCall />
+      <CallModal />
+    </CallSessionContext.Provider>
+  );
 }
 
 /** Wraps the agent's pages with the phone line. Without a configured provider the pages get the plain fallback. */
