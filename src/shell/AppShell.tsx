@@ -37,20 +37,20 @@ function navFor(role: Role, pendingEscalations: number, firstApp: AppId | undefi
       },
     ];
   }
+  const X = FEATURES.adminExtras;
   const team: NavItem[] = [
-    { to: '/team', label: 'Team performance', icon: <BarChart3 size={s} /> },
+    ...(X ? [{ to: '/team/performance', label: 'Team performance', icon: <BarChart3 size={s} /> }] : []),
     { to: '/calls', label: 'Calls & recordings', icon: <Phone size={s} /> },
     { to: '/escalations', label: 'Escalations', icon: <Flag size={s} />, badge: pendingEscalations || undefined },
-    { to: '/allocation', label: 'Allocation', icon: <Shuffle size={s} /> },
+    ...(X ? [{ to: '/allocation', label: 'Allocation', icon: <Shuffle size={s} /> }] : []),
   ];
-  const people: NavItem[] = [{ to: '/people', label: 'People & access', icon: <UsersRound size={s} /> }];
+  const people: NavItem[] = [{ to: '/people', label: 'Agents', icon: <UsersRound size={s} /> }];
+  if (role === 'admin') people.push({ to: '/customers-import', label: 'Import data', icon: <Database size={s} /> });
   if (canExportOrAudit) people.push({ to: '/audit', label: 'Change log', icon: <ClipboardList size={s} /> });
-  if (role === 'admin') people.push({ to: '/customers-import', label: 'Customers', icon: <Database size={s} /> });
-  if (role === 'supervisor') return [{ title: 'Team', items: team }, { title: 'Admin', items: people }];
+  const overview: NavItem = { to: role === 'admin' ? '/overview' : '/team', label: 'Overview', icon: <Home size={s} /> };
   return [
-    { title: 'Business', items: [{ to: '/overview', label: 'Overview', icon: <Home size={s} /> }, { to: '/geography', label: 'Geography', icon: <Map size={s} /> }] },
-    { title: 'Operations', items: team },
-    { title: 'Admin', items: people },
+    { items: [overview, ...team] },
+    { title: 'Manage', items: [...people, ...(X && role === 'admin' ? [{ to: '/geography', label: 'Geography', icon: <Map size={s} /> }] : [])] },
   ];
 }
 

@@ -11,4 +11,6 @@ export const FEATURES = {
   earlierCalls: false,
   /** The manual "Log this call" form. The call card replaces it; it stays on when the build has no phone line. */
   manualLog: false,
+  /** Team performance, Geography and Allocation in the admin menu. The Overview page replaces them. */
+  adminExtras: false,
 } as const;

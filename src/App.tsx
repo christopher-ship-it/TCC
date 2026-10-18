@@ -17,6 +17,7 @@ import People from './pages/admin/People';
 import AuditLog from './pages/admin/AuditLog';
 import CustomerImport from './pages/admin/CustomerImport';
 import Overview from './pages/owner/Overview';
+import Home from './pages/Overview';
 import Geography from './pages/owner/Geography';
 import type { Role } from './data/types';
 import { isActive } from './lib/access';
@@ -52,13 +53,15 @@ function Routed() {
         <Route path="/calls" element={<Calls />} />
         <Route path="/customers/:id" element={<CustomerPage />} />
         <Route path="/customers/:id/calls/:entryId" element={<CallDetail />} />
-        <Route path="/team" element={<Only roles={['supervisor', 'admin']}><TeamPerformance /></Only>} />
+        <Route path="/team" element={<Only roles={['supervisor', 'admin']}><Home /></Only>} />
+        <Route path="/team/performance" element={<Only roles={['supervisor', 'admin']}><TeamPerformance /></Only>} />
         <Route path="/escalations" element={<Only roles={['supervisor', 'admin']}><Escalations /></Only>} />
         <Route path="/allocation" element={<Only roles={['supervisor', 'admin']}><Allocation /></Only>} />
         <Route path="/people" element={<Only roles={['supervisor', 'admin']}><People /></Only>} />
         <Route path="/audit" element={<Only roles={['supervisor', 'admin']}><AuditLog /></Only>} />
         <Route path="/customers-import" element={<Only roles={['admin']}><CustomerImport /></Only>} />
-        <Route path="/overview" element={<Only roles={['admin']}><Overview /></Only>} />
+        <Route path="/overview" element={<Only roles={['admin']}><Home /></Only>} />
+        <Route path="/overview/business" element={<Only roles={['admin']}><Overview /></Only>} />
         <Route path="/geography" element={<Only roles={['admin']}><Geography /></Only>} />
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />
