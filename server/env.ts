@@ -20,6 +20,8 @@ export interface ServerEnv {
   /** Extra addresses the app is served at through a proxy that rewrites the Host header (TCC_PUBLIC_HOSTS,
    *  comma-separated) — e.g. vanmohchitfunds.buziness365.com, forwarded by BusinessOS to this service. */
   publicHosts: string[];
+  /** Asked for when the very first admin account is created (TCC_SETUP_CODE). Unset = the first visitor may create it. */
+  setupCode?: string;
 }
 
 const pick = (v: string | undefined) => (v && v.trim() ? v.trim() : undefined);
@@ -34,6 +36,7 @@ export function readServerEnv(vars: Record<string, string | undefined>, root: st
     geminiModel: pick(vars.GEMINI_MODEL) ?? 'gemini-2.5-flash',
     dataDir: path.join(root, '.data'),
     brand: brandKey(vars.VITE_BRAND),
+    setupCode: pick(vars.TCC_SETUP_CODE),
     publicHosts: (vars.TCC_PUBLIC_HOSTS ?? '').split(',').map((h) => h.trim().toLowerCase()).filter(Boolean),
   };
 }

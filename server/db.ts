@@ -54,6 +54,54 @@ export const MIGRATIONS: { version: number; name: string; sql: string }[] = [
       );
     `,
   },
+  {
+    version: 2,
+    name: 'sign-in and sessions',
+    sql: `
+      create table logins (
+        agent_id text primary key,
+        username text unique not null,
+        password_hash text not null,
+        updated_at timestamptz not null default now()
+      );
+      create table sessions (
+        token_hash text primary key,
+        agent_id text not null,
+        created_at timestamptz not null default now(),
+        expires_at timestamptz not null
+      );
+      create index sessions_agent_idx on sessions (agent_id);
+      create index customers_updated_idx on customers (updated_at);
+      create index agents_updated_idx on agents (updated_at);
+      create index escalations_updated_idx on escalations (updated_at);
+    `,
+  },
+  {
+    version: 3,
+    name: 'super admin: events, inbox, last seen',
+    sql: `
+      create table events (
+        id bigserial primary key,
+        ts timestamptz not null,
+        level text not null,
+        source text not null,
+        message text not null,
+        agent_id text,
+        doc jsonb not null
+      );
+      create index events_ts_idx on events (ts desc);
+      create table notices (
+        id text primary key,
+        agent_id text not null,
+        kind text not null,
+        doc jsonb not null,
+        created_at timestamptz not null default now(),
+        done_at timestamptz
+      );
+      create index notices_agent_idx on notices (agent_id) where done_at is null;
+      alter table sessions add column last_seen_at timestamptz not null default now();
+    `,
+  },
 ];
 
 export interface DbHealth {
@@ -66,7 +114,7 @@ export interface DbHealth {
   tables?: Record<string, number>;
 }
 
-const TABLES = ['agents', 'customers', 'escalations', 'audit_log', 'call_analyses', 'settings'] as const;
+const TABLES = ['agents', 'customers', 'escalations', 'audit_log', 'call_analyses', 'settings', 'logins', 'sessions', 'events', 'notices'] as const;
 
 export function createDb(url: string | undefined) {
   let pool: pg.Pool | undefined;
