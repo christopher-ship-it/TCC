@@ -10,6 +10,7 @@
 //   POST /api/data                    → { agents?, customers?, escalations?, audit?, cleared? } — upserts
 //   POST /api/people                  → { agent, password } — adds a person with their login
 //   POST /api/people/:id/password     → { password } — sets a person's password
+//   GET/POST /api/notes, DELETE /api/notes/:id → an agent's own notes, and notes admins leave for every agent
 
 import crypto from 'node:crypto';
 import { promisify } from 'node:util';
@@ -61,6 +62,19 @@ interface AuditEntry {
   action: string;
   target?: string;
   detail: string;
+}
+
+/** A note: private to its author ('me'), or one an admin or supervisor left for every agent ('agents'). */
+export interface NoteDoc {
+  id: string;
+  ownerId: string;
+  ownerName: string;
+  audience: 'me' | 'agents';
+  app?: string;
+  title: string;
+  body: string;
+  createdTs: number;
+  updatedTs: number;
 }
 
 export class HttpError extends Error {
@@ -241,7 +255,7 @@ export function createStore(getPool: () => Promise<pg.Pool>, env: StoreEnv, read
   /** Handles a store route; false when the path is not one of them. */
   return async function handle(req: IncomingMessage, res: ServerResponse, url: URL): Promise<boolean> {
     const p = url.pathname;
-    if (!p.startsWith('/api/auth/') && p !== '/api/data' && !p.startsWith('/api/people') && !p.startsWith('/api/notices') && p !== '/api/password-requests' && p !== '/api/events' && !p.startsWith('/api/system')) return false;
+    if (!p.startsWith('/api/auth/') && p !== '/api/data' && !p.startsWith('/api/people') && !p.startsWith('/api/notices') && !p.startsWith('/api/notes') && p !== '/api/password-requests' && p !== '/api/events' && !p.startsWith('/api/system')) return false;
     const pool = await getPool();
 
     if (req.method === 'GET' && p === '/api/auth/me') {
@@ -708,6 +722,57 @@ export function createStore(getPool: () => Promise<pg.Pool>, env: StoreEnv, read
         await pool.query('update logins set username = $2, updated_at = now() where agent_id = $1', [target.id, username]);
         await writeAudit(pool, auditRow(me, 'access_changed', target.name, `Sign-in changed: ${username}${email ? ` · ${email}` : ''}`));
         send(res, 200, { ok: true, agent: next });
+        return true;
+      }
+    }
+
+    // Notes: an agent's own reminders (audience 'me'), and notes an admin or supervisor leaves for every agent ('agents').
+    if (p === '/api/notes' || p.startsWith('/api/notes/')) {
+      const me = await requireMe(req, pool);
+      if (req.method === 'GET' && p === '/api/notes') {
+        const rows = (
+          await pool.query<{ doc: NoteDoc }>(
+            "select doc from notes where (audience = 'me' and owner_id = $1) or audience = 'agents' order by updated_at desc limit 500",
+            [me.id],
+          )
+        ).rows.map((r) => r.doc);
+        // Agents only see team notes for the products they work.
+        send(res, 200, { notes: me.role === 'agent' ? rows.filter((n) => n.audience === 'me' || !n.app || me.apps.includes(n.app)) : rows });
+        return true;
+      }
+      if (req.method === 'POST' && p === '/api/notes') {
+        const b = (await readJson(req)) as Record<string, unknown>;
+        const title = typeof b.title === 'string' ? b.title.trim().slice(0, 120) : '';
+        const body = typeof b.body === 'string' ? b.body.trim().slice(0, 5000) : '';
+        if (!body && !title) throw new HttpError(400, 'Write something in the note.');
+        const audience = b.audience === 'agents' ? 'agents' : 'me';
+        if (audience === 'agents' && me.role === 'agent') throw new HttpError(403, 'Only admins and supervisors can leave notes for agents.');
+        const app = audience === 'agents' && typeof b.app === 'string' && b.app ? b.app.slice(0, 40) : undefined;
+        const id = typeof b.id === 'string' && b.id ? b.id.slice(0, 80) : '';
+        const prev = id ? (await pool.query<{ doc: NoteDoc }>('select doc from notes where id = $1', [id])).rows[0]?.doc : undefined;
+        if (id && !prev) throw new HttpError(404, 'That note is gone.');
+        if (prev && prev.ownerId !== me.id && !(prev.audience === 'agents' && me.role === 'admin')) throw new HttpError(403, 'That is not your note.');
+        const now = Date.now();
+        const note: NoteDoc = { id: prev?.id ?? `note-${now}-${crypto.randomBytes(3).toString('hex')}`, ownerId: prev?.ownerId ?? me.id, ownerName: prev?.ownerName ?? me.name, audience, app, title, body, createdTs: prev?.createdTs ?? now, updatedTs: now };
+        await pool.query(
+          `insert into notes (id, owner_id, audience, doc, updated_at) values ($1, $2, $3, $4, now())
+           on conflict (id) do update set audience = excluded.audience, doc = excluded.doc, updated_at = now()`,
+          [note.id, note.ownerId, audience, JSON.stringify(note)],
+        );
+        send(res, 200, { note });
+        return true;
+      }
+      const noteRoute = p.match(/^\/api\/notes\/([^/]+)$/);
+      if (req.method === 'DELETE' && noteRoute) {
+        const id = decodeURIComponent(noteRoute[1]);
+        const prev = (await pool.query<{ doc: NoteDoc }>('select doc from notes where id = $1', [id])).rows[0]?.doc;
+        if (!prev) {
+          send(res, 200, { ok: true });
+          return true;
+        }
+        if (prev.ownerId !== me.id && !(prev.audience === 'agents' && me.role === 'admin')) throw new HttpError(403, 'That is not your note.');
+        await pool.query('delete from notes where id = $1', [id]);
+        send(res, 200, { ok: true });
         return true;
       }
     }

@@ -49,8 +49,8 @@ test('live: first admin, agents with passwords, customers by mobile, calls share
   const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
   const client = () => {
     let cookie = '';
-    return async (path: string, body?: unknown) => {
-      const res = await fetch(base + path, { method: body === undefined ? 'GET' : 'POST', headers: { ...(cookie ? { cookie } : {}), ...(body === undefined ? {} : { 'content-type': 'application/json' }) }, body: body === undefined ? undefined : JSON.stringify(body) });
+    return async (path: string, body?: unknown, method?: string) => {
+      const res = await fetch(base + path, { method: method ?? (body === undefined ? 'GET' : 'POST'), headers: { ...(cookie ? { cookie } : {}), ...(body === undefined ? {} : { 'content-type': 'application/json' }) }, body: body === undefined ? undefined : JSON.stringify(body) });
       const set = res.headers.get('set-cookie');
       if (set) cookie = set.split(';')[0];
       return { status: res.status, body: (await res.json()) as Record<string, any> };
@@ -104,6 +104,27 @@ test('live: first admin, agents with passwords, customers by mobile, calls share
     assert.equal(seen.callHistory.length, 1);
     const cursor = r.body.cursor;
     r = await admin(`/api/data?since=${encodeURIComponent(cursor)}`);
+    assert.equal(r.status, 200);
+
+    // Notes: private to their author; an admin can leave one for every agent, an agent cannot.
+    r = await agent('/api/notes', { title: 'Ask city', body: 'Ask which city they work in', audience: 'me' });
+    assert.equal(r.status, 200, r.body.error);
+    const mine = r.body.note;
+    r = await agent('/api/notes', { title: 'Hi', body: 'x', audience: 'agents' });
+    assert.equal(r.status, 403, 'agents cannot post team notes');
+    r = await admin('/api/notes', { title: 'Always', body: 'Mention the free trial', audience: 'agents', app: 'realbroks' });
+    assert.equal(r.status, 200, r.body.error);
+    const team = r.body.note;
+    r = await admin('/api/notes', { title: 'Other product', body: 'IronDrobe only', audience: 'agents', app: 'irondrobe' });
+    r = await agent('/api/notes');
+    assert.deepEqual(r.body.notes.map((n: { title: string }) => n.title).sort(), ['Always', 'Ask city']);
+    r = await admin('/api/notes');
+    assert.ok(!r.body.notes.some((n: { id: string }) => n.id === mine.id), 'private notes stay private');
+    r = await admin(`/api/notes/${mine.id}`, undefined, 'DELETE');
+    assert.equal(r.status, 403);
+    r = await agent(`/api/notes/${team.id}`, undefined, 'DELETE');
+    assert.equal(r.status, 403, 'agents cannot remove team notes');
+    r = await agent(`/api/notes/${mine.id}`, undefined, 'DELETE');
     assert.equal(r.status, 200);
 
     // Suspending signs them out at once; a new password works and the old one doesn't.

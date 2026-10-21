@@ -102,6 +102,21 @@ export const MIGRATIONS: { version: number; name: string; sql: string }[] = [
       alter table sessions add column last_seen_at timestamptz not null default now();
     `,
   },
+  {
+    version: 4,
+    name: 'notes for agents',
+    sql: `
+      create table notes (
+        id text primary key,
+        owner_id text not null,
+        audience text not null,
+        doc jsonb not null,
+        updated_at timestamptz not null default now()
+      );
+      create index notes_owner_idx on notes (owner_id);
+      create index notes_audience_idx on notes (audience);
+    `,
+  },
 ];
 
 export interface DbHealth {
@@ -114,7 +129,7 @@ export interface DbHealth {
   tables?: Record<string, number>;
 }
 
-const TABLES = ['agents', 'customers', 'escalations', 'audit_log', 'call_analyses', 'settings', 'logins', 'sessions', 'events', 'notices'] as const;
+const TABLES = ['agents', 'customers', 'escalations', 'audit_log', 'call_analyses', 'settings', 'logins', 'sessions', 'events', 'notices', 'notes'] as const;
 
 export function createDb(url: string | undefined) {
   let pool: pg.Pool | undefined;

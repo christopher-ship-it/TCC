@@ -202,7 +202,7 @@ export function createApi(env: ServerEnv) {
         return send(res, 200, { analysis: await analyzeRecording(request, env) });
       }
 
-      if (/^\/api\/(auth\/|data$|people|notices|password-requests$|events$|system)/.test(url.pathname)) {
+      if (/^\/api\/(auth\/|data$|people|notices|notes|password-requests$|events$|system)/.test(url.pathname)) {
         if (!db.configured) return send(res, 501, { error: 'No database is connected (DATABASE_URL).', notConfigured: true });
         if (await store(req, res, url)) return;
       }
