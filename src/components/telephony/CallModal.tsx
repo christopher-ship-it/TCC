@@ -167,8 +167,6 @@ function WrapUp({ user }: { user: CustomerUser }) {
   const suggestTicket = outcome === 'Technical issue' || outcome === 'Payment issue' || !!analysis?.actionItems.some((a) => /ticket|escalat|issue|problem|bug|refund/i.test(a));
   const ticketOn = ticket ?? suggestTicket;
   const team = outcome === 'Payment issue' ? 'Billing' : 'Product';
-  // Who they are and how they found us matter on a call that connected; an unanswered call can be saved without them.
-  const missing = answered ? [!type ? 'customer type' : null, !source ? 'how they heard about the app' : null].filter(Boolean) as string[] : [];
   const followTs = dayFromInput(followDate);
   const today = inputFromDay(Date.now());
   const inDays = (n: number) => inputFromDay(startOfDay(Date.now()) + n * 86_400_000 + 3_600_000);
@@ -237,7 +235,7 @@ function WrapUp({ user }: { user: CustomerUser }) {
       </div>
 
       <div className="flex flex-col gap-2">
-        <div className="flex items-center gap-2 text-sm font-medium">Who is this?{!user.customerType && !type && <Badge variant="outline">{answered ? 'Required' : 'Not needed for this call'}</Badge>}</div>
+        <div className="text-sm font-medium">Who is this? <span className="font-normal text-muted-foreground">(optional)</span></div>
         <div className="flex flex-wrap gap-2">
           {types.map((t) => (
             <Button key={t} size="sm" variant={type === t ? 'default' : 'outline'} onClick={() => setType(t)}>{t}</Button>
@@ -247,7 +245,7 @@ function WrapUp({ user }: { user: CustomerUser }) {
 
       {answered && (
         <div className="flex flex-col gap-2">
-          <div className="flex items-center gap-2 text-sm font-medium">How did they hear about the app?{!source && <Badge variant="outline">Required</Badge>}</div>
+          <div className="text-sm font-medium">How did they hear about the app? <span className="font-normal text-muted-foreground">(optional)</span></div>
           <div className="flex flex-wrap gap-2">
             {LEAD_SOURCES.map((s) => (
               <Button key={s} size="sm" variant={source === s ? 'default' : 'outline'} onClick={() => setSource(s)}>{s}</Button>
@@ -297,8 +295,8 @@ function WrapUp({ user }: { user: CustomerUser }) {
       <textarea value={note} onChange={(e) => setNote(e.target.value)} placeholder="Note for whoever calls next (optional)" rows={2} className="w-full resize-none rounded-md border border-input bg-card p-2.5 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring" />
 
       <div className="flex items-center justify-between gap-3">
-        <span className="text-[13px] text-muted-foreground">{missing.length ? `Still needed: ${missing.join(', ')}` : answered && !outcome ? 'What they said can be left blank — the call is read after you close this.' : ''}</span>
-        <Button size="lg" disabled={missing.length > 0} onClick={complete}><PhoneIcon className="size-4" />Complete call</Button>
+        <span className="text-[13px] text-muted-foreground">{answered && !outcome ? 'What they said can be left blank — the call is read after you close this.' : ''}</span>
+        <Button size="lg" onClick={complete}><PhoneIcon className="size-4" />Complete call</Button>
       </div>
     </div>
   );
