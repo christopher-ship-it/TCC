@@ -83,6 +83,8 @@ export interface AgentAccount {
   clickToDial: boolean;
   /** Softphone login (TeleCMI user id, e.g. "101_33338836"). The password is never stored — the agent types it per session. */
   telecmiUserId?: string;
+  /** Tecstellar's own account on a client deployment: sees and repairs everything; client admins never see it. */
+  superAdmin?: boolean;
   /** Suspended people cannot sign in. Missing on older records = active. */
   status?: AccountStatus;
   /** Per-app capabilities. Missing for an app = the role's defaults (src/lib/access.ts). */
@@ -184,7 +186,8 @@ export type AuditAction =
   | 'queues_distributed'
   | 'payment_marked_paid'
   | 'data_exported'
-  | 'customers_imported';
+  | 'customers_imported'
+  | 'customer_deleted';
 
 /** One line of the change log: who did what to whom. Everything an admin needs to answer "who changed this?". */
 export interface AuditEntry {
@@ -276,6 +279,12 @@ export interface CustomerUser {
   customerType?: string;
   /** Made on the spot by dialling a number that isn't a customer yet (Workspace › Dial a number). */
   adHoc?: boolean;
+  /** Added by hand by an agent (Add customer). Stays in the owner's queue only, whatever their languages and states. */
+  manual?: boolean;
+  /** Free-text note from whoever added the customer. */
+  note?: string;
+  /** Set when someone removed the customer (a test record, a duplicate). Kept, hidden from every list, and shown on the page with who and why. `null` = brought back. */
+  deleted?: { byId: string; byName: string; reason: string; ts: number; atLabel: string } | null;
 }
 
 // The subset of CustomerUser that TCC itself owns and writes live to

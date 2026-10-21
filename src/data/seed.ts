@@ -30,12 +30,20 @@ const NOW = Date.now();
 /** The Vanmoh Chit Funds build (VITE_BRAND=vanmoh) generates its own sample subscribers; see seedVanmoh.ts. */
 const VM = BRAND.key === 'vanmoh';
 
-const TECSTELLAR_APPS: AppDef[] = [
+const ALL_TECSTELLAR_APPS: AppDef[] = [
   { id: 'realbroks', name: 'RealBroks', tagline: 'Broker assistant · 10K+ installs', logo: 'logo-realbroks.png', live: true },
   { id: 'irondrobe', name: 'IronDrobe', tagline: 'Laundry & ironing CRM · 1K+ installs', logo: 'logo-irondrobe.png', live: true },
   { id: 'influnet', name: 'Influnet', tagline: 'influnet.io · in development', logo: 'logo-influnet.png', live: false },
   { id: 'vehigo', name: 'Vehigo', tagline: 'In development', logo: 'logo-vehigo.png', live: false },
 ];
+
+// VITE_APPS (comma-separated app ids) limits a deployment to some of Tecstellar's apps — e.g. "realbroks,irondrobe".
+// Unset = all of them, as before. The others then appear nowhere: menus, access, search, customers.
+const ENABLED_APPS = ((import.meta as { env?: Record<string, string | undefined> }).env?.VITE_APPS ?? '')
+  .split(',')
+  .map((s) => s.trim().toLowerCase())
+  .filter(Boolean);
+const TECSTELLAR_APPS: AppDef[] = ENABLED_APPS.length ? ALL_TECSTELLAR_APPS.filter((a) => ENABLED_APPS.includes(a.id)) : ALL_TECSTELLAR_APPS;
 
 interface StateSeedDef extends StateDef {
   weight: number;

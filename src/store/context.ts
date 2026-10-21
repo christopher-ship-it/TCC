@@ -38,8 +38,25 @@ export type Action =
   /** Replaces the fabricated sample customers with a real CSV import, preserving call history etc. for any id already worked. */
   /** A number dialled directly: adds one customer record without touching the rest. No-op if the id already exists. */
   | { type: 'ADD_CUSTOMER'; customer: CustomerUser }
+  /** Fills in a customer's details (an agent naming a number that first came in as an unknown caller). */
+  | { type: 'UPDATE_CUSTOMER'; userId: string; patch: Partial<Omit<CustomerUser, 'id' | 'callHistory'>> }
+  /** Removes a customer from every list. The reason is required and goes in the super admin's log. */
+  | { type: 'DELETE_CUSTOMER'; userId: string; actorId: string; reason: string }
   | { type: 'IMPORT_CUSTOMERS'; customers: CustomerUser[]; actorId: string }
   | { type: 'RESET' };
+
+/** Something someone asked this person to do in the app — a card in their inbox. */
+export interface Notice {
+  id: string;
+  /** password_change: the super admin lets you choose a new password. password_request: someone asks the super admin for one (super admin's inbox). */
+  kind: 'password_change' | 'password_request' | 'message';
+  subjectId?: string;
+  subjectName?: string;
+  title: string;
+  body: string;
+  fromName: string;
+  ts: number;
+}
 
 /** Why an account action did not happen. */
 export type AccountResult = { ok: true } | { ok: false; message: string };
@@ -49,12 +66,28 @@ export interface StoreValue {
   dispatch: Dispatch<Action>;
   currentAgent: AgentAccount | null;
   ready: boolean;
-  backend: 'local' | 'firestore';
-  /** Firestore backend only: real per-person sign-in. The local demo store has none. */
-  signInWithPassword?: (email: string, password: string) => Promise<AccountResult>;
+  backend: 'local' | 'firestore' | 'server';
+  /** Firestore (email) and server (username) backends: real per-person sign-in. The local demo store has none. */
+  signInWithPassword?: (emailOrUsername: string, password: string) => Promise<AccountResult>;
   sendPasswordReset?: (email: string) => Promise<AccountResult>;
   /** Adds a person. On Firestore this also creates their login and emails them a link to choose a password. */
-  createAgent: (agent: AgentAccount, actorId: string) => Promise<AccountResult>;
+  createAgent: (agent: AgentAccount, actorId: string, password?: string) => Promise<AccountResult>;
+  /** Server backend: an admin (or supervisor, for agents) sets someone's password. */
+  setPassword?: (agentId: string, password: string) => Promise<AccountResult>;
+  /** Server backend: nobody exists yet, so the sign-in page offers to create the first admin. */
+  setup?: { needed: boolean; allowed: boolean; codeRequired: boolean; run: (p: { name: string; username: string; password: string; code?: string }) => Promise<AccountResult> };
+  /** Server backend: what the super admin lets client admins and agents see. */
+  visibility?: { changeLog: boolean };
+  /** Server backend: this person's inbox, and what they can do with it. */
+  notices?: Notice[];
+  dismissNotice?: (id: string) => Promise<void>;
+  changeMyPassword?: (password: string) => Promise<AccountResult>;
+  /** Asks the super admin for a new password — for yourself, or (admins) for one of your agents. */
+  requestPasswordChange?: (agentId?: string, note?: string) => Promise<AccountResult>;
+  /** Super admin: puts a "choose a new password" card in someone's inbox. */
+  grantPasswordChange?: (agentId: string, note?: string) => Promise<AccountResult>;
+  /** Server backend: changes not yet saved, or the last save failed. */
+  sync?: { pending: number; error: string | null };
   /** Firestore backend: signed in, but this login is not linked to an active TCC person. */
   accessProblem?: string | null;
 }

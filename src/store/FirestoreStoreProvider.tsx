@@ -319,6 +319,9 @@ export function FirestoreStoreProvider({ children }: { children: React.ReactNode
       case 'LOG_EXPORT':
         writeAudit(action.actorId, 'data_exported', undefined, action.detail);
         return;
+      case 'UPDATE_CUSTOMER':
+        await setDoc(customerMasterDoc(action.userId), stripUndefined(action.patch), { merge: true });
+        return;
       case 'ADD_CUSTOMER': {
         const { id, ...rest } = action.customer;
         if (usersRef.current.some((u) => u.id === id)) return;
