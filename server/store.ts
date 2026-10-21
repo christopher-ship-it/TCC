@@ -438,6 +438,7 @@ export function createStore(getPool: () => Promise<pg.Pool>, env: StoreEnv, read
               if (c.ownerAgentId !== prev.ownerAgentId) changes.push(`changed who calls ${c.name ?? c.phone}`);
               if ((Array.isArray(c.tickets) ? c.tickets.length : 0) > (Array.isArray(prev.tickets) ? prev.tickets.length : 0)) changes.push(`raised a ticket for ${c.name ?? c.phone}`);
               if (c.customerType !== prev.customerType) changes.push(`set ${c.name ?? c.phone} as ${String(c.customerType ?? 'no type')}`);
+              if ((c.lead ?? null) !== (prev.lead ?? null)) changes.push(c.lead ? `marked ${c.name ?? c.phone} ${String(c.lead)}` : `cleared positive/negative on ${c.name ?? c.phone}`);
             }
             await client.query(
               `insert into customers (id, owner_id, doc, updated_at) values ($1, $2, $3, now())

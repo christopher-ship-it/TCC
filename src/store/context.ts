@@ -1,6 +1,6 @@
 import { createContext, useContext, type Dispatch } from 'react';
 import type { Seed } from '../data/seed';
-import type { AgentAccount, AuditAction, AuditEntry, CallAnalysis, CallStatus, CallTelephony, CustomerUser, EscalationRecord, Language, Outcome } from '../data/types';
+import type { AgentAccount, AuditAction, AuditEntry, CallAnalysis, CallStatus, CallTelephony, CustomerUser, EscalationRecord, Language, Lead, Outcome } from '../data/types';
 
 export interface State {
   agents: AgentAccount[];
@@ -18,7 +18,7 @@ export interface State {
 export type Action =
   | { type: 'LOGIN'; agentId: string }
   | { type: 'LOGOUT' }
-  | { type: 'LOG_CALL'; userId: string; status: CallStatus; outcome?: Outcome; comment: string; agentId: string; telephony?: CallTelephony; analysis?: CallAnalysis; source?: string; followUpTs?: number }
+  | { type: 'LOG_CALL'; userId: string; status: CallStatus; outcome?: Outcome; comment: string; agentId: string; telephony?: CallTelephony; analysis?: CallAnalysis; source?: string; followUpTs?: number; lead?: Lead }
   | { type: 'ATTACH_RECORDING'; file: string; callId?: string; entryId?: string }
   | { type: 'SET_ANALYSIS'; userId: string; entryId: string; analysis?: CallAnalysis; error?: string }
   | { type: 'RAISE_TICKET'; userId: string; subject: string }
@@ -33,6 +33,8 @@ export type Action =
   | { type: 'CLOSE_FOLLOWUP'; userId: string; converted: boolean }
   | { type: 'MARK_PAID'; userId: string; actorId: string }
   | { type: 'SET_CUSTOMER_TYPE'; userId: string; customerType: string }
+  /** Marks a customer positive or negative by hand (customer page); `null` clears it. */
+  | { type: 'SET_LEAD'; userId: string; lead: Lead | null }
   | { type: 'AUTO_DISTRIBUTE'; actorId: string }
   | { type: 'LOG_EXPORT'; actorId: string; detail: string }
   /** Replaces the fabricated sample customers with a real CSV import, preserving call history etc. for any id already worked. */

@@ -62,6 +62,7 @@ export function reducer(state: State, action: Action): State {
         next.callback = plan.callback;
         next.autoFollowUp = plan.autoFollowUp;
         if (action.source) next.source = action.source;
+        if (action.lead) next.lead = action.lead;
         if (plan.callback) callHistory[0] = { ...entry, followUpTs: plan.callback.dueTs };
         if (plan.ended) {
           next.attempt = u.attempt + 1;
@@ -224,6 +225,8 @@ export function reducer(state: State, action: Action): State {
     }
     case 'SET_CUSTOMER_TYPE':
       return { ...state, users: state.users.map((u) => (u.id === action.userId ? { ...u, customerType: action.customerType } : u)) };
+    case 'SET_LEAD':
+      return { ...state, users: state.users.map((u) => (u.id === action.userId ? { ...u, lead: action.lead } : u)) };
     case 'MARK_PAID': {
       const user = state.users.find((u) => u.id === action.userId);
       if (!user) return state;

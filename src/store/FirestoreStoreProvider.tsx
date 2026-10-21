@@ -200,6 +200,7 @@ export function FirestoreStoreProvider({ children }: { children: React.ReactNode
         const now = Date.now();
         const entry = buildCallLogEntry(now, agent?.name ?? 'You', user, action);
         const callHistory = [entry, ...user.callHistory];
+        if (action.lead) writeOverlay(user.id, { lead: action.lead });
 
         if (!action.outcome) {
           // A call they made to us is not one of our attempts at reaching them.
@@ -307,6 +308,9 @@ export function FirestoreStoreProvider({ children }: { children: React.ReactNode
       }
       case 'SET_CUSTOMER_TYPE':
         writeOverlay(action.userId, { customerType: action.customerType });
+        return;
+      case 'SET_LEAD':
+        writeOverlay(action.userId, { lead: action.lead });
         return;
       case 'MARK_PAID': {
         const user = usersRef.current.find((u) => u.id === action.userId);

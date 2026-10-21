@@ -1,10 +1,11 @@
 // The call, as a panel docked beside the page (the page stays usable and readable). Two stages: on the line (large
 // controls, and the notes for this customer's product) → after the call: always a short form the agent completes
-// (what the call told us, what it didn't, a date to call again, one click to raise a ticket). The recording is read in
+// (what the call told us, what it didn't, positive or negative, a date to call again, one click to raise a ticket). Nothing
+// on it is required: a customer can hang up before answering any question. The recording is read in
 // the background and fills the form in as it arrives; the agent never has to wait for it.
 
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { Check, Grid3x3, Loader2, Mic, MicOff, Pause, Phone as PhoneIcon, PhoneOff, Play, Sparkles, Ticket } from 'lucide-react';
+import { Check, Grid3x3, Loader2, Mic, MicOff, Pause, Phone as PhoneIcon, PhoneOff, Play, Sparkles, ThumbsDown, ThumbsUp, Ticket } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { cn } from '@/lib/utils';
@@ -12,7 +13,7 @@ import { formatDuration, useElapsedSeconds, useTelephony } from '../../telephony
 import { useStore } from '../../store/StoreContext';
 import { useToast } from '../../ui/toastContext';
 import { customerTypesFor } from '../../data/products';
-import { CALL_STATUS_LIST, LEAD_SOURCES, NEGATIVE_OUTCOMES, OUTCOME_LIST, POSITIVE_OUTCOMES, type CallAnalysis, type CallStatus, type CustomerUser, type Outcome } from '../../data/types';
+import { CALL_STATUS_LIST, LEAD_SOURCES, NEGATIVE_OUTCOMES, OUTCOME_LIST, POSITIVE_OUTCOMES, type CallAnalysis, type CallStatus, type CustomerUser, type Lead, type Outcome } from '../../data/types';
 import { suggestStatus, toCallTelephony } from '../../lib/telephony';
 import { hasRealRecording } from '../../lib/attachRecording';
 import { analyzeCall, AnalysisUnavailable } from '../../lib/transcription';
@@ -111,6 +112,7 @@ function WrapUp({ user }: { user: CustomerUser }) {
   const [status, setStatus] = useState<CallStatus>(suggestStatus(result));
   const [type, setType] = useState<string>(user.customerType ?? '');
   const [outcome, setOutcome] = useState<Outcome | ''>('');
+  const [lead, setLead] = useState<Lead | ''>('');
   const [ticket, setTicket] = useState<boolean | null>(null);
   const [source, setSource] = useState<string>(user.source ?? '');
   const [followDate, setFollowDate] = useState('');
@@ -185,6 +187,7 @@ function WrapUp({ user }: { user: CustomerUser }) {
       analysis: analysis ?? undefined,
       source: answered ? source || undefined : undefined,
       followUpTs: followTs,
+      lead: answered && lead ? lead : undefined,
     });
     if (type && type !== user.customerType) dispatch({ type: 'SET_CUSTOMER_TYPE', userId: user.id, customerType: type });
     if (ticketOn) dispatch({ type: 'RAISE_TICKET', userId: user.id, subject: `[${team}] ${analysis?.summary?.slice(0, 120) || note.trim() || 'Raised from a call'}` });
@@ -265,6 +268,18 @@ function WrapUp({ user }: { user: CustomerUser }) {
           {outcome && POSITIVE_OUTCOMES.includes(outcome) && outcome !== 'Ready to subscribe' && <p className="text-[13px] text-muted-foreground">Goes into the weekly follow-up list. Only a “no” ends it.</p>}
           {outcome === 'Ready to subscribe' && <p className="text-[13px] text-muted-foreground">Marked as converted and taken out of every queue.</p>}
           {outcome && NEGATIVE_OUTCOMES.includes(outcome) && <p className="text-[13px] text-muted-foreground">Taken out of the queues and the follow-up list.</p>}
+        </div>
+      )}
+
+      {answered && (
+        <div className="flex flex-col gap-2">
+          <div className="text-sm font-medium">Positive or negative? <span className="font-normal text-muted-foreground">(optional, your own call)</span></div>
+          <div className="flex flex-wrap gap-2" role="group" aria-label="Positive or negative">
+            <Button size="sm" variant={lead === 'positive' ? 'default' : 'outline'} aria-pressed={lead === 'positive'} onClick={() => setLead(lead === 'positive' ? '' : 'positive')}><ThumbsUp className="size-4" />Positive</Button>
+            <Button size="sm" variant={lead === 'negative' ? 'default' : 'outline'} aria-pressed={lead === 'negative'} onClick={() => setLead(lead === 'negative' ? '' : 'negative')}><ThumbsDown className="size-4" />Negative</Button>
+          </div>
+          {user.lead && !lead && <p className="text-[13px] text-muted-foreground">Marked {user.lead} after an earlier call. Leave both off to keep that.</p>}
+          {lead && <p className="text-[13px] text-muted-foreground">Saved on the customer, so you can filter for {lead} customers on Customers and Follow-ups. It doesn’t change their queue.</p>}
         </div>
       )}
 

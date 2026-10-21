@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
-import { ArrowRight, CircleDollarSign, Headset, Lock, PhoneOff, Ticket, Trash2 } from 'lucide-react';
+import { ArrowRight, CircleDollarSign, Headset, Lock, PhoneOff, ThumbsDown, ThumbsUp, Ticket, Trash2 } from 'lucide-react';
 import { useStore } from '../store/StoreContext';
 import { APPS } from '../data/seed';
 import { QUEUES } from '../data/types';
@@ -14,7 +14,7 @@ import { talkShare } from '../lib/analysis/speakers';
 import { whyInQueue } from '../lib/whyInQueue';
 import { AUTO_FOLLOWUP_DAYS, chainDay } from '../lib/followUps';
 import { formatDuration } from '../telephony';
-import { OutcomeBadge, SentimentBadge } from '../components/calls/badges';
+import { LeadBadge, OutcomeBadge, SentimentBadge } from '../components/calls/badges';
 import { analysisState } from '../lib/callStatus';
 import { TicketDialog } from '../components/agent/TicketDialog';
 import { ColumnChart, Legend, LineChart } from '../ui/charts';
@@ -63,6 +63,7 @@ export default function CustomerPage() {
           <span className="row" style={{ gap: 12 }}>
             {user.name}
             <Badge tone={verdict.tone}>{verdict.label}</Badge>
+            <LeadBadge lead={user.lead} />
           </span>
         }
         desc={user.manual ? [user.phone, user.business, user.city].filter((x) => x && x !== '—').join(' · ') : `${user.business} · ${user.city}, ${user.effectiveState} · ${user.phone}`}
@@ -175,6 +176,7 @@ export default function CustomerPage() {
                       <div className="row" style={{ justifyContent: 'space-between' }}>
                         <span className="muted" style={{ fontSize: 13 }}>{c.atLabel} · {c.agentName}{c.telephony?.durationSec ? ` · ${formatDuration(c.telephony.durationSec)}` : ''}</span>
                         <span className="row" style={{ gap: 6 }}>
+                          <LeadBadge lead={c.lead} prefix="Marked" />
                           <SentimentBadge score={c.analysis?.sentiment} />
                           <OutcomeBadge call={c} />
                         </span>
@@ -238,6 +240,28 @@ export default function CustomerPage() {
               </>
             )}
           </Card>
+          {!gone && (
+            <Card title="Positive or negative" sub="Your own call on this customer, separate from what they said">
+              <div className="row" style={{ gap: 8 }} role="group" aria-label="Positive or negative">
+                {(['positive', 'negative'] as const).map((l) => (
+                  <Button
+                    key={l}
+                    size="sm"
+                    variant={user.lead === l ? 'primary' : 'secondary'}
+                    aria-pressed={user.lead === l}
+                    icon={l === 'positive' ? <ThumbsUp size={14} /> : <ThumbsDown size={14} />}
+                    onClick={() => {
+                      const next = user.lead === l ? null : l;
+                      dispatch({ type: 'SET_LEAD', userId: user.id, lead: next });
+                      toast(next ? `Marked ${next}` : 'Mark cleared');
+                    }}
+                  >
+                    {l === 'positive' ? 'Positive' : 'Negative'}
+                  </Button>
+                ))}
+              </div>
+            </Card>
+          )}
           <Card title="Owner">
             <div className="stack" style={{ gap: 10 }}>
               <span>{owner ? <><b>{owner.name}</b> <span className="muted">· {owner.languages.join(', ')}</span></> : <span className="muted">No owner — the queue decides who calls next.</span>}</span>
