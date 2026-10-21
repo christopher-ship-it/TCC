@@ -92,10 +92,10 @@ h2 { font-size: 17px; }
 h3 { font-size: 15px; }
 h4 { font-size: 14px; }
 p { margin: 0; }
-a { color: var(--accent); text-underline-offset: 3px; }
-a:hover { color: var(--accent-hover); }
+@layer base { a { color: var(--accent); text-underline-offset: 3px; } a:hover { color: var(--accent-hover); } }
 img { display: block; max-width: 100%; }
-button, input, select, textarea { font: inherit; color: inherit; }
+/* In a layer, so Tailwind's utilities (text-white on a blue button) win over it; unlayered CSS always beats a layer. */
+@layer base { button, input, select, textarea { font: inherit; color: inherit; } }
 code { font-family: var(--font-mono); font-size: 0.92em; background: var(--surface-3); padding: 1px 5px; border-radius: 4px; }
 
 :focus { outline: none; }
