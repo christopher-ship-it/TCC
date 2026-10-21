@@ -1,10 +1,10 @@
-// The call, as one big card over a blurred page. Three stages, one after the other, so the agent never has to find
-// anything: on the line (large controls) → processing (recording + analysis) → review (what the call told us, fill
-// what it didn't, one click to raise a ticket) → complete, then the next customer.
+// The call, as a panel docked beside the page (the page stays usable and readable). Two stages: on the line (large
+// controls, and the notes for this customer's product) → after the call: always a short form the agent completes
+// (what the call told us, what it didn't, a date to call again, one click to raise a ticket). The recording is read in
+// the background and fills the form in as it arrives; the agent never has to wait for it.
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { Check, Grid3x3, Loader2, Mic, MicOff, Pause, Phone as PhoneIcon, PhoneOff, Play, Sparkles, Ticket } from 'lucide-react';
-import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { cn } from '@/lib/utils';
@@ -19,6 +19,11 @@ import { analyzeCall, AnalysisUnavailable } from '../../lib/transcription';
 import { outcomeLabel } from '../../brand';
 import { AUTO_FOLLOWUP_DAYS, dayFromInput, inputFromDay, startOfDay } from '../../lib/followUps';
 import { useCallSession } from './callSessionContext';
+import { notesCall, notesForProduct, type Note } from '../../lib/notes';
+import { APPS } from '../../data/seed';
+
+const Title = ({ children }: { children: ReactNode }) => <h2 className="text-xl font-semibold leading-tight">{children}</h2>;
+const Sub = ({ children, className }: { children: ReactNode; className?: string }) => <p className={cn('text-sm text-muted-foreground', className)}>{children}</p>;
 
 const KEYS = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '*', '0', '#'];
 const STATUS_LABEL: Record<CallStatus, string> = {
@@ -50,13 +55,13 @@ function LiveCall({ user }: { user: CustomerUser }) {
   const [keypad, setKeypad] = useState(false);
   const connected = call.state === 'connected';
   return (
-    <div className="flex flex-col items-center gap-5 py-2 text-center">
-      <div className="flex size-20 items-center justify-center rounded-full bg-secondary text-2xl font-semibold">{initials(user.name)}</div>
+    <div className="flex flex-col items-center gap-4 text-center">
+      <div className="flex size-16 items-center justify-center rounded-full bg-secondary text-xl font-semibold">{initials(user.name)}</div>
       <div>
-        <DialogTitle className="text-2xl">{user.name}</DialogTitle>
-        <DialogDescription className="mt-1">{user.phone}{user.customerType ? ` · ${user.customerType}` : ''}</DialogDescription>
+        <Title>{user.name}</Title>
+        <Sub className="mt-1">{user.phone}{user.customerType ? ` · ${user.customerType}` : ''}</Sub>
       </div>
-      <div className="text-4xl font-medium tabular-nums" aria-live="off">{formatDuration(elapsed)}</div>
+      <div className="text-3xl font-medium tabular-nums" aria-live="off">{formatDuration(elapsed)}</div>
       <div className="text-sm text-muted-foreground" aria-live="polite">
         {!connected ? (call.state === 'dialing' ? 'Calling…' : 'Ringing…') : call.held ? 'On hold' : call.muted ? 'Muted — they can’t hear you' : 'Connected · recording'}
       </div>
@@ -85,7 +90,7 @@ function LiveCall({ user }: { user: CustomerUser }) {
   );
 }
 
-type Phase = 'processing' | 'review' | 'done';
+type Phase = 'review' | 'done';
 
 /** The call is over: wait for the analysis, then let the agent confirm and complete. */
 function WrapUp({ user }: { user: CustomerUser }) {
@@ -99,7 +104,8 @@ function WrapUp({ user }: { user: CustomerUser }) {
   // The demo line records nothing, so there is nothing to wait for.
   const analyse = connected && snapshot.provider !== 'mock';
 
-  const [phase, setPhase] = useState<Phase>(analyse ? 'processing' : 'review');
+  const [phase, setPhase] = useState<Phase>('review');
+  const [reading, setReading] = useState(analyse);
   const [analysis, setAnalysis] = useState<CallAnalysis | null>(null);
   const [note, setNote] = useState('');
   const [status, setStatus] = useState<CallStatus>(suggestStatus(result));
@@ -138,7 +144,7 @@ function WrapUp({ user }: { user: CustomerUser }) {
         }
         await new Promise((res) => setTimeout(res, 6000));
       }
-      if (!cancelled) setPhase('review');
+      if (!cancelled) setReading(false);
     })();
     return () => {
       cancelled = true;
@@ -150,9 +156,10 @@ function WrapUp({ user }: { user: CustomerUser }) {
   useEffect(() => {
     if (!analysis || filled.current) return;
     filled.current = true;
+    // Fills only what the agent has not already chosen.
     const o = OUTCOME_LIST.find((x) => x.outcome === analysis.outcome)?.outcome;
-    if (o) setOutcome(o);
-    if (!user.customerType && analysis.customerType && customerTypesFor(user.app).includes(analysis.customerType)) setType(analysis.customerType);
+    if (o) setOutcome((cur) => cur || o);
+    if (!user.customerType && analysis.customerType && customerTypesFor(user.app).includes(analysis.customerType)) setType((cur) => cur || analysis.customerType!);
   }, [analysis, user.customerType, user.app]);
 
   const answered = status.startsWith('Answered');
@@ -165,24 +172,6 @@ function WrapUp({ user }: { user: CustomerUser }) {
   const followTs = dayFromInput(followDate);
   const today = inputFromDay(Date.now());
   const inDays = (n: number) => inputFromDay(startOfDay(Date.now()) + n * 86_400_000 + 3_600_000);
-
-  // Close the card now: the call is saved as it stands and the recording is found and read in the background. When the
-  // reading finishes, the call is classified from what was said (answered, broker or not, what they want).
-  function saveInBackground() {
-    const agent = currentAgent!;
-    const telephony = toCallTelephony(resultRef.current);
-    dispatch({
-      type: 'LOG_CALL',
-      userId: user.id,
-      status,
-      comment: note.trim() || (telephony.durationSec > 0 ? `Talked ${formatDuration(telephony.durationSec)}` : STATUS_LABEL[status]),
-      agentId: agent.id,
-      telephony,
-      followUpTs: followTs,
-    });
-    toast('Saved — the call is still being read in the background');
-    session.completeWrapUp();
-  }
 
   function complete() {
     const agent = currentAgent!;
@@ -210,22 +199,8 @@ function WrapUp({ user }: { user: CustomerUser }) {
     return (
       <div className="flex flex-col items-center gap-3 py-10 text-center">
         <span className="flex size-14 items-center justify-center rounded-full bg-foreground text-background"><Check className="size-7" /></span>
-        <DialogTitle>Call completed</DialogTitle>
-        <DialogDescription>Moving to the next customer…</DialogDescription>
-      </div>
-    );
-  }
-
-  if (phase === 'processing') {
-    return (
-      <div className="flex flex-col items-center gap-3 py-10 text-center">
-        <Loader2 className="size-8 animate-spin text-muted-foreground" />
-        <DialogTitle>Reading the call</DialogTitle>
-        <DialogDescription>{hasRealRecording(result.recordingFile) ? 'Analysing the conversation…' : 'Getting the recording…'} This takes under a minute. You can close this and carry on — it finishes by itself.</DialogDescription>
-        <div className="flex flex-col items-center gap-1">
-          <Button size="sm" onClick={saveInBackground}>Close — keep reading in the background</Button>
-          <Button variant="ghost" size="sm" onClick={() => setPhase('review')}>Skip and fill in myself</Button>
-        </div>
+        <Title>Call completed</Title>
+        <Sub>Moving to the next customer…</Sub>
       </div>
     );
   }
@@ -233,10 +208,16 @@ function WrapUp({ user }: { user: CustomerUser }) {
   return (
     <div className="flex flex-col gap-5">
       <div>
-        <DialogTitle>{user.name}</DialogTitle>
-        <DialogDescription>{connected ? `Talked ${formatDuration(result.talkSeconds)}` : 'Did not connect'}{user.business ? ` · ${user.business}` : ''}</DialogDescription>
+        <Title>{user.name}</Title>
+        <Sub>{connected ? `Talked ${formatDuration(result.talkSeconds)}` : 'Did not connect'}{user.business ? ` · ${user.business}` : ''}</Sub>
       </div>
 
+      {reading && !analysis && (
+        <div className="flex items-center gap-2 rounded-lg border border-border bg-muted p-3 text-sm text-muted-foreground" role="status">
+          <Loader2 className="size-4 shrink-0 animate-spin" />
+          <span>Reading the call in the background — the summary and answers below fill in by themselves. You can complete this now.</span>
+        </div>
+      )}
       {analysis && (
         <div className="rounded-lg border border-border bg-muted p-3.5 text-sm">
           <div className="mb-1 flex items-center gap-1.5 text-xs text-muted-foreground"><Sparkles className="size-3.5" />Call summary</div>
@@ -244,7 +225,7 @@ function WrapUp({ user }: { user: CustomerUser }) {
           {analysis.recommendation && <p className="mt-2 text-muted-foreground">Next step: {analysis.recommendation}</p>}
         </div>
       )}
-      {connected && !analysis && <p className="text-sm text-muted-foreground">The analysis isn’t available for this call, so fill in what they said below.</p>}
+      {connected && !analysis && !reading && <p className="text-sm text-muted-foreground">The analysis isn’t available for this call, so fill in what they said below.</p>}
 
       <div className="flex flex-col gap-2">
         <div className="text-sm font-medium">Did the call connect?</div>
@@ -323,7 +304,36 @@ function WrapUp({ user }: { user: CustomerUser }) {
   );
 }
 
-/** Mounted once for the agent's whole session. Opens by itself when a call is on the line or waiting to be completed. */
+/** The notes for the product of the customer on the line: what to ask and say. Own notes and the team's. */
+function CallNotes({ app }: { app: CustomerUser['app'] }) {
+  const [notes, setNotes] = useState<Note[] | null>(null);
+  useEffect(() => {
+    let off = false;
+    notesCall<{ notes: Note[] }>('GET', '/api/notes').then((r) => !off && setNotes(r.notes)).catch(() => !off && setNotes([]));
+    return () => {
+      off = true;
+    };
+  }, []);
+  const mine = useMemo(() => notesForProduct(notes ?? [], app), [notes, app]);
+  const product = APPS.find((a) => a.id === app)?.name ?? 'this product';
+  if (!mine.length) return null;
+  return (
+    <section className="mt-5 border-t border-border pt-4" aria-label={`Notes for ${product}`}>
+      <div className="mb-2 text-sm font-medium">Notes for {product}</div>
+      <div className="flex flex-col gap-2">
+        {mine.map((n) => (
+          <div key={n.id} className="rounded-lg border border-border bg-muted p-3 text-sm">
+            {n.title && <b className="block font-medium">{n.title}</b>}
+            <p className="whitespace-pre-wrap leading-relaxed">{n.body}</p>
+            {n.audience === 'agents' && <span className="mt-1 block text-xs text-muted-foreground">From {n.ownerName}</span>}
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+/** Mounted once for the agent's whole session. Docks beside the page when a call is on the line or waiting to be completed. */
 export function CallModal() {
   const { snapshot } = useTelephony();
   const session = useCallSession();
@@ -333,17 +343,22 @@ export function CallModal() {
   const customerId = call?.meta.customerId ?? session.wrapUp?.customerId;
   const user = useMemo(() => state.users.find((u) => u.id === customerId), [state.users, customerId]);
   const open = !!user && (!!live || (!call && !!session.wrapUp));
+  // The page makes room for the dock (shell.css).
+  useEffect(() => {
+    document.body.classList.toggle('call-docked', open);
+    return () => document.body.classList.remove('call-docked');
+  }, [open]);
+  if (!open || !user) return null;
   return (
-    <Dialog open={open}>
-      <DialogContent
-        overlayClassName="bg-black/30 backdrop-blur-sm"
-        className="max-h-[92vh] max-w-xl overflow-y-auto p-8"
-        showClose={false}
-        onInteractOutside={(e) => e.preventDefault()}
-        onEscapeKeyDown={(e) => e.preventDefault()}
-      >
-        {user && (live ? <LiveCall user={user} /> : session.wrapUp ? <WrapUp key={session.wrapUp.result.id} user={user} /> : null)}
-      </DialogContent>
-    </Dialog>
+    <aside className="call-dock" aria-label="Call">
+      {live ? (
+        <>
+          <LiveCall user={user} />
+          <CallNotes app={user.app} />
+        </>
+      ) : session.wrapUp ? (
+        <WrapUp key={session.wrapUp.result.id} user={user} />
+      ) : null}
+    </aside>
   );
 }
