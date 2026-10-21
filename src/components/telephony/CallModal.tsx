@@ -12,11 +12,12 @@ import { formatDuration, useElapsedSeconds, useTelephony } from '../../telephony
 import { useStore } from '../../store/StoreContext';
 import { useToast } from '../../ui/toastContext';
 import { customerTypesFor } from '../../data/products';
-import { CALL_STATUS_LIST, NEGATIVE_OUTCOMES, OUTCOME_LIST, POSITIVE_OUTCOMES, type CallAnalysis, type CallStatus, type CustomerUser, type Outcome } from '../../data/types';
+import { CALL_STATUS_LIST, LEAD_SOURCES, NEGATIVE_OUTCOMES, OUTCOME_LIST, POSITIVE_OUTCOMES, type CallAnalysis, type CallStatus, type CustomerUser, type Outcome } from '../../data/types';
 import { suggestStatus, toCallTelephony } from '../../lib/telephony';
 import { hasRealRecording } from '../../lib/attachRecording';
 import { analyzeCall, AnalysisUnavailable } from '../../lib/transcription';
 import { outcomeLabel } from '../../brand';
+import { AUTO_FOLLOWUP_DAYS, dayFromInput, inputFromDay, startOfDay } from '../../lib/followUps';
 import { useCallSession } from './callSessionContext';
 
 const KEYS = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '*', '0', '#'];
@@ -105,6 +106,8 @@ function WrapUp({ user }: { user: CustomerUser }) {
   const [type, setType] = useState<string>(user.customerType ?? '');
   const [outcome, setOutcome] = useState<Outcome | ''>('');
   const [ticket, setTicket] = useState<boolean | null>(null);
+  const [source, setSource] = useState<string>(user.source ?? '');
+  const [followDate, setFollowDate] = useState('');
   const filled = useRef(false);
 
   // Find the recording (TeleCMI finalises it a little after hangup), then analyse it. Give up after ~2 minutes.
@@ -157,6 +160,11 @@ function WrapUp({ user }: { user: CustomerUser }) {
   const suggestTicket = outcome === 'Technical issue' || outcome === 'Payment issue' || !!analysis?.actionItems.some((a) => /ticket|escalat|issue|problem|bug|refund/i.test(a));
   const ticketOn = ticket ?? suggestTicket;
   const team = outcome === 'Payment issue' ? 'Billing' : 'Product';
+  // Who they are and how they found us matter on a call that connected; an unanswered call can be saved without them.
+  const missing = answered ? [!type ? 'customer type' : null, !source ? 'how they heard about the app' : null].filter(Boolean) as string[] : [];
+  const followTs = dayFromInput(followDate);
+  const today = inputFromDay(Date.now());
+  const inDays = (n: number) => inputFromDay(startOfDay(Date.now()) + n * 86_400_000 + 3_600_000);
 
   // Close the card now: the call is saved as it stands and the recording is found and read in the background. When the
   // reading finishes, the call is classified from what was said (answered, broker or not, what they want).
@@ -170,6 +178,7 @@ function WrapUp({ user }: { user: CustomerUser }) {
       comment: note.trim() || (telephony.durationSec > 0 ? `Talked ${formatDuration(telephony.durationSec)}` : STATUS_LABEL[status]),
       agentId: agent.id,
       telephony,
+      followUpTs: followTs,
     });
     toast('Saved — the call is still being read in the background');
     session.completeWrapUp();
@@ -187,6 +196,8 @@ function WrapUp({ user }: { user: CustomerUser }) {
       agentId: agent.id,
       telephony,
       analysis: analysis ?? undefined,
+      source: answered ? source || undefined : undefined,
+      followUpTs: followTs,
     });
     if (type && type !== user.customerType) dispatch({ type: 'SET_CUSTOMER_TYPE', userId: user.id, customerType: type });
     if (ticketOn) dispatch({ type: 'RAISE_TICKET', userId: user.id, subject: `[${team}] ${analysis?.summary?.slice(0, 120) || note.trim() || 'Raised from a call'}` });
@@ -245,13 +256,24 @@ function WrapUp({ user }: { user: CustomerUser }) {
       </div>
 
       <div className="flex flex-col gap-2">
-        <div className="flex items-center gap-2 text-sm font-medium">Who is this?{!user.customerType && !type && <Badge variant="outline">Not clear from the call — optional</Badge>}</div>
+        <div className="flex items-center gap-2 text-sm font-medium">Who is this?{!user.customerType && !type && <Badge variant="outline">{answered ? 'Required' : 'Not needed for this call'}</Badge>}</div>
         <div className="flex flex-wrap gap-2">
           {types.map((t) => (
             <Button key={t} size="sm" variant={type === t ? 'default' : 'outline'} onClick={() => setType(t)}>{t}</Button>
           ))}
         </div>
       </div>
+
+      {answered && (
+        <div className="flex flex-col gap-2">
+          <div className="flex items-center gap-2 text-sm font-medium">How did they hear about the app?{!source && <Badge variant="outline">Required</Badge>}</div>
+          <div className="flex flex-wrap gap-2">
+            {LEAD_SOURCES.map((s) => (
+              <Button key={s} size="sm" variant={source === s ? 'default' : 'outline'} onClick={() => setSource(s)}>{s}</Button>
+            ))}
+          </div>
+        </div>
+      )}
 
       {answered && (
         <div className="flex flex-col gap-2">
@@ -266,7 +288,21 @@ function WrapUp({ user }: { user: CustomerUser }) {
           {outcome && NEGATIVE_OUTCOMES.includes(outcome) && <p className="text-[13px] text-muted-foreground">Taken out of the queues and the follow-up list.</p>}
         </div>
       )}
-      {!answered && <p className="text-[13px] text-muted-foreground">They’ll stay in the queue for another try.</p>}
+
+      <div className="flex flex-col gap-2">
+        <div className="text-sm font-medium">Call them again on <span className="font-normal text-muted-foreground">(optional)</span></div>
+        <div className="flex flex-wrap items-center gap-2">
+          <Button size="sm" variant={followDate === today ? 'default' : 'outline'} onClick={() => setFollowDate(today)}>Today</Button>
+          <Button size="sm" variant={followDate === inDays(1) ? 'default' : 'outline'} onClick={() => setFollowDate(inDays(1))}>Tomorrow</Button>
+          <Button size="sm" variant={followDate === inDays(7) ? 'default' : 'outline'} onClick={() => setFollowDate(inDays(7))}>In a week</Button>
+          <input type="date" min={today} value={followDate} onChange={(e) => setFollowDate(e.target.value && e.target.value >= today ? e.target.value : '')} aria-label="Follow-up date" className="h-8 rounded-md border border-input bg-card px-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring" />
+          {followDate && <Button size="sm" variant="ghost" onClick={() => setFollowDate('')}>Clear</Button>}
+        </div>
+        {!answered && !followDate && !user.callHistory.some((c) => c.status.startsWith('Answered')) && (
+          <p className="text-[13px] text-muted-foreground">No date chosen: they’ll be called again every day for {AUTO_FOLLOWUP_DAYS} days, until they answer.</p>
+        )}
+        {!answered && followDate && <p className="text-[13px] text-muted-foreground">They’ll wait out of the queue until then.</p>}
+      </div>
 
       <button type="button" onClick={() => setTicket(!ticketOn)} aria-pressed={ticketOn} className={cn('flex cursor-pointer items-center gap-3 rounded-lg border p-3 text-left text-sm', ticketOn ? 'border-foreground bg-muted' : 'border-border')}>
         <Ticket className="size-4 shrink-0" />
@@ -280,8 +316,8 @@ function WrapUp({ user }: { user: CustomerUser }) {
       <textarea value={note} onChange={(e) => setNote(e.target.value)} placeholder="Note for whoever calls next (optional)" rows={2} className="w-full resize-none rounded-md border border-input bg-card p-2.5 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring" />
 
       <div className="flex items-center justify-between gap-3">
-        <span className="text-[13px] text-muted-foreground">{answered && !outcome ? 'What they said can be left blank — the call is read after you close this.' : ''}</span>
-        <Button size="lg" onClick={complete}><PhoneIcon className="size-4" />Complete call</Button>
+        <span className="text-[13px] text-muted-foreground">{missing.length ? `Still needed: ${missing.join(', ')}` : answered && !outcome ? 'What they said can be left blank — the call is read after you close this.' : ''}</span>
+        <Button size="lg" disabled={missing.length > 0} onClick={complete}><PhoneIcon className="size-4" />Complete call</Button>
       </div>
     </div>
   );

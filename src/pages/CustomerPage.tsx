@@ -12,6 +12,7 @@ import { can, LANGUAGE_SCRIPT } from '../lib/access';
 import { customerJourney, durationLabel, isConnected, journeyVerdict } from '../lib/metrics';
 import { talkShare } from '../lib/analysis/speakers';
 import { whyInQueue } from '../lib/whyInQueue';
+import { AUTO_FOLLOWUP_DAYS, chainDay } from '../lib/followUps';
 import { formatDuration } from '../telephony';
 import { OutcomeBadge, SentimentBadge } from '../components/calls/badges';
 import { analysisState } from '../lib/callStatus';
@@ -210,6 +211,7 @@ export default function CustomerPage() {
                 <div className="kv"><span>Mobile</span><span className="mono">{user.phone}</span></div>
                 <div className="kv"><span>Type</span><span>{user.customerType ?? '—'}</span></div>
                 <div className="kv"><span>Language</span><span>{user.language}</span></div>
+                <div className="kv"><span>Heard about the app via</span><span>{user.source ?? '—'}</span></div>
                 {user.city !== '—' && <div className="kv"><span>City</span><span>{user.city}</span></div>}
                 <div className="kv"><span>Added</span><span>{user.registeredAtLabel}</span></div>
               </>
@@ -259,6 +261,13 @@ export default function CustomerPage() {
               <div className="kv"><span>Amount</span><span className="mono">₹{user.paymentDue.amount.toLocaleString('en-IN')}</span></div>
               <div className="kv"><span>Due</span><span>{user.paymentDue.dueLabel}</span></div>
               <div className="kv"><span>Status</span><Badge tone={user.paymentDue.status === 'upcoming' ? 'neutral' : 'warn'}>{user.paymentDue.status}</Badge></div>
+            </Card>
+          )}
+          {user.callback && !gone && (
+            <Card title="Next call">
+              <div className="kv"><span>Call on</span><span>{new Date(user.callback.dueTs).toLocaleDateString('en-IN', { weekday: 'short', day: 'numeric', month: 'short' })}</span></div>
+              <div className="kv"><span>Set by</span><span>{user.callback.auto ? 'Automatic follow-up' : 'An agent'}</span></div>
+              {user.autoFollowUp && <div className="kv"><span>Automatic calls</span><span>Day {chainDay(user.autoFollowUp)} of {AUTO_FOLLOWUP_DAYS}, until they answer</span></div>}
             </Card>
           )}
           {user.followUp && (

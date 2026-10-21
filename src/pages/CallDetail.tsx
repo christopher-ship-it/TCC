@@ -210,6 +210,8 @@ export default function CallDetail() {
 
             <Card title="Logged by the agent">
               <div className="kv"><span>Status</span><span>{call.status}</span></div>
+              {call.source && <div className="kv"><span>Heard about the app via</span><span>{call.source}</span></div>}
+              {call.followUpTs && <div className="kv"><span>Call again on</span><span>{new Date(call.followUpTs).toLocaleDateString('en-IN', { weekday: 'short', day: 'numeric', month: 'short' })}</span></div>}
               {call.outcome && <div className="kv"><span>Outcome</span><span>{outcomeLabel(call.outcome)}</span></div>}
               {t?.ringSec ? <div className="kv"><span>Rang for</span><span className="mono">{t.ringSec}s</span></div> : null}
               {connected && quality && <div className="kv"><span>Line</span><span>{quality}</span></div>}

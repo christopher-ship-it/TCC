@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
-import { Activity, BarChart3, ChevronDown, ClipboardList, Contact, Database, KeyRound, Flag, Headset, History, Home, LogOut, Map, Phone, RotateCcw, Search, Shuffle, Users, UsersRound } from 'lucide-react';
+import { Activity, BarChart3, ChevronDown, ClipboardList, Contact, Database, KeyRound, Flag, Headset, History, Home, LogOut, Map, NotebookPen, Phone, RotateCcw, Search, Shuffle, Users, UsersRound } from 'lucide-react';
 import { BRAND_MARK } from '../assets';
 import { APPS } from '../data/seed';
 import type { AppId, Role } from '../data/types';
@@ -28,6 +28,7 @@ interface NavItem {
 
 function navFor(role: Role, pendingEscalations: number, firstApp: AppId | undefined, canExportOrAudit: boolean, addFirst: boolean, showLog = true): { title?: string; items: NavItem[] }[] {
   const s = 17;
+  const notes: NavItem = { to: '/notes', label: 'Notes', icon: <NotebookPen size={s} /> };
   const customers: NavItem = { to: '/customers', label: 'Customers', icon: <Contact size={s} />, end: true };
   if (role === 'agent') {
     return [
@@ -37,6 +38,7 @@ function navFor(role: Role, pendingEscalations: number, firstApp: AppId | undefi
           { to: firstApp ? `/work/${firstApp}` : '/home', label: 'Call queue', icon: <Headset size={s} /> },
           ...(addFirst ? [customers] : []),
           { to: '/calls', label: 'My calls', icon: <History size={s} /> },
+          ...(addFirst ? [notes] : []),
         ],
       },
     ];
@@ -46,6 +48,7 @@ function navFor(role: Role, pendingEscalations: number, firstApp: AppId | undefi
     ...(X ? [{ to: '/team/performance', label: 'Team performance', icon: <BarChart3 size={s} /> }] : []),
     ...(addFirst ? [customers] : []),
     { to: '/calls', label: 'Calls & recordings', icon: <Phone size={s} /> },
+    ...(addFirst ? [notes] : []),
     { to: '/escalations', label: 'Escalations', icon: <Flag size={s} />, badge: pendingEscalations || undefined },
     ...(X ? [{ to: '/allocation', label: 'Allocation', icon: <Shuffle size={s} /> }] : []),
   ];
