@@ -1,20 +1,75 @@
-import { useState } from 'react';
+import { useState, type FormEvent } from 'react';
 import { Navigate, useNavigate } from 'react-router-dom';
 import { ArrowRight, ShieldAlert } from 'lucide-react';
 import { useStore } from '../store/StoreContext';
 import { BRAND_MARK } from '../assets';
-import { BRAND } from '../brand';
+import { BRAND, WHITE_LABEL } from '../brand';
+import { APPS } from '../data/seed';
 import type { Role } from '../data/types';
-import { ROLE_INFO, isActive } from '../lib/access';
+import { ROLE_INFO, isActive, listJoin } from '../lib/access';
 import { homeFor } from '../lib/routes';
 import { Avatar, Button, Callout, Field, Input } from '../ui/primitives';
 import './login.css';
 
 const ROLE_ORDER: Role[] = ['agent', 'supervisor', 'admin'];
 
+/** First visit to a deployment with an empty database: whoever sets it up becomes its first admin. */
+function SetupForm() {
+  const { setup } = useStore();
+  const [name, setName] = useState('');
+  const [username, setUsername] = useState('');
+  const [password, setPassword] = useState('');
+  const [confirm, setConfirm] = useState('');
+  const [code, setCode] = useState('');
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  if (!setup) return null;
+
+  async function submit(e: FormEvent) {
+    e.preventDefault();
+    if (password !== confirm) return setError('The two passwords don’t match.');
+    setBusy(true);
+    const r = await setup!.run({ name: name.trim(), username: username.trim().toLowerCase(), password, code: code.trim() || undefined });
+    setBusy(false);
+    if (!r.ok) setError(r.message);
+  }
+
+  return (
+    <>
+      <div>
+        <h2 style={{ fontSize: 22 }}>Set up Command Center</h2>
+        <p className="muted" style={{ marginTop: 4 }}>Create the admin account. You’ll then add your agents and give each one a password.</p>
+      </div>
+      <form className="stack" onSubmit={(e) => void submit(e)}>
+        <Field label="Your name" htmlFor="su-name">
+          <Input id="su-name" value={name} onChange={(e) => { setName(e.target.value); setError(null); }} autoFocus placeholder="Priya Raman" />
+        </Field>
+        <Field label="Username" htmlFor="su-user" hint="What you type to sign in. Lowercase letters, numbers, dots.">
+          <Input id="su-user" value={username} onChange={(e) => { setUsername(e.target.value.toLowerCase()); setError(null); }} autoComplete="username" placeholder="admin" />
+        </Field>
+        <Field label="Password" htmlFor="su-pw" hint="At least 6 characters.">
+          <Input id="su-pw" type="password" value={password} onChange={(e) => { setPassword(e.target.value); setError(null); }} autoComplete="new-password" />
+        </Field>
+        <Field label="Password again" htmlFor="su-pw2">
+          <Input id="su-pw2" type="password" value={confirm} onChange={(e) => { setConfirm(e.target.value); setError(null); }} autoComplete="new-password" />
+        </Field>
+        {setup.codeRequired && (
+          <Field label="Setup code" htmlFor="su-code" hint="The code you were given with this address.">
+            <Input id="su-code" value={code} onChange={(e) => { setCode(e.target.value); setError(null); }} autoComplete="off" />
+          </Field>
+        )}
+        {error && <Callout tone="danger">{error}</Callout>}
+        <Button type="submit" variant="primary" size="lg" block disabled={busy || !name.trim() || !username.trim() || !password || !confirm || (setup.codeRequired && !code.trim())}>{busy ? 'Creating…' : 'Create admin account'}</Button>
+      </form>
+    </>
+  );
+}
+
 export default function LoginPage() {
-  const { state, dispatch, ready, backend, currentAgent, signInWithPassword, sendPasswordReset, accessProblem } = useStore();
-  const live = backend === 'firestore';
+  const { state, dispatch, ready, backend, currentAgent, signInWithPassword, sendPasswordReset, accessProblem, setup } = useStore();
+  const live = backend !== 'local';
+  const byEmail = backend === 'firestore';
+  const blurb = WHITE_LABEL ? BRAND.loginBlurb : BRAND.loginBlurb.replace('RealBroks, IronDrobe, Influnet and Vehigo', listJoin(APPS.map((a) => a.name)));
   const navigate = useNavigate();
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
@@ -22,7 +77,7 @@ export default function LoginPage() {
   const [info, setInfo] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
-  if (ready && currentAgent && isActive(currentAgent)) return <Navigate to={homeFor(currentAgent.role)} replace />;
+  if (ready && currentAgent && isActive(currentAgent)) return <Navigate to={currentAgent.superAdmin ? '/system' : homeFor(currentAgent.role)} replace />;
 
   async function signInLive() {
     if (!signInWithPassword || busy) return;
@@ -62,7 +117,7 @@ export default function LoginPage() {
         </div>
         <div className="login__pitch">
           <h1>{BRAND.loginHeadline}</h1>
-          <p>{BRAND.loginBlurb}</p>
+          <p>{blurb}</p>
         </div>
         <div className="login__rule" aria-hidden>
           <span />
@@ -72,6 +127,12 @@ export default function LoginPage() {
 
       <main className="login__panel">
         <div className="login__card">
+          {setup?.needed && !setup.allowed ? (
+            <div>
+              <h2 style={{ fontSize: 22 }}>Not set up yet</h2>
+              <p className="muted" style={{ marginTop: 4 }}>This Command Center has no accounts yet. Tecstellar will send you your sign-in.</p>
+            </div>
+          ) : setup?.needed ? <SetupForm /> : <>
           <div>
             <h2 style={{ fontSize: 22 }}>Sign in</h2>
             <p className="muted" style={{ marginTop: 4 }}>Agents land on today’s queue, supervisors on their team, admins on the overview.</p>
@@ -84,8 +145,8 @@ export default function LoginPage() {
               else signIn();
             }}
           >
-            <Field label={live ? 'Email' : 'Username'} htmlFor="tcc-un">
-              <Input id="tcc-un" type={live ? 'email' : 'text'} value={username} onChange={(e) => { setUsername(e.target.value); setError(null); }} autoComplete="username" autoFocus placeholder={live ? BRAND.emailPlaceholder : BRAND.usernamePlaceholder} />
+            <Field label={byEmail ? 'Email' : backend === 'server' ? 'Username or email' : 'Username'} htmlFor="tcc-un">
+              <Input id="tcc-un" type={byEmail ? 'email' : 'text'} value={username} onChange={(e) => { setUsername(e.target.value); setError(null); }} autoComplete="username" autoFocus placeholder={byEmail ? BRAND.emailPlaceholder : BRAND.usernamePlaceholder} />
             </Field>
             <Field label="Password" htmlFor="tcc-pw">
               <Input id="tcc-pw" type="password" value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="current-password" />
@@ -93,7 +154,8 @@ export default function LoginPage() {
             {(error ?? accessProblem) && <Callout tone="danger">{error ?? accessProblem}</Callout>}
             {info && <Callout tone="ok">{info}</Callout>}
             <Button type="submit" variant="primary" size="lg" block disabled={!ready || busy || !username.trim() || (live && !password)}>{busy ? 'Signing in…' : 'Sign in'}</Button>
-            {live && <button type="button" className="btn btn--link" style={{ alignSelf: 'center' }} onClick={() => void forgot()}>Forgot password?</button>}
+            {byEmail && <button type="button" className="btn btn--link" style={{ alignSelf: 'center' }} onClick={() => void forgot()}>Forgot password?</button>}
+            {backend === 'server' && <span className="muted" style={{ fontSize: 13, textAlign: 'center' }}>Forgot your password? Ask your admin to set a new one.</span>}
           </form>
 
           {!live && (
@@ -130,7 +192,8 @@ export default function LoginPage() {
               })
             )}
           </div>}
-          <p className="muted" style={{ fontSize: 12.5 }}>{backend === 'firestore' ? 'Live data · connected to Firestore' : 'Sample data in this browser · no database connected yet'}</p>
+          {backend !== 'server' && <p className="muted" style={{ fontSize: 12.5 }}>{backend === 'firestore' ? 'Live data · connected to Firestore' : 'Sample data in this browser · no database connected yet'}</p>}
+          </>}
         </div>
       </main>
     </div>

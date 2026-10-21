@@ -7,7 +7,7 @@ import { formatDuration, useElapsedSeconds, useTelephonyOptional, type CallResul
 import { isVirtualInput } from '../../telephony/core/microphone';
 import { useAudioDevices } from '../../telephony/react/hooks';
 import type { AgentAccount, CustomerUser } from '../../data/types';
-import { LIVE_DIAL_BLOCKED, TEST_NUMBER } from '../../lib/telephony';
+import { LIVE_DIAL_BLOCKED, TEST_NUMBER, isRealNumber } from '../../lib/telephony';
 import { Button, Field, Input, Select } from '../../ui/primitives';
 import { useCallSession } from './callSessionContext';
 import { announcePresence, forgetLine, rememberLine } from '../../lib/presence';
@@ -187,8 +187,8 @@ export function Phone({ user, agent, onEscalate }: { user: CustomerUser; agent: 
   const otherCall = call && call.meta.customerId !== user.id;
   const inbound = call?.direction === 'inbound' && !otherCall;
   const callerNumber = call && /^\d{8,15}$/.test(call.remote) ? `+${call.remote}` : (call?.remote ?? '');
-  const redirected = !!TEST_NUMBER && !user.adHoc && !inbound;
-  const blocked = LIVE_DIAL_BLOCKED && !user.adHoc;
+  const redirected = !!TEST_NUMBER && !isRealNumber(user) && !inbound;
+  const blocked = LIVE_DIAL_BLOCKED && !isRealNumber(user);
   const ended = !call && session.wrapUp?.customerId === user.id ? session.wrapUp.result : null;
   const ringing = call && (call.state === 'dialing' || call.state === 'ringing' || call.state === 'incoming');
   const micLabel = stats?.micLabel;

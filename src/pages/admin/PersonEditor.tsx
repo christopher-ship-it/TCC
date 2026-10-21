@@ -73,7 +73,10 @@ function diff(before: Draft, after: Draft): string[] {
 }
 
 export function PersonEditor({ person, onClose }: { person?: AgentAccount; onClose: () => void }) {
-  const { state, dispatch, currentAgent, createAgent, backend } = useStore();
+  const { state, dispatch, currentAgent, createAgent, backend, setPassword, requestPasswordChange, grantPasswordChange } = useStore();
+  const [password, setPw] = useState('');
+  const [newPw, setNewPw] = useState('');
+  const [pwBusy, setPwBusy] = useState(false);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const toast = useToast();
@@ -101,8 +104,19 @@ export function PersonEditor({ person, onClose }: { person?: AgentAccount; onClo
     username: !/^[a-z0-9._-]{3,}$/.test(d.username.trim()) ? 'Use 3+ lowercase letters, numbers, dots or dashes.' : usernameTaken ? 'Someone already has this username.' : null,
     apps: d.role !== 'admin' && d.apps.length === 0 ? 'Give them at least one app.' : null,
     email: creating && backend === 'firestore' && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(d.email.trim()) ? 'Enter their work email — they sign in with it.' : null,
+    password: creating && backend === 'server' && password.length < 6 ? 'Set a password of at least 6 characters. You give it to them.' : null,
   };
-  const valid = !errors.name && !errors.username && !errors.apps && !errors.email;
+  const valid = !errors.name && !errors.username && !errors.apps && !errors.email && !errors.password;
+
+  async function changePassword() {
+    if (!person || !setPassword || newPw.length < 6) return;
+    setPwBusy(true);
+    const r = await setPassword(person.id, newPw);
+    setPwBusy(false);
+    if (!r.ok) return setSaveError(r.message);
+    toast(`New password set for ${person.name}`);
+    setNewPw('');
+  }
   const activity = useMemo(() => (person ? state.audit.filter((e) => e.target === person.name || e.actorId === person.id).slice(0, 40) : []), [state.audit, person]);
 
   function applyTemplate(id: string) {
@@ -139,7 +153,7 @@ export function PersonEditor({ person, onClose }: { person?: AgentAccount; onClo
   function save() {
     setTried(true);
     if (!valid) {
-      setSection(errors.name || errors.username || errors.email ? 'who' : 'access');
+      setSection(errors.name || errors.username || errors.email || errors.password ? 'who' : 'access');
       return;
     }
     const patch: Partial<AgentAccount> = {
@@ -178,6 +192,7 @@ export function PersonEditor({ person, onClose }: { person?: AgentAccount; onClo
           workingQueueLabel: '—',
         },
         actor.id,
+        backend === 'server' ? password : undefined,
       ).then((r) => {
         setSaving(false);
         if (!r.ok) {
@@ -185,7 +200,7 @@ export function PersonEditor({ person, onClose }: { person?: AgentAccount; onClo
           setSection('who');
           return;
         }
-        toast(backend === 'firestore' ? `${patch.name} was emailed a link to choose a password` : `${patch.name} can now sign in as ${patch.username}`);
+        toast(backend === 'firestore' ? `${patch.name} was emailed a link to choose a password` : backend === 'server' ? `${patch.name} can sign in now — username ${patch.username} and the password you set` : `${patch.name} can now sign in as ${patch.username}`);
         onClose();
       });
       return;
@@ -218,7 +233,7 @@ export function PersonEditor({ person, onClose }: { person?: AgentAccount; onClo
     <Sheet
       wide
       title={creating ? 'Add a person' : person!.name}
-      desc={creating ? (backend === 'firestore' ? 'They sign in with their work email and choose their own password.' : 'They sign in with the username you set here.') : `${person!.username} · ${ROLE_INFO[person!.role].label}${person!.createdTs ? ` · added ${fmtDayTime(person!.createdTs).split(' · ')[0]}` : ''}`}
+      desc={creating ? (backend === 'firestore' ? 'They sign in with their work email and choose their own password.' : backend === 'server' ? 'They sign in with the username and password you set here.' : 'They sign in with the username you set here.') : `${person!.username} · ${ROLE_INFO[person!.role].label}${person!.createdTs ? ` · added ${fmtDayTime(person!.createdTs).split(' · ')[0]}` : ''}`}
       leading={!creating ? <Avatar name={person!.name} size="lg" /> : undefined}
       onClose={onClose}
       footer={
@@ -257,10 +272,34 @@ export function PersonEditor({ person, onClose }: { person?: AgentAccount; onClo
                   <Input id="pe-user" value={d.username} invalid={tried && !!errors.username} onChange={(e) => { setUserTouched(true); set('username', e.target.value.toLowerCase()); }} placeholder="kavya.r" />
                 </Field>
                 {saveError && <Callout tone="danger">{saveError}</Callout>}
-                {(creating ? backend === 'firestore' : !!person?.email) && (
-                  <Field label="Work email" htmlFor="pe-email" error={tried && errors.email} hint={creating ? 'Their login. They get an email to choose a password.' : undefined}>
+                {(creating ? backend !== 'local' : !!person?.email) && (
+                  <Field label={backend === 'server' ? 'Email (optional)' : 'Work email'} htmlFor="pe-email" error={tried && errors.email} hint={creating ? (backend === 'server' ? 'They can sign in with this instead of the username.' : 'Their login. They get an email to choose a password.') : undefined}>
                     <Input id="pe-email" type="email" value={d.email} readOnly={!creating} invalid={tried && !!errors.email} onChange={(e) => set('email', e.target.value)} placeholder={BRAND.emailPlaceholder} />
                   </Field>
+                )}
+                {creating && backend === 'server' && (
+                  <Field label="Password" htmlFor="pe-pw" error={tried && errors.password} hint="At least 6 characters. Give it to them with their username.">
+                    <Input id="pe-pw" type="text" value={password} invalid={tried && !!errors.password} onChange={(e) => setPw(e.target.value)} autoComplete="off" />
+                  </Field>
+                )}
+                {!creating && backend === 'server' && editable && actor.superAdmin && (
+                  <Field label="Set a new password" htmlFor="pe-newpw" hint="They’re signed out everywhere and use the new one.">
+                    <div className="row" style={{ gap: 8, flexWrap: 'nowrap' }}>
+                      <Input id="pe-newpw" type="text" value={newPw} onChange={(e) => setNewPw(e.target.value)} autoComplete="off" placeholder="At least 6 characters" />
+                      <Button onClick={() => void changePassword()} disabled={pwBusy || newPw.length < 6}>{pwBusy ? 'Saving…' : 'Set'}</Button>
+                    </div>
+                  </Field>
+                )}
+                {!creating && backend === 'server' && editable && !self && (actor.superAdmin ? grantPasswordChange : requestPasswordChange) && (
+                  actor.superAdmin ? (
+                    <Field label="Or let them choose it" htmlFor="pe-ask" hint="A card appears in their inbox; they choose the new password.">
+                      <Button id="pe-ask" onClick={() => void grantPasswordChange!(person!.id).then((r) => (r.ok ? toast(`${person!.name} will see the card in their inbox`) : setSaveError(r.message)))}>Send them a card</Button>
+                    </Field>
+                  ) : (
+                    <Field label="Password" htmlFor="pe-ask" hint="Only the super admin changes passwords. Send them a request.">
+                      <Button id="pe-ask" onClick={() => void requestPasswordChange!(person!.id).then((r) => (r.ok ? toast('Request sent to the super admin') : setSaveError(r.message)))}>Request a password change</Button>
+                    </Field>
+                  )
                 )}
                 <Field label="Mobile (optional)" htmlFor="pe-phone">
                   <Input id="pe-phone" value={d.phone} onChange={(e) => set('phone', e.target.value)} inputMode="tel" placeholder="+91 98450 12345" />
@@ -328,7 +367,7 @@ export function PersonEditor({ person, onClose }: { person?: AgentAccount; onClo
                       </tbody>
                     </table>
                   </div>
-                  {!WHITE_LABEL && <span className="muted" style={{ fontSize: 13 }}>Influnet and Vehigo appear here when they go live.</span>}
+                  {!WHITE_LABEL && APPS.some((a) => !a.live) && <span className="muted" style={{ fontSize: 13 }}>Influnet and Vehigo appear here when they go live.</span>}
                 </div>
                 <div className="stack" style={{ gap: 8 }}>
                   <span className="section-label">Queues they work</span>

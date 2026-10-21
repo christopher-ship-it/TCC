@@ -27,6 +27,7 @@
 
 .shell-pill { display: inline-flex; align-items: center; gap: 8px; height: 32px; padding: 0 12px; border-radius: var(--r-pill); border: 1px solid var(--line-strong); background: var(--surface); color: var(--ink); font-size: 13px; cursor: pointer; white-space: nowrap; }
 .shell-pill--live { border-color: var(--ok-line); }
+.shell-pill--warn { border-color: var(--warn); color: var(--warn); cursor: default; }
 .shell-pill:hover { background: var(--surface-3); }
 
 .shell-user__btn { display: flex; align-items: center; gap: 10px; background: none; border: 0; color: var(--ink); cursor: pointer; padding: 4px 6px; border-radius: var(--r-sm); }

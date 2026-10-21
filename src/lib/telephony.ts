@@ -30,16 +30,19 @@ if (telephonyProvider instanceof MockProvider && typeof window !== 'undefined') 
 export const TEST_NUMBER = (import.meta.env.VITE_TELEPHONY_TEST_NUMBER as string | undefined)?.trim() || null;
 export const LIVE_DIAL_BLOCKED = mode === 'telecmi' && !TEST_NUMBER && import.meta.env.VITE_TELEPHONY_LIVE !== 'true';
 
-/** The number to actually dial for a customer (the test number, when one is set). A number the agent typed in is always dialled as typed. */
+/** A number a person typed in (dialled directly, or a customer added by hand) is real: it is always dialled as typed. */
+export const isRealNumber = (user: CustomerUser): boolean => !!(user.adHoc || user.manual);
+
+/** The number to actually dial for a customer (the test number, when one is set, for sample customers only). */
 export function dialNumberFor(user: CustomerUser): string {
-  return TEST_NUMBER && !user.adHoc ? TEST_NUMBER : user.phone;
+  return TEST_NUMBER && !isRealNumber(user) ? TEST_NUMBER : user.phone;
 }
 
 export const DEFAULT_COUNTRY_CODE = (import.meta.env.VITE_TELEPHONY_COUNTRY_CODE as string | undefined) || '91';
 
 /** Tags attached to every call; TeleCMI echoes them back in its webhooks so a call can be tied to a customer and agent. */
 export function callMeta(user: CustomerUser, agent: AgentAccount): Meta {
-  return { app: user.app, customerId: user.id, agentId: agent.id, queue: user.queue ?? '', ...(TEST_NUMBER && !user.adHoc ? { testRedirect: 'true' } : {}) };
+  return { app: user.app, customerId: user.id, agentId: agent.id, queue: user.queue ?? '', ...(TEST_NUMBER && !isRealNumber(user) ? { testRedirect: 'true' } : {}) };
 }
 
 /** What the softphone already knows about "did the call connect?". Provides an intelligent default status

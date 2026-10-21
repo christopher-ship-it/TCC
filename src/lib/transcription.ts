@@ -3,7 +3,7 @@
 // `npm run transcribe`) can still produce a bare transcript.
 
 import type { CallAnalysis, CallLogEntry, CustomerUser, Language } from '../data/types';
-import { TEST_NUMBER } from './telephony';
+import { TEST_NUMBER, isRealNumber } from './telephony';
 import { customerTypesFor } from '../data/products';
 
 export const TRANSCRIBE_URL = ((import.meta.env.VITE_TRANSCRIBE_URL as string | undefined)?.trim() || 'http://127.0.0.1:8787').replace(/\/$/, '');
@@ -40,8 +40,8 @@ async function viaServer(entry: CallLogEntry, user: CustomerUser): Promise<CallA
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       file: entry.telephony?.recordingFile,
-      customer: TEST_NUMBER ? undefined : user.name,
-      business: TEST_NUMBER ? undefined : user.business,
+      customer: TEST_NUMBER && !isRealNumber(user) ? undefined : user.name,
+      business: TEST_NUMBER && !isRealNumber(user) ? undefined : user.business,
       app: user.app,
       customerTypes: customerTypesFor(user.app),
       levels: entry.telephony?.levels,

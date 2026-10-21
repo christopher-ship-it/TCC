@@ -22,6 +22,7 @@ export function allCalls(users: CustomerUser[], opts: { apps?: AppId[]; agentNam
   const out: CallRow[] = [];
   for (const user of users) {
     if (opts.apps && !opts.apps.includes(user.app)) continue;
+    if (user.deleted) continue;
     for (const call of user.callHistory) {
       if (opts.agentName && call.agentName !== opts.agentName) continue;
       if (opts.since && call.atTs < opts.since) continue;

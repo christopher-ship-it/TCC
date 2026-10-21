@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
-import { BarChart3, ChevronDown, ClipboardList, Database, Flag, Headset, History, Home, LogOut, Map, Phone, RotateCcw, Search, Shuffle, Users, UsersRound } from 'lucide-react';
+import { Activity, BarChart3, ChevronDown, ClipboardList, Contact, Database, KeyRound, Flag, Headset, History, Home, LogOut, Map, Phone, RotateCcw, Search, Shuffle, Users, UsersRound } from 'lucide-react';
 import { BRAND_MARK } from '../assets';
 import { APPS } from '../data/seed';
 import type { AppId, Role } from '../data/types';
@@ -10,10 +10,12 @@ import { formatDuration, useElapsedSeconds, useTelephonyOptional } from '../tele
 import { useCallSession } from '../components/telephony/callSessionContext';
 import { LineStatus } from '../components/telephony/LineStatus';
 import { Avatar } from '../ui/primitives';
+import { useToast } from '../ui/toastContext';
 import { BRAND } from '../brand';
 import { FEATURES } from '../lib/features';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { ScopeContext, type ScopeValue } from './scope';
+import { ChangePasswordDialog, InboxBanner, InboxBell } from '../components/inbox/Inbox';
 import './shell.css';
 
 interface NavItem {
@@ -24,14 +26,16 @@ interface NavItem {
   badge?: number;
 }
 
-function navFor(role: Role, pendingEscalations: number, firstApp: AppId | undefined, canExportOrAudit: boolean): { title?: string; items: NavItem[] }[] {
+function navFor(role: Role, pendingEscalations: number, firstApp: AppId | undefined, canExportOrAudit: boolean, addFirst: boolean, showLog = true): { title?: string; items: NavItem[] }[] {
   const s = 17;
+  const customers: NavItem = { to: '/customers', label: 'Customers', icon: <Contact size={s} />, end: true };
   if (role === 'agent') {
     return [
       {
         items: [
           ...(FEATURES.todayPage ? [{ to: '/home', label: 'Today', icon: <Home size={s} /> }] : []),
           { to: firstApp ? `/work/${firstApp}` : '/home', label: 'Call queue', icon: <Headset size={s} /> },
+          ...(addFirst ? [customers] : []),
           { to: '/calls', label: 'My calls', icon: <History size={s} /> },
         ],
       },
@@ -40,13 +44,14 @@ function navFor(role: Role, pendingEscalations: number, firstApp: AppId | undefi
   const X = FEATURES.adminExtras;
   const team: NavItem[] = [
     ...(X ? [{ to: '/team/performance', label: 'Team performance', icon: <BarChart3 size={s} /> }] : []),
+    ...(addFirst ? [customers] : []),
     { to: '/calls', label: 'Calls & recordings', icon: <Phone size={s} /> },
     { to: '/escalations', label: 'Escalations', icon: <Flag size={s} />, badge: pendingEscalations || undefined },
     ...(X ? [{ to: '/allocation', label: 'Allocation', icon: <Shuffle size={s} /> }] : []),
   ];
   const people: NavItem[] = [{ to: '/people', label: 'Agents', icon: <UsersRound size={s} /> }];
-  if (role === 'admin') people.push({ to: '/customers-import', label: 'Import data', icon: <Database size={s} /> });
-  if (canExportOrAudit) people.push({ to: '/audit', label: 'Change log', icon: <ClipboardList size={s} /> });
+  if (role === 'admin' && !addFirst) people.push({ to: '/customers-import', label: 'Import data', icon: <Database size={s} /> });
+  if (canExportOrAudit && showLog) people.push({ to: '/audit', label: 'Change log', icon: <ClipboardList size={s} /> });
   const overview: NavItem = { to: role === 'admin' ? '/overview' : '/team', label: 'Overview', icon: <Home size={s} /> };
   return [
     { items: [overview, ...team] },
@@ -79,7 +84,7 @@ function CustomerSearch({ apps }: { apps: AppId[] }) {
     if (t.length < 2) return [];
     const digits = t.replace(/\D/g, '');
     return state.users
-      .filter((u) => apps.includes(u.app))
+      .filter((u) => apps.includes(u.app) && !u.deleted)
       .filter((u) => u.name.toLowerCase().includes(t) || u.business.toLowerCase().includes(t) || u.shopCode.toLowerCase().includes(t) || (digits.length >= 4 && u.phone.replace(/\D/g, '').includes(digits)))
       .slice(0, 8);
   }, [q, state.users, apps]);
@@ -137,6 +142,18 @@ function CustomerSearch({ apps }: { apps: AppId[] }) {
   );
 }
 
+/** Shared-database builds: whether this browser's changes have reached the server. Quiet when all is saved. */
+function SyncStatus() {
+  const { sync } = useStore();
+  if (!sync || (!sync.error && sync.pending === 0)) return null;
+  return (
+    <span className={`shell-pill${sync.error ? ' shell-pill--warn' : ''}`} title={sync.error ?? undefined} role="status">
+      <span className={`dot ${sync.error ? 'dot--warn' : ''}`} />
+      {sync.error ? 'Not saved — retrying' : 'Saving…'}
+    </span>
+  );
+}
+
 /** "On a call 02:41" / "Log your call" — visible from every page so a call is never lost. */
 function CallPill() {
   const tel = useTelephonyOptional();
@@ -164,9 +181,11 @@ function CallPill() {
 }
 
 export default function AppShell() {
-  const { state, currentAgent, dispatch, backend } = useStore();
+  const { state, currentAgent, dispatch, backend, requestPasswordChange, visibility } = useStore();
+  const toast = useToast();
   const navigate = useNavigate();
   const location = useLocation();
+  const [changingPw, setChangingPw] = useState(false);
 
   const visibleApps = useMemo<AppId[]>(() => {
     if (!currentAgent) return [];
@@ -183,7 +202,8 @@ export default function AppShell() {
   if (!currentAgent) return null;
   const pending = state.escalations.filter((e) => e.status === 'pending' && visibleApps.includes(e.app)).length;
   const firstLiveApp = visibleApps.find((id) => APPS.find((a) => a.id === id)?.live);
-  const nav = navFor(currentAgent.role, pending, firstLiveApp, canAnywhere(currentAgent, 'export') || currentAgent.role !== 'agent');
+  const nav = navFor(currentAgent.role, pending, firstLiveApp, canAnywhere(currentAgent, 'export') || currentAgent.role !== 'agent', backend === 'server', currentAgent.superAdmin || visibility?.changeLog !== false);
+  if (currentAgent.superAdmin) nav.unshift({ title: 'Super admin', items: [{ to: '/system', label: 'System', icon: <Activity size={17} /> }] });
   const showScope = currentAgent.role !== 'agent' && visibleApps.length > 1 && !location.pathname.startsWith('/people') && !location.pathname.startsWith('/audit') && !location.pathname.startsWith('/customers');
 
   return (
@@ -236,6 +256,8 @@ export default function AppShell() {
               </label>
             )}
             <div className="shell-top__right">
+              <SyncStatus />
+              {backend === 'server' && <InboxBell />}
               <CallPill />
               <LineStatus />
               <DropdownMenu>
@@ -262,6 +284,16 @@ export default function AppShell() {
                       <RotateCcw /> Reset sample data
                     </DropdownMenuItem>
                   )}
+                  {backend === 'server' && (
+                    <DropdownMenuItem
+                      onSelect={() => {
+                        if (currentAgent.superAdmin) return setChangingPw(true);
+                        void requestPasswordChange?.().then((r) => toast(r.ok ? 'Request sent. The super admin will set it up or send you a card to choose it.' : r.message));
+                      }}
+                    >
+                      <KeyRound /> {currentAgent.superAdmin ? 'Change password' : 'Request password change'}
+                    </DropdownMenuItem>
+                  )}
                   <DropdownMenuSeparator />
                   <DropdownMenuItem
                     onSelect={() => {
@@ -275,9 +307,11 @@ export default function AppShell() {
               </DropdownMenu>
             </div>
           </header>
+          <InboxBanner />
           <main className="shell-main" id="main">
             <Outlet />
           </main>
+          {changingPw && <ChangePasswordDialog onClose={() => setChangingPw(false)} />}
         </div>
       </div>
     </ScopeContext.Provider>

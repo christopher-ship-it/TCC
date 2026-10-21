@@ -10,7 +10,7 @@ const tail = (phone: string) => phone.replace(/\D/g, '').slice(-10);
 export function matchCaller(users: CustomerUser[], remote: string, apps: AppId[]): CustomerUser | null {
   const want = tail(remote);
   if (want.length < 10) return null;
-  const hits = users.filter((u) => apps.includes(u.app) && tail(u.phone) === want);
+  const hits = users.filter((u) => !u.deleted && apps.includes(u.app) && tail(u.phone) === want);
   return hits.find((u) => !u.adHoc) ?? hits[0] ?? null;
 }
 
@@ -25,6 +25,6 @@ export function resolveCaller(users: CustomerUser[], remote: string, apps: AppId
   if (known) return { customer: known, isNew: false };
   const digits = remote.replace(/\D/g, '');
   if (digits.length < 8) return null;
-  const existing = users.find((u) => u.id === adHocId(digits));
+  const existing = users.find((u) => u.id === adHocId(digits) && !u.deleted);
   return existing ? { customer: existing, isNew: false } : { customer: { ...adHocCustomer(digits, apps[0], now), business: 'Incoming call', stageTag: 'Incoming call' }, isNew: true };
 }

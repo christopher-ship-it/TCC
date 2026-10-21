@@ -6,6 +6,8 @@ import { APPS } from '../data/seed';
 import { outcomeLabel } from '../brand';
 import { telephonyQualitySummary } from '../data/types';
 import { can } from '../lib/access';
+import { isConnected } from '../lib/metrics';
+import { whyNotAnswered } from '../lib/whyNotAnswered';
 import { hasRealRecording } from '../lib/attachRecording';
 import { clock, sentimentBand } from '../lib/analysis/model';
 import { speakingBlocks, talkShare } from '../lib/analysis/speakers';
@@ -55,6 +57,9 @@ export default function CallDetail() {
   const share = a ? talkShare(t?.levels, a.transcript) : null;
   const band = sentimentBand(a?.sentiment);
   const quality = telephonyQualitySummary(t?.quality);
+  const connected = isConnected(call);
+  const inbound = t?.direction === 'inbound';
+  const missed = !connected ? whyNotAnswered(call) : null;
 
   async function runAnalysis() {
     if (!user || !call) return;
@@ -75,7 +80,7 @@ export default function CallDetail() {
       <PageHead
         eyebrow={<Link to={`/customers/${user.id}`}>← {user.name}</Link>}
         title={<span className="row" style={{ gap: 10 }}>Call on {call.atLabel} <OutcomeBadge call={call} /></span>}
-        desc={`${user.business} · ${APPS.find((x) => x.id === user.app)?.name} · ${call.agentName}${t?.durationSec ? ` · ${formatDuration(t.durationSec)} talk time` : ' · did not connect'}`}
+        desc={`${inbound ? 'Incoming call' : 'Outgoing call'} · ${APPS.find((x) => x.id === user.app)?.name} · ${call.agentName}${t?.durationSec ? ` · ${formatDuration(t.durationSec)} talk time` : ' · did not connect'}`}
       />
 
       {!hear ? (
@@ -83,23 +88,34 @@ export default function CallDetail() {
       ) : (
         <div className="call-layout">
           <div className="stack" style={{ gap: 16 }}>
-            <Card title="Recording" sub={a && a.transcript.length ? 'Click a transcript line or a stretch of the timeline to jump there' : undefined}>
+            {missed && (
+              <Card title="What happened" sub={call.atLabel}>
+                <div className="kv"><span>Call</span><span>{inbound ? 'Incoming' : 'Outgoing'}</span></div>
+                <div className="kv"><span>Who called whom</span><span>{inbound ? `${user.adHoc ? user.phone : `${user.name} (${user.phone})`} called ${call.agentName}` : `${call.agentName} called ${user.adHoc ? user.phone : `${user.name} (${user.phone})`}`}</span></div>
+                <div className="kv"><span>Result</span><span>{missed.result}</span></div>
+                {t?.ringSec ? <div className="kv"><span>Rang for</span><span className="mono">{t.ringSec}s</span></div> : null}
+                <p style={{ marginTop: 10, lineHeight: 1.55 }}><b style={{ fontWeight: 600 }}>Why:</b> {missed.why}</p>
+                <p style={{ marginTop: 6, color: 'var(--ink-2)' }}>{missed.next}</p>
+              </Card>
+            )}
+
+            {connected && <Card title="Recording" sub={a && a.transcript.length ? 'Click a transcript line or a stretch of the timeline to jump there' : undefined}>
               {src ? (
                 <RecordingPlayer src={src} durationHint={t?.durationSec} onTime={setPlayhead} registerSeek={registerSeek} sample={!real} />
               ) : t?.durationSec ? (
                 <Callout icon={<Loader2 size={16} className="spin" />}>Waiting for the call recording to finish the recording — usually under a minute after the call ends.</Callout>
               ) : (
-                <span className="muted">The call didn’t connect, so there is nothing to record.</span>
+                <span className="muted">There is no recording for this call.</span>
               )}
-            </Card>
+            </Card>}
 
-            {spans.length > 0 && (
+            {connected && spans.length > 0 && (
               <Card title="Who spoke when" sub={t?.levels?.length ? 'Measured on the line during the call' : 'Estimated from the transcript'} actions={<Legend items={[{ label: 'Agent', color: 'var(--series-1)' }, { label: 'Customer', color: 'var(--series-2)' }]} />}>
                 <ConversationTimeline spans={spans} duration={duration} playhead={playhead} onSeek={(s) => seekRef.current?.(s)} measured={!!t?.levels?.length} />
               </Card>
             )}
 
-            <Card title="Transcript" sub={a ? `${a.transcript.length} lines${a.languages.length ? ` · ${a.languages.join(', ')}` : ''}${a.source === 'sample' ? ' · sample data' : a.source === 'whisper' ? ' · speakers not separated' : ''}` : undefined}>
+            {connected && <Card title="Transcript" sub={a ? `${a.transcript.length} lines${a.languages.length ? ` · ${a.languages.join(', ')}` : ''}${a.source === 'sample' ? ' · sample data' : a.source === 'whisper' ? ' · speakers not separated' : ''}` : undefined}>
               {!a ? (
                 <span className="muted">{real ? 'Not analysed yet.' : 'No transcript for this call.'}</span>
               ) : a.transcript.length === 0 ? (
@@ -117,7 +133,7 @@ export default function CallDetail() {
                   ))}
                 </div>
               )}
-            </Card>
+            </Card>}
           </div>
 
           <div className="stack" style={{ gap: 16 }}>
@@ -196,7 +212,7 @@ export default function CallDetail() {
               <div className="kv"><span>Status</span><span>{call.status}</span></div>
               {call.outcome && <div className="kv"><span>Outcome</span><span>{outcomeLabel(call.outcome)}</span></div>}
               {t?.ringSec ? <div className="kv"><span>Rang for</span><span className="mono">{t.ringSec}s</span></div> : null}
-              {quality && <div className="kv"><span>Line</span><span>{quality}</span></div>}
+              {connected && quality && <div className="kv"><span>Line</span><span>{quality}</span></div>}
               {call.comment && <p style={{ marginTop: 10, color: 'var(--ink-2)' }}>“{call.comment}”</p>}
             </Card>
           </div>

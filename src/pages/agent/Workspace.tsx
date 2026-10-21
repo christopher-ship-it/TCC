@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
-import { ArrowRight, CircleDollarSign, Flag, Inbox, Phone as PhoneIcon, Ticket } from 'lucide-react';
+import { ArrowRight, CircleDollarSign, Flag, Inbox, Phone as PhoneIcon, Ticket, UserPlus } from 'lucide-react';
+import { AddCustomerDialog } from '../../components/customers/AddCustomerDialog';
 import { useStore } from '../../store/StoreContext';
 import { APPS } from '../../data/seed';
 import { BRAND, outcomeLabel } from '../../brand';
@@ -75,9 +76,12 @@ export default function Workspace() {
   const { appId } = useParams<{ appId: AppId }>();
   const [params, setParams] = useSearchParams();
   const navigate = useNavigate();
-  const { state, dispatch, currentAgent } = useStore();
+  const { state, dispatch, currentAgent, backend } = useStore();
   const toast = useToast();
   const session = useCallSession();
+  // With a real database, customers are added by hand (mobile number first), then called.
+  const addFirst = backend === 'server';
+  const [adding, setAdding] = useState(false);
   const tel = useTelephonyOptional();
   const agent = currentAgent!;
   const app = APPS.find((a) => a.id === appId);
@@ -104,6 +108,17 @@ export default function Workspace() {
   const [dialog, setDialog] = useState<'escalate' | 'ticket' | null>(null);
   const callLive = !!tel?.snapshot.call;
   const wrapHere = session.wrapUp && user && session.wrapUp.customerId === user.id ? session.wrapUp : null;
+
+  // Arrived from "Add and call" elsewhere: ring the customer once they're on screen.
+  const wantCall = params.get('call') === '1';
+  useEffect(() => {
+    if (!wantCall || !user || user.id !== focusId || callLive || session.wrapUp) return;
+    setParams((p) => { p.delete('call'); return p; }, { replace: true });
+    const r = session.dial(user);
+    if (!r.ok) toast(r.message);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [wantCall, user?.id, focusId]);
+
 
   // An ended call pre-fills what the line already knows.
   useEffect(() => {
@@ -258,7 +273,11 @@ export default function Workspace() {
               {queues.map((q) => <option key={q.key} value={q.key}>{q.label} ({counts[q.key] ?? 0})</option>)}
             </select>
           )}
-          <DialNumber appId={appId} disabled={callLive || !!session.wrapUp} />
+          {addFirst ? (
+            <UiButton variant="outline" size="lg" disabled={callLive || !!session.wrapUp} onClick={() => setAdding(true)}><UserPlus /> Add customer</UiButton>
+          ) : (
+            <DialNumber appId={appId} disabled={callLive || !!session.wrapUp} />
+          )}
           {tel && <UiButton size="lg" disabled={callLive || !!session.wrapUp || list.length === 0} onClick={callNext}><PhoneIcon /> Call next customer</UiButton>}
         </div>
       </div>
@@ -302,6 +321,7 @@ export default function Workspace() {
           <Empty icon={<Inbox size={24} />} title="All caught up">
             Nothing left in {QUEUES.find((q) => q.key === selectedQueue)?.label ?? 'this queue'} for {app.name}{typeFilter !== 'All' ? ` as ${typeFilter}` : ''} in your languages and states.
             {skipped.size > 0 && <> You skipped {skipped.size}. <button type="button" className="btn btn--link" onClick={() => setSkipped(new Set())}>Bring them back</button></>}
+            {addFirst && <div className="mt-3"><UiButton onClick={() => setAdding(true)}><UserPlus /> Add a customer to call</UiButton></div>}
           </Empty>
         </UiCard>
       ) : (
@@ -439,6 +459,22 @@ export default function Workspace() {
         </div>
       )}
 
+      {adding && (
+        <AddCustomerDialog
+          appId={appId}
+          callLabel={tel ? 'Add and call' : undefined}
+          onClose={() => setAdding(false)}
+          onAdded={(c, call) => {
+            setAdding(false);
+            if (c.app !== appId) return navigate(`/work/${c.app}?focus=${c.id}${call ? '&call=1' : ''}`);
+            setParams({ focus: c.id }, { replace: true });
+            if (call) {
+              const r = session.dial(c);
+              if (!r.ok) toast(r.message);
+            } else toast(`${c.name} added`);
+          }}
+        />
+      )}
       {dialog === 'escalate' && user && <EscalateDialog user={user} onClose={() => setDialog(null)} />}
       {dialog === 'ticket' && user && <TicketDialog user={user} onClose={() => setDialog(null)} />}
     </div>

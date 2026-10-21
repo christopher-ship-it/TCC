@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
-import { ArrowRight, CircleDollarSign, Headset, Lock, PhoneOff, Ticket } from 'lucide-react';
+import { ArrowRight, CircleDollarSign, Headset, Lock, PhoneOff, Ticket, Trash2 } from 'lucide-react';
 import { useStore } from '../store/StoreContext';
 import { APPS } from '../data/seed';
 import { QUEUES } from '../data/types';
@@ -17,7 +17,8 @@ import { OutcomeBadge, SentimentBadge } from '../components/calls/badges';
 import { analysisState } from '../lib/callStatus';
 import { TicketDialog } from '../components/agent/TicketDialog';
 import { ColumnChart, Legend, LineChart } from '../ui/charts';
-import { Badge, Button, Callout, Card, Empty, PageHead, Select, Stat } from '../ui/primitives';
+import { Badge, Button, Callout, Card, Empty, Field, PageHead, Select, Stat, Textarea } from '../ui/primitives';
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { useToast } from '../ui/toastContext';
 import './customer.css';
 
@@ -29,6 +30,8 @@ export default function CustomerPage() {
   const agent = currentAgent!;
   const user = state.users.find((u) => u.id === id);
   const [ticket, setTicket] = useState(false);
+  const [removing, setRemoving] = useState(false);
+  const [reason, setReason] = useState('');
   const journey = useMemo(() => (user ? customerJourney(user) : []), [user]);
 
   if (!user) return <div className="page"><Empty title="Customer not found" action={<Link to="/" className="btn">Go home</Link>} /></div>;
@@ -48,6 +51,7 @@ export default function CustomerPage() {
   const answered = journey.filter((p) => p.talkSec > 0);
   const canCall = agent.role === 'agent' && can(agent, user.app, 'call');
   const manage = agent.role !== 'agent';
+  const gone = user.deleted;
   const reassignable = state.agents.filter((a) => a.role === 'agent' && a.apps.includes(user.app) && (a.status ?? 'active') === 'active');
 
   return (
@@ -60,12 +64,13 @@ export default function CustomerPage() {
             <Badge tone={verdict.tone}>{verdict.label}</Badge>
           </span>
         }
-        desc={`${user.business} · ${user.city}, ${user.effectiveState} · ${user.phone}`}
+        desc={user.manual ? [user.phone, user.business, user.city].filter((x) => x && x !== '—').join(' · ') : `${user.business} · ${user.city}, ${user.effectiveState} · ${user.phone}`}
         actions={
           <>
-            {canCall && <Button variant="primary" icon={<Headset size={16} />} onClick={() => navigate(`/work/${user.app}?${user.queue ? `queue=${user.queue}&` : ''}focus=${user.id}`)}>Call {user.name.split(' ')[0]}</Button>}
-            {can(agent, user.app, 'tickets') && <Button icon={<Ticket size={15} />} onClick={() => setTicket(true)}>Raise ticket</Button>}
-            {user.paymentDue && can(agent, user.app, 'payments') && (
+            {canCall && !gone && <Button variant="primary" icon={<Headset size={16} />} onClick={() => navigate(`/work/${user.app}?${user.queue ? `queue=${user.queue}&` : ''}focus=${user.id}`)}>Call {user.name.split(' ')[0]}</Button>}
+            {!gone && <Button icon={<Trash2 size={15} />} onClick={() => setRemoving(true)}>Delete</Button>}
+            {can(agent, user.app, 'tickets') && !gone && <Button icon={<Ticket size={15} />} onClick={() => setTicket(true)}>Raise ticket</Button>}
+            {user.paymentDue && !gone && can(agent, user.app, 'payments') && (
               <Button icon={<CircleDollarSign size={15} />} onClick={() => { dispatch({ type: 'MARK_PAID', userId: user.id, actorId: agent.id }); toast('Marked as paid'); }}>
                 Mark ₹{user.paymentDue.amount.toLocaleString('en-IN')} paid
               </Button>
@@ -74,21 +79,33 @@ export default function CustomerPage() {
         }
       />
 
+      {gone && (
+        <Callout tone="danger">
+          <b>Deleted by {gone.byName}</b> on {gone.atLabel}. Reason: {gone.reason}
+          <br />They no longer appear in customers, search or queues. Their calls are kept. Adding this number again brings them back.
+        </Callout>
+      )}
+
       <div className="row" style={{ gap: 8 }}>
         <img src={APP_LOGOS[app.id]} alt={app.name} style={{ height: 18, width: 96, objectFit: 'contain', objectPosition: 'left center' }} />
         <Badge tone="accent"><span className="chip__script">{LANGUAGE_SCRIPT[user.language]}</span>{user.language !== 'English' ? ` · ${user.language}` : ''}</Badge>
-        <Badge tone={user.plan === 'Paid' ? 'ok' : 'neutral'}>{F ? (user.plan === 'Paid' ? F.paid : F.free) : `${user.plan} plan`}</Badge>
+        {!user.manual && <Badge tone={user.plan === 'Paid' ? 'ok' : 'neutral'}>{F ? (user.plan === 'Paid' ? F.paid : F.free) : `${user.plan} plan`}</Badge>}
         {user.queue && <Badge>In {QUEUES.find((q) => q.key === user.queue)?.label}</Badge>}
         <span className="mono muted" style={{ fontSize: 12.5 }}>{user.shopCode}</span>
       </div>
 
-      {whyInQueue(user) && <Callout tone="warn">{whyInQueue(user)}</Callout>}
+      {!user.manual && whyInQueue(user) && <Callout tone="warn">{whyInQueue(user)}</Callout>}
+      {user.note && <Callout tone="accent">{user.note}</Callout>}
 
       <div className="stats">
         <Stat label="Calls" value={user.callHistory.length} note={`${connectedCalls.length} connected`} />
         <Stat label="Talk time" value={durationLabel(talk)} note={connectedCalls.length ? `${formatDuration(Math.round(talk / Math.max(1, connectedCalls.length)))} average` : 'Not reached yet'} />
         <Stat label="Average sentiment" value={avg ?? '—'} tone={avg === null ? undefined : avg >= 60 ? 'ok' : avg <= 40 ? 'danger' : undefined} note={trend === null ? `${scored.length} analysed call${scored.length === 1 ? '' : 's'}` : `${trend >= 0 ? '+' : ''}${trend} since first analysed call`} />
-        <Stat label="Conversion score" value={user.conversionScore} note="Out of 100, from app activity" />
+        {user.manual ? (
+          <Stat label="Last call" value={user.callHistory[0]?.atLabel.split(' · ')[0] ?? '—'} note={user.callHistory[0] ? (user.callHistory[0].outcome ? outcomeLabel(user.callHistory[0].outcome) : user.callHistory[0].status) : `Added ${user.registeredAtLabel}`} />
+        ) : (
+          <Stat label="Conversion score" value={user.conversionScore} note="Out of 100, from app activity" />
+        )}
       </div>
 
       <div className="grid-2">
@@ -187,7 +204,16 @@ export default function CustomerPage() {
 
         <div className="stack" style={{ gap: 16 }}>
           <Card title="Profile">
-            {F ? (
+            {user.manual ? (
+              <>
+                <div className="kv"><span>Product</span><span>{app.name}</span></div>
+                <div className="kv"><span>Mobile</span><span className="mono">{user.phone}</span></div>
+                <div className="kv"><span>Type</span><span>{user.customerType ?? '—'}</span></div>
+                <div className="kv"><span>Language</span><span>{user.language}</span></div>
+                {user.city !== '—' && <div className="kv"><span>City</span><span>{user.city}</span></div>}
+                <div className="kv"><span>Added</span><span>{user.registeredAtLabel}</span></div>
+              </>
+            ) : F ? (
               <>
                 <div className="kv"><span>{F.app}</span><span>{app.name}</span></div>
                 <div className="kv"><span>{F.registered}</span><span>{user.registeredAtLabel} · {user.registeredDaysAgo}d ago</span></div>
@@ -250,6 +276,21 @@ export default function CustomerPage() {
         </div>
       </div>
       {ticket && <TicketDialog user={user} onClose={() => setTicket(false)} />}
+      <Dialog open={removing} onOpenChange={(o) => { if (!o) { setRemoving(false); setReason(''); } }}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Delete {user.name}?</DialogTitle>
+            <DialogDescription>They disappear from customers, search and queues. Say why — for example “test customer” or “duplicate”. The reason is shown on their page and kept in the super admin’s log.</DialogDescription>
+          </DialogHeader>
+          <Field label="Reason" htmlFor="del-reason">
+            <Textarea id="del-reason" autoFocus value={reason} onChange={(e) => setReason(e.target.value)} placeholder="Test customer" />
+          </Field>
+          <div className="row" style={{ justifyContent: 'flex-end', gap: 8 }}>
+            <Button onClick={() => { setRemoving(false); setReason(''); }}>Cancel</Button>
+            <Button variant="primary" disabled={!reason.trim()} onClick={() => { dispatch({ type: 'DELETE_CUSTOMER', userId: user.id, actorId: agent.id, reason }); setRemoving(false); setReason(''); toast('Customer deleted'); }}>Delete customer</Button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

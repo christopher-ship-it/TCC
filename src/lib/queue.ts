@@ -2,6 +2,9 @@ import type { AgentAccount, AppId, CustomerUser, QueueKey } from '../data/types'
 
 export function isReachable(agent: AgentAccount, user: CustomerUser): boolean {
   if (!agent.apps.includes(user.app)) return false;
+  // A customer added by hand belongs to whoever it was given to, whatever their states; unowned, anyone who speaks
+  // the customer's language in that product can take it.
+  if (user.manual) return user.ownerAgentId ? user.ownerAgentId === agent.id : agent.languages.includes(user.language);
   const stateOk = agent.states.includes(user.effectiveState);
   const langOk = user.state === null ? true : agent.languages.includes(user.language);
   return stateOk && langOk;

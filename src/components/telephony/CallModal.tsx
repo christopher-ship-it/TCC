@@ -157,7 +157,23 @@ function WrapUp({ user }: { user: CustomerUser }) {
   const suggestTicket = outcome === 'Technical issue' || outcome === 'Payment issue' || !!analysis?.actionItems.some((a) => /ticket|escalat|issue|problem|bug|refund/i.test(a));
   const ticketOn = ticket ?? suggestTicket;
   const team = outcome === 'Payment issue' ? 'Billing' : 'Product';
-  const missing = [answered && !outcome ? 'what they said' : null, !type ? 'customer type' : null].filter(Boolean) as string[];
+
+  // Close the card now: the call is saved as it stands and the recording is found and read in the background. When the
+  // reading finishes, the call is classified from what was said (answered, broker or not, what they want).
+  function saveInBackground() {
+    const agent = currentAgent!;
+    const telephony = toCallTelephony(resultRef.current);
+    dispatch({
+      type: 'LOG_CALL',
+      userId: user.id,
+      status,
+      comment: note.trim() || (telephony.durationSec > 0 ? `Talked ${formatDuration(telephony.durationSec)}` : STATUS_LABEL[status]),
+      agentId: agent.id,
+      telephony,
+    });
+    toast('Saved — the call is still being read in the background');
+    session.completeWrapUp();
+  }
 
   function complete() {
     const agent = currentAgent!;
@@ -194,8 +210,11 @@ function WrapUp({ user }: { user: CustomerUser }) {
       <div className="flex flex-col items-center gap-3 py-10 text-center">
         <Loader2 className="size-8 animate-spin text-muted-foreground" />
         <DialogTitle>Reading the call</DialogTitle>
-        <DialogDescription>{hasRealRecording(result.recordingFile) ? 'Analysing the conversation…' : 'Getting the recording…'} This takes under a minute.</DialogDescription>
-        <Button variant="ghost" size="sm" onClick={() => setPhase('review')}>Skip and fill in myself</Button>
+        <DialogDescription>{hasRealRecording(result.recordingFile) ? 'Analysing the conversation…' : 'Getting the recording…'} This takes under a minute. You can close this and carry on — it finishes by itself.</DialogDescription>
+        <div className="flex flex-col items-center gap-1">
+          <Button size="sm" onClick={saveInBackground}>Close — keep reading in the background</Button>
+          <Button variant="ghost" size="sm" onClick={() => setPhase('review')}>Skip and fill in myself</Button>
+        </div>
       </div>
     );
   }
@@ -226,7 +245,7 @@ function WrapUp({ user }: { user: CustomerUser }) {
       </div>
 
       <div className="flex flex-col gap-2">
-        <div className="flex items-center gap-2 text-sm font-medium">Who is this?{!user.customerType && !type && <Badge variant="outline">Not captured — pick one</Badge>}</div>
+        <div className="flex items-center gap-2 text-sm font-medium">Who is this?{!user.customerType && !type && <Badge variant="outline">Not clear from the call — optional</Badge>}</div>
         <div className="flex flex-wrap gap-2">
           {types.map((t) => (
             <Button key={t} size="sm" variant={type === t ? 'default' : 'outline'} onClick={() => setType(t)}>{t}</Button>
@@ -236,7 +255,7 @@ function WrapUp({ user }: { user: CustomerUser }) {
 
       {answered && (
         <div className="flex flex-col gap-2">
-          <div className="flex items-center gap-2 text-sm font-medium">What did they say?{!outcome && <Badge variant="outline">Not captured — pick one</Badge>}</div>
+          <div className="flex items-center gap-2 text-sm font-medium">What did they say?{!outcome && <Badge variant="outline">Not captured</Badge>}</div>
           <div className="flex flex-wrap gap-2">
             {OUTCOME_LIST.map((o) => (
               <Button key={o.outcome} size="sm" variant={outcome === o.outcome ? 'default' : 'outline'} onClick={() => setOutcome(o.outcome)}>{outcomeLabel(o.outcome)}</Button>
@@ -261,8 +280,8 @@ function WrapUp({ user }: { user: CustomerUser }) {
       <textarea value={note} onChange={(e) => setNote(e.target.value)} placeholder="Note for whoever calls next (optional)" rows={2} className="w-full resize-none rounded-md border border-input bg-card p-2.5 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring" />
 
       <div className="flex items-center justify-between gap-3">
-        <span className="text-[13px] text-muted-foreground">{missing.length ? `Still needed: ${missing.join(', ')}` : ''}</span>
-        <Button size="lg" disabled={missing.length > 0} onClick={complete}><PhoneIcon className="size-4" />Complete call</Button>
+        <span className="text-[13px] text-muted-foreground">{answered && !outcome ? 'What they said can be left blank — the call is read after you close this.' : ''}</span>
+        <Button size="lg" onClick={complete}><PhoneIcon className="size-4" />Complete call</Button>
       </div>
     </div>
   );
