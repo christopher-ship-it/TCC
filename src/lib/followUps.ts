@@ -1,6 +1,6 @@
 // Calling people back. An agent can set a date on any call. When the first try ends unanswered (no answer / not
 // reachable) and nobody set one, TCC calls again every day for 14 days — until they answer or the 14 days run out.
-import type { CustomerUser } from '../data/types.ts';
+import type { AgentAccount, CustomerUser } from '../data/types.ts';
 
 export const AUTO_FOLLOWUP_DAYS = 14;
 const DAY = 86_400_000;
@@ -51,3 +51,72 @@ export function chainDay(auto: NonNullable<CustomerUser['autoFollowUp']>, now = 
 }
 
 export const callbackIsDue = (u: Pick<CustomerUser, 'callback'>, now = Date.now()): boolean => !!u.callback && u.callback.dueTs < startOfDay(now) + DAY;
+
+/** `n` calendar days after the day of `ts`, as the start of that day. */
+export function addDays(ts: number, n: number): number {
+  const d = new Date(ts);
+  d.setHours(0, 0, 0, 0);
+  d.setDate(d.getDate() + n);
+  return d.getTime();
+}
+
+/** Why someone is on the Follow-ups page: a date an agent chose, the automatic daily calls, or the weekly positive chain. */
+export type FollowUpKind = 'agent' | 'auto' | 'weekly';
+
+export interface ScheduledFollowUp {
+  user: CustomerUser;
+  /** Start of the day they should be called. */
+  dueTs: number;
+  kind: FollowUpKind;
+}
+
+const WEEKLY = new Set(['Interested', 'Very interested', 'Created first listing']);
+function weeklyFromHistory(u: CustomerUser): number | undefined {
+  const last = u.callHistory.find((c) => c.outcome && WEEKLY.has(c.outcome));
+  return last ? addDays(last.atTs, 7) : undefined;
+}
+
+/** Everyone with a date to be called again, earliest first. A call-back date wins over the weekly chain. */
+export function scheduledFollowUps(users: CustomerUser[]): ScheduledFollowUp[] {
+  const out: ScheduledFollowUp[] = [];
+  for (const u of users) {
+    if (u.deleted) continue;
+    if (u.callback) out.push({ user: u, dueTs: startOfDay(u.callback.dueTs), kind: u.callback.auto ? 'auto' : 'agent' });
+    else if (u.followUp) {
+      // Chains made before the date was stored: a week after the last call that put them in it.
+      const due = u.followUp.nextDueTs ?? weeklyFromHistory(u);
+      if (due !== undefined) out.push({ user: u, dueTs: startOfDay(due), kind: 'weekly' });
+    }
+  }
+  return out.sort((a, b) => a.dueTs - b.dueTs || a.user.name.localeCompare(b.user.name));
+}
+
+export type FollowUpRange = 'overdue' | 'today' | 'tomorrow' | 'week' | 'upcoming' | 'custom';
+
+/** The days a filter covers, as [from, to): start of the first day up to the start of the day after the last. */
+export function rangeBounds(range: FollowUpRange, now: number, custom?: { from?: number; to?: number }): { from: number; to: number } {
+  const today = startOfDay(now);
+  switch (range) {
+    case 'overdue':
+      return { from: -Infinity, to: today };
+    case 'today':
+      return { from: today, to: addDays(today, 1) };
+    case 'tomorrow':
+      return { from: addDays(today, 1), to: addDays(today, 2) };
+    case 'week': {
+      // Today up to and including Sunday.
+      const day = new Date(today).getDay();
+      return { from: today, to: addDays(today, ((7 - day) % 7) + 1) };
+    }
+    case 'upcoming':
+      return { from: today, to: Infinity };
+    case 'custom':
+      return { from: custom?.from !== undefined ? startOfDay(custom.from) : -Infinity, to: custom?.to !== undefined ? addDays(custom.to, 1) : Infinity };
+  }
+}
+
+export const inRange = (dueTs: number, r: { from: number; to: number }): boolean => dueTs >= r.from && dueTs < r.to;
+
+/** An agent's own follow-up: a customer they own, or an unowned one they called. */
+export const isFollowUpOf = (u: CustomerUser, agent: Pick<AgentAccount, 'id' | 'name'>): boolean =>
+  u.ownerAgentId === agent.id || (!u.ownerAgentId && u.callHistory.some((c) => c.agentName === agent.name));

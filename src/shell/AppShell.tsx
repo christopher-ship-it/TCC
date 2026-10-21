@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
-import { Activity, BarChart3, ChevronDown, ClipboardList, Contact, Database, KeyRound, Flag, Headset, History, Home, LogOut, Map, NotebookPen, Phone, RotateCcw, Search, Shuffle, Users, UsersRound } from 'lucide-react';
+import { Activity, BarChart3, CalendarClock, ChevronDown, ClipboardList, Contact, Database, KeyRound, Flag, Headset, History, Home, LogOut, Map, NotebookPen, Phone, RotateCcw, Search, Shuffle, Users, UsersRound } from 'lucide-react';
 import { BRAND_MARK } from '../assets';
 import { APPS } from '../data/seed';
 import type { AppId, Role } from '../data/types';
@@ -13,6 +13,7 @@ import { Avatar } from '../ui/primitives';
 import { useToast } from '../ui/toastContext';
 import { BRAND } from '../brand';
 import { FEATURES } from '../lib/features';
+import { isFollowUpOf, scheduledFollowUps, startOfDay } from '../lib/followUps';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { ScopeContext, type ScopeValue } from './scope';
 import { ChangePasswordDialog, InboxBanner, InboxBell } from '../components/inbox/Inbox';
@@ -26,8 +27,9 @@ interface NavItem {
   badge?: number;
 }
 
-function navFor(role: Role, pendingEscalations: number, firstApp: AppId | undefined, canExportOrAudit: boolean, addFirst: boolean, showLog = true): { title?: string; items: NavItem[] }[] {
+function navFor(role: Role, pendingEscalations: number, firstApp: AppId | undefined, canExportOrAudit: boolean, addFirst: boolean, showLog = true, dueFollowUps = 0): { title?: string; items: NavItem[] }[] {
   const s = 17;
+  const followUps: NavItem = { to: '/follow-ups', label: 'Follow-ups', icon: <CalendarClock size={s} />, badge: dueFollowUps || undefined };
   const notes: NavItem = { to: '/notes', label: 'Notes', icon: <NotebookPen size={s} /> };
   const customers: NavItem = { to: '/customers', label: 'Customers', icon: <Contact size={s} />, end: true };
   if (role === 'agent') {
@@ -36,6 +38,7 @@ function navFor(role: Role, pendingEscalations: number, firstApp: AppId | undefi
         items: [
           ...(FEATURES.todayPage ? [{ to: '/home', label: 'Today', icon: <Home size={s} /> }] : []),
           { to: firstApp ? `/work/${firstApp}` : '/home', label: 'Call queue', icon: <Headset size={s} /> },
+          followUps,
           ...(addFirst ? [customers] : []),
           { to: '/calls', label: 'My calls', icon: <History size={s} /> },
           ...(addFirst ? [notes] : []),
@@ -47,6 +50,7 @@ function navFor(role: Role, pendingEscalations: number, firstApp: AppId | undefi
   const team: NavItem[] = [
     ...(X ? [{ to: '/team/performance', label: 'Team performance', icon: <BarChart3 size={s} /> }] : []),
     ...(addFirst ? [customers] : []),
+    followUps,
     { to: '/calls', label: 'Calls & recordings', icon: <Phone size={s} /> },
     ...(addFirst ? [notes] : []),
     { to: '/escalations', label: 'Escalations', icon: <Flag size={s} />, badge: pendingEscalations || undefined },
@@ -202,10 +206,20 @@ export default function AppShell() {
     window.scrollTo(0, 0);
   }, [location.pathname]);
 
+  // Follow-ups due today or overdue: an agent's own (as on the Follow-ups page under "Mine"), everyone's for the rest.
+  const dueFollowUps = useMemo(() => {
+    if (!currentAgent) return 0;
+    const end = startOfDay(Date.now()) + 86_400_000;
+    const me = currentAgent;
+    return scheduledFollowUps(state.users.filter((u) => visibleApps.includes(u.app))).filter(
+      (f) => f.dueTs < end && (me.role !== 'agent' || isFollowUpOf(f.user, me)),
+    ).length;
+  }, [state.users, visibleApps, currentAgent]);
+
   if (!currentAgent) return null;
   const pending = state.escalations.filter((e) => e.status === 'pending' && visibleApps.includes(e.app)).length;
   const firstLiveApp = visibleApps.find((id) => APPS.find((a) => a.id === id)?.live);
-  const nav = navFor(currentAgent.role, pending, firstLiveApp, canAnywhere(currentAgent, 'export') || currentAgent.role !== 'agent', backend === 'server', currentAgent.superAdmin || visibility?.changeLog !== false);
+  const nav = navFor(currentAgent.role, pending, firstLiveApp, canAnywhere(currentAgent, 'export') || currentAgent.role !== 'agent', backend === 'server', currentAgent.superAdmin || visibility?.changeLog !== false, dueFollowUps);
   if (currentAgent.superAdmin) nav.unshift({ title: 'Super admin', items: [{ to: '/system', label: 'System', icon: <Activity size={17} /> }] });
   const showScope = currentAgent.role !== 'agent' && visibleApps.length > 1 && !location.pathname.startsWith('/people') && !location.pathname.startsWith('/audit') && !location.pathname.startsWith('/customers');
 

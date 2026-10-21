@@ -230,6 +230,8 @@ export interface PaymentDue {
 export interface FollowUpChain {
   weekNumber: number;
   nextDueLabel: string;
+  /** Start of the day of the next weekly call. Missing on chains made before 2026-10-21. */
+  nextDueTs?: number;
   markedPositiveLabel: string;
   state: 'due-today' | 'pending' | 'overdue';
   overdueDays?: number;

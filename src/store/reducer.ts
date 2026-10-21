@@ -4,7 +4,7 @@ import type { CustomerUser, EscalationRecord, Outcome, QueueKey } from '../data/
 import { NEGATIVE_OUTCOMES, OUTCOME_LIST, overlayFromUser } from '../data/types';
 import { customerTypesFor } from '../data/products';
 import { isConnected } from '../lib/metrics';
-import { planFollowUp } from '../lib/followUps';
+import { planFollowUp, startOfDay } from '../lib/followUps';
 import { fmtDay, fmtDayTime } from '../lib/dates';
 import { isReachable } from '../lib/queue';
 import { attachRecording, withAnalysis } from '../lib/attachRecording';
@@ -36,7 +36,7 @@ function applyOutcome(next: CustomerUser, outcome: Outcome, now: number): Custom
     ...next,
     queue: 'followup',
     stageTag: 'Hot lead',
-    followUp: { weekNumber: prevWeek + 1, nextDueLabel: fmtDay(now + 7 * DAY_MS), markedPositiveLabel: fmtDay(now), state: 'pending' },
+    followUp: { weekNumber: prevWeek + 1, nextDueLabel: fmtDay(now + 7 * DAY_MS), nextDueTs: startOfDay(now + 7 * DAY_MS), markedPositiveLabel: fmtDay(now), state: 'pending' },
   };
 }
 

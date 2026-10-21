@@ -11,6 +11,7 @@ import Calls from './pages/Calls';
 import CustomerPage from './pages/CustomerPage';
 import Customers from './pages/Customers';
 import Notes from './pages/Notes';
+import FollowUps from './pages/FollowUps';
 import CallDetail from './pages/CallDetail';
 import TeamPerformance from './pages/team/TeamPerformance';
 import Escalations from './pages/team/Escalations';
@@ -70,6 +71,7 @@ function Routed() {
         <Route path="/work/:appId" element={<Only roles={['agent']}><Workspace /></Only>} />
         <Route path="/calls" element={<Calls />} />
         <Route path="/notes" element={<Notes />} />
+        <Route path="/follow-ups" element={<FollowUps />} />
         <Route path="/customers" element={<Customers />} />
         <Route path="/customers/:id" element={<CustomerPage />} />
         <Route path="/customers/:id/calls/:entryId" element={<CallDetail />} />
