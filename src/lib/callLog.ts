@@ -7,6 +7,8 @@ export interface LogCallInput {
   status: CallStatus;
   outcome?: Outcome;
   comment: string;
+  source?: string;
+  followUpTs?: number;
   telephony?: CallTelephony;
   analysis?: CallAnalysis;
 }
@@ -41,6 +43,8 @@ export function buildCallLogEntry(now: number, agentName: string, user: Customer
     status: input.status,
     outcome: input.outcome,
     comment: input.comment,
+    ...(input.source ? { source: input.source } : {}),
+    ...(input.followUpTs !== undefined ? { followUpTs: input.followUpTs } : {}),
     telephony,
     analysis,
   };

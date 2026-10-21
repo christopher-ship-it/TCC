@@ -1,10 +1,11 @@
 import type { AgentAccount, AppId, CustomerUser, QueueKey } from '../data/types';
+import { callbackIsDue, startOfDay } from './followUps';
 
 export function isReachable(agent: AgentAccount, user: CustomerUser): boolean {
   if (!agent.apps.includes(user.app)) return false;
   // A customer added by hand belongs to whoever it was given to, whatever their states; unowned, anyone who speaks
   // the customer's language in that product can take it.
-  if (user.manual) return user.ownerAgentId ? user.ownerAgentId === agent.id : agent.languages.includes(user.language);
+  if (user.manual || user.adHoc) return user.ownerAgentId ? user.ownerAgentId === agent.id : agent.languages.includes(user.language);
   const stateOk = agent.states.includes(user.effectiveState);
   const langOk = user.state === null ? true : agent.languages.includes(user.language);
   return stateOk && langOk;
@@ -14,18 +15,27 @@ export function visibleQueuesFor(agent: AgentAccount): QueueKey[] {
   return agent.queues;
 }
 
-export function tasksForQueue(agent: AgentAccount, users: CustomerUser[], appId: AppId | null, queueKey: QueueKey): CustomerUser[] {
-  if (!agent.queues.includes(queueKey)) return [];
-  const list = users.filter((u) => (appId ? u.app === appId : agent.apps.includes(u.app)) && u.queue === queueKey && isReachable(agent, u));
-  return sortQueue(queueKey, list);
+/** A customer with a call-back date waits out of every queue until that day, then shows up under Follow-up. */
+function queueOf(u: CustomerUser, now: number): QueueKey | null {
+  if (u.deleted) return null;
+  if (u.callback) return callbackIsDue(u, now) ? 'followup' : null;
+  return u.queue;
 }
 
-function sortQueue(queueKey: QueueKey, list: CustomerUser[]): CustomerUser[] {
+export function tasksForQueue(agent: AgentAccount, users: CustomerUser[], appId: AppId | null, queueKey: QueueKey, now = Date.now()): CustomerUser[] {
+  if (!agent.queues.includes(queueKey)) return [];
+  const list = users.filter((u) => (appId ? u.app === appId : agent.apps.includes(u.app)) && queueOf(u, now) === queueKey && isReachable(agent, u));
+  return sortQueue(queueKey, list, now);
+}
+
+function sortQueue(queueKey: QueueKey, list: CustomerUser[], now: number): CustomerUser[] {
   const arr = list.slice();
   switch (queueKey) {
-    case 'followup':
-      arr.sort((a, b) => rank(a.followUp?.state) - rank(b.followUp?.state) || (b.followUp?.overdueDays ?? 0) - (a.followUp?.overdueDays ?? 0));
+    case 'followup': {
+      const state = (u: CustomerUser) => (u.callback ? (u.callback.dueTs < startOfDay(now) ? 'overdue' : 'due-today') : u.followUp?.state);
+      arr.sort((a, b) => rank(state(a)) - rank(state(b)) || (b.followUp?.overdueDays ?? 0) - (a.followUp?.overdueDays ?? 0) || (a.callback?.dueTs ?? 0) - (b.callback?.dueTs ?? 0));
       return arr;
+    }
     case 'payments':
       arr.sort((a, b) => payRank(a.paymentDue?.status) - payRank(b.paymentDue?.status));
       return arr;

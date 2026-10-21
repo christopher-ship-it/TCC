@@ -116,6 +116,9 @@ export type Outcome =
 export const NEGATIVE_OUTCOMES: Outcome[] = ['Not interested', 'Using competitor'];
 export const POSITIVE_OUTCOMES: Outcome[] = ['Interested', 'Very interested', 'Ready to subscribe', 'Created first listing'];
 
+/** How a customer says they came to know about the app (asked on answered calls). */
+export const LEAD_SOURCES = ['Instagram', 'Facebook', 'Telecalling', 'Google/YouTube', 'Referral', 'Other'] as const;
+
 export const CALL_STATUS_LIST: { status: CallStatus; key: string }[] = [
   { status: 'Answered — DG', key: '1' },
   { status: 'Answered — DNG', key: '2' },
@@ -166,6 +169,10 @@ export interface CallLogEntry {
   outcome?: Outcome;
   comment: string;
   auto?: boolean;
+  /** Answered calls: how they came to know about the app (LEAD_SOURCES). */
+  source?: string;
+  /** The day the agent (or the automatic chain) said to call them again, start of day. */
+  followUpTs?: number;
   telephony?: CallTelephony;
   /** Post-call analysis: transcript, summary, sentiment, objections, next step (src/lib/analysis). */
   analysis?: CallAnalysis;
@@ -284,6 +291,12 @@ export interface CustomerUser {
   /** Free-text note from whoever added the customer. */
   note?: string;
   /** Set when someone removed the customer (a test record, a duplicate). Kept, hidden from every list, and shown on the page with who and why. `null` = brought back. */
+  /** How they came to know about the app, from the last answered call that asked. */
+  source?: string;
+  /** The next call to make: a day the agent chose, or the next of the automatic daily calls. Overrides the queue until then. */
+  callback?: { dueTs: number; auto: boolean };
+  /** First call unanswered: TCC calls again every day for 14 days (src/lib/followUps.ts). Gone once they answer or the days run out. */
+  autoFollowUp?: { startedTs: number; attempts: number };
   deleted?: { byId: string; byName: string; reason: string; ts: number; atLabel: string } | null;
 }
 
@@ -292,7 +305,7 @@ export interface CustomerUser {
 // data — generated for now, destined to come from the existing app database.
 export type CustomerOverlay = Pick<
   CustomerUser,
-  'queue' | 'attempt' | 'callHistory' | 'tickets' | 'paymentDue' | 'followUp' | 'paying' | 'plan' | 'planNote' | 'mrr' | 'stageTag' | 'ownerAgentId' | 'hasActiveEscalation' | 'language' | 'customerType'
+  'queue' | 'attempt' | 'callHistory' | 'tickets' | 'paymentDue' | 'followUp' | 'paying' | 'plan' | 'planNote' | 'mrr' | 'stageTag' | 'ownerAgentId' | 'hasActiveEscalation' | 'language' | 'customerType' | 'source' | 'callback' | 'autoFollowUp'
 >;
 
 export function overlayFromUser(u: CustomerUser): CustomerOverlay {
@@ -312,5 +325,8 @@ export function overlayFromUser(u: CustomerUser): CustomerOverlay {
     hasActiveEscalation: u.hasActiveEscalation,
     language: u.language,
     customerType: u.customerType,
+    source: u.source,
+    callback: u.callback,
+    autoFollowUp: u.autoFollowUp,
   };
 }

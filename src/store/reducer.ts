@@ -4,6 +4,7 @@ import type { CustomerUser, EscalationRecord, Outcome, QueueKey } from '../data/
 import { NEGATIVE_OUTCOMES, OUTCOME_LIST, overlayFromUser } from '../data/types';
 import { customerTypesFor } from '../data/products';
 import { isConnected } from '../lib/metrics';
+import { planFollowUp } from '../lib/followUps';
 import { fmtDay, fmtDayTime } from '../lib/dates';
 import { isReachable } from '../lib/queue';
 import { attachRecording, withAnalysis } from '../lib/attachRecording';
@@ -21,10 +22,10 @@ function withAudit(state: State, entry: ReturnType<typeof auditEntry>): State {
 /** What a call's outcome does to the customer: which queue they land in, whether they convert or exit. */
 function applyOutcome(next: CustomerUser, outcome: Outcome, now: number): CustomerUser {
   if (NEGATIVE_OUTCOMES.includes(outcome)) {
-    return { ...next, queue: null, stageTag: 'Exited — negative', followUp: undefined };
+    return { ...next, queue: null, stageTag: 'Exited — negative', followUp: undefined, callback: undefined };
   }
   if (outcome === 'Ready to subscribe') {
-    return { ...next, queue: null, paying: true, plan: 'Paid', stageTag: 'Converted', followUp: undefined, mrr: next.mrr ?? 999 };
+    return { ...next, queue: null, paying: true, plan: 'Paid', stageTag: 'Converted', followUp: undefined, callback: undefined, mrr: next.mrr ?? 999 };
   }
   if (outcome === 'Payment issue') {
     return { ...next, queue: 'payments', stageTag: 'Overdue', paymentDue: next.paymentDue ?? { amount: 999, dueLabel: fmtDay(now - DAY_MS), status: 'overdue' } };
@@ -55,6 +56,19 @@ export function reducer(state: State, action: Action): State {
         const entry = buildCallLogEntry(now, agent?.name ?? 'You', u, action);
         const callHistory = [entry, ...u.callHistory];
         const next: CustomerUser = { ...u, callHistory };
+
+        // When to call again: the agent's date, else the automatic daily calls (first try unanswered, 14 days).
+        const plan = planFollowUp({ answered: isConnected(entry), hadAnswered: u.callHistory.some(isConnected), auto: u.autoFollowUp, manualTs: action.followUpTs, now });
+        next.callback = plan.callback;
+        next.autoFollowUp = plan.autoFollowUp;
+        if (action.source) next.source = action.source;
+        if (plan.callback) callHistory[0] = { ...entry, followUpTs: plan.callback.dueTs };
+        if (plan.ended) {
+          next.attempt = u.attempt + 1;
+          next.queue = null;
+          next.stageTag = 'No answer in 14 days';
+          return next;
+        }
 
         if (!action.outcome) {
           // A call they made to us is not one of our attempts at reaching them.

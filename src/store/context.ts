@@ -18,7 +18,7 @@ export interface State {
 export type Action =
   | { type: 'LOGIN'; agentId: string }
   | { type: 'LOGOUT' }
-  | { type: 'LOG_CALL'; userId: string; status: CallStatus; outcome?: Outcome; comment: string; agentId: string; telephony?: CallTelephony; analysis?: CallAnalysis }
+  | { type: 'LOG_CALL'; userId: string; status: CallStatus; outcome?: Outcome; comment: string; agentId: string; telephony?: CallTelephony; analysis?: CallAnalysis; source?: string; followUpTs?: number }
   | { type: 'ATTACH_RECORDING'; file: string; callId?: string; entryId?: string }
   | { type: 'SET_ANALYSIS'; userId: string; entryId: string; analysis?: CallAnalysis; error?: string }
   | { type: 'RAISE_TICKET'; userId: string; subject: string }
