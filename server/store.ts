@@ -736,8 +736,8 @@ export function createStore(getPool: () => Promise<pg.Pool>, env: StoreEnv, read
             [me.id],
           )
         ).rows.map((r) => r.doc);
-        // Agents only see team notes for the products they work.
-        send(res, 200, { notes: me.role === 'agent' ? rows.filter((n) => n.audience === 'me' || !n.app || me.apps.includes(n.app)) : rows });
+        // Agents only see notes for the products they work.
+        send(res, 200, { notes: me.role === 'agent' ? rows.filter((n) => !n.app || me.apps.includes(n.app)) : rows });
         return true;
       }
       if (req.method === 'POST' && p === '/api/notes') {
@@ -747,7 +747,7 @@ export function createStore(getPool: () => Promise<pg.Pool>, env: StoreEnv, read
         if (!body && !title) throw new HttpError(400, 'Write something in the note.');
         const audience = b.audience === 'agents' ? 'agents' : 'me';
         if (audience === 'agents' && me.role === 'agent') throw new HttpError(403, 'Only admins and supervisors can leave notes for agents.');
-        const app = audience === 'agents' && typeof b.app === 'string' && b.app ? b.app.slice(0, 40) : undefined;
+        const app = typeof b.app === 'string' && b.app ? b.app.slice(0, 40) : undefined;
         const id = typeof b.id === 'string' && b.id ? b.id.slice(0, 80) : '';
         const prev = id ? (await pool.query<{ doc: NoteDoc }>('select doc from notes where id = $1', [id])).rows[0]?.doc : undefined;
         if (id && !prev) throw new HttpError(404, 'That note is gone.');

@@ -7,29 +7,11 @@ import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { useStore } from '../store/StoreContext';
+import { notesCall as call, type Note } from '../lib/notes';
 import { APPS } from '../data/seed';
 import { fmtDayTime } from '../lib/dates';
 import { Button, Empty, Field, Input, PageHead, Select, Textarea } from '../ui/primitives';
 import { useToast } from '../ui/toastContext';
-
-interface Note {
-  id: string;
-  ownerId: string;
-  ownerName: string;
-  audience: 'me' | 'agents';
-  app?: string;
-  title: string;
-  body: string;
-  createdTs: number;
-  updatedTs: number;
-}
-
-async function call<T>(method: 'GET' | 'POST' | 'DELETE', path: string, body?: unknown): Promise<T> {
-  const res = await fetch(path, { method, credentials: 'same-origin', headers: body === undefined ? undefined : { 'Content-Type': 'application/json' }, body: body === undefined ? undefined : JSON.stringify(body) });
-  const json = (await res.json().catch(() => ({}))) as T & { error?: string };
-  if (!res.ok) throw new Error(json.error ?? `Request failed (${res.status}).`);
-  return json;
-}
 
 export default function Notes() {
   const { currentAgent } = useStore();
@@ -40,6 +22,8 @@ export default function Notes() {
   const [editing, setEditing] = useState<Partial<Note> | null>(null);
   const [q, setQ] = useState('');
   const canTeam = me.role !== 'agent';
+  const [product, setProduct] = useState('');
+  const myApps = APPS.filter((a) => a.live && (me.role === 'admin' || me.apps.includes(a.id)));
 
   const load = useCallback(() => {
     call<{ notes: Note[] }>('GET', '/api/notes').then((r) => { setNotes(r.notes); setError(null); }).catch((e: Error) => setError(e.message));
@@ -48,8 +32,8 @@ export default function Notes() {
 
   const shown = useMemo(() => {
     const t = q.trim().toLowerCase();
-    return (notes ?? []).filter((n) => !t || `${n.title} ${n.body} ${n.ownerName}`.toLowerCase().includes(t));
-  }, [notes, q]);
+    return (notes ?? []).filter((n) => (!product || !n.app || n.app === product) && (!t || `${n.title} ${n.body} ${n.ownerName}`.toLowerCase().includes(t)));
+  }, [notes, q, product]);
   const team = shown.filter((n) => n.audience === 'agents');
   const mine = shown.filter((n) => n.audience === 'me');
   const canChange = (n: Note) => n.ownerId === me.id || (n.audience === 'agents' && me.role === 'admin');
@@ -77,7 +61,7 @@ export default function Notes() {
       </div>
       <p className="whitespace-pre-wrap text-sm leading-relaxed">{n.body}</p>
       <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-        {n.audience === 'agents' && <Badge variant="outline">{n.app ? APPS.find((a) => a.id === n.app)?.name ?? n.app : 'All products'}</Badge>}
+        <Badge variant="outline">{n.app ? APPS.find((a) => a.id === n.app)?.name ?? n.app : 'All products'}</Badge>
         <span>{n.audience === 'agents' ? `${n.ownerName} · ` : ''}{fmtDayTime(n.updatedTs)}</span>
       </div>
     </Card>
@@ -90,7 +74,15 @@ export default function Notes() {
         desc={canTeam ? 'Your own reminders, and notes every agent sees before they call.' : 'Points to remember on a call, so nothing important is missed.'}
         actions={<Button variant="primary" icon={<Plus size={16} />} onClick={() => setEditing({ audience: 'me' })}>New note</Button>}
       />
-      <Input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search notes" aria-label="Search notes" />
+      <div className="row" style={{ gap: 8 }}>
+        <Input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search notes" aria-label="Search notes" />
+        {myApps.length > 1 && (
+          <Select aria-label="Product" value={product} onChange={(e) => setProduct(e.target.value)}>
+            <option value="">All products</option>
+            {myApps.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
+          </Select>
+        )}
+      </div>
       {error ? (
         <Empty title="Notes could not load">{error}</Empty>
       ) : notes === null ? (
@@ -109,12 +101,12 @@ export default function Notes() {
           </section>
         </>
       )}
-      {editing && <NoteDialog note={editing} canTeam={canTeam} onClose={() => setEditing(null)} onSaved={(n) => { setNotes((cur) => [n, ...(cur ?? []).filter((x) => x.id !== n.id)]); setEditing(null); toast('Note saved'); }} />}
+      {editing && <NoteDialog note={editing} canTeam={canTeam} products={myApps} onClose={() => setEditing(null)} onSaved={(n) => { setNotes((cur) => [n, ...(cur ?? []).filter((x) => x.id !== n.id)]); setEditing(null); toast('Note saved'); }} />}
     </div>
   );
 }
 
-function NoteDialog({ note, canTeam, onClose, onSaved }: { note: Partial<Note>; canTeam: boolean; onClose: () => void; onSaved: (n: Note) => void }) {
+function NoteDialog({ note, canTeam, products, onClose, onSaved }: { note: Partial<Note>; canTeam: boolean; products: { id: string; name: string }[]; onClose: () => void; onSaved: (n: Note) => void }) {
   const [title, setTitle] = useState(note.title ?? '');
   const [body, setBody] = useState(note.body ?? '');
   const [audience, setAudience] = useState<'me' | 'agents'>(note.audience ?? 'me');
@@ -143,24 +135,22 @@ function NoteDialog({ note, canTeam, onClose, onSaved }: { note: Partial<Note>; 
         <div className="stack" style={{ gap: 12 }}>
           <Field label="Title" htmlFor="note-title"><Input id="note-title" autoFocus value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Ask about their city" /></Field>
           <Field label="Note" htmlFor="note-body" error={err}><Textarea id="note-body" rows={6} value={body} onChange={(e) => setBody(e.target.value)} placeholder="What to ask, say or not forget" /></Field>
-          {canTeam && (
-            <div className="grid-2" style={{ gap: 12 }}>
+          <div className="grid-2" style={{ gap: 12 }}>
+            {canTeam && (
               <Field label="Who sees it" htmlFor="note-aud">
                 <Select id="note-aud" value={audience} onChange={(e) => setAudience(e.target.value as 'me' | 'agents')}>
                   <option value="me">Just me</option>
                   <option value="agents">All agents</option>
                 </Select>
               </Field>
-              {audience === 'agents' && (
-                <Field label="Product" htmlFor="note-app">
-                  <Select id="note-app" value={app} onChange={(e) => setApp(e.target.value)}>
-                    <option value="">All products</option>
-                    {APPS.filter((a) => a.live).map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
-                  </Select>
-                </Field>
-              )}
-            </div>
-          )}
+            )}
+            <Field label="Show it when calling" htmlFor="note-app">
+              <Select id="note-app" value={app} onChange={(e) => setApp(e.target.value)}>
+                <option value="">Every product</option>
+                {products.map((a) => <option key={a.id} value={a.id}>{a.name} customers</option>)}
+              </Select>
+            </Field>
+          </div>
           <div className="row" style={{ justifyContent: 'flex-end', gap: 8 }}>
             <Button onClick={onClose}>Cancel</Button>
             <Button variant="primary" disabled={busy || (!title.trim() && !body.trim())} onClick={() => void save()}>Save note</Button>
