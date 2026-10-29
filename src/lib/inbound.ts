@@ -28,3 +28,25 @@ export function resolveCaller(users: CustomerUser[], remote: string, apps: AppId
   const existing = users.find((u) => u.id === adHocId(digits) && !u.deleted);
   return existing ? { customer: existing, isNew: false } : { customer: { ...adHocCustomer(digits, apps[0], now), business: 'Incoming call', stageTag: 'Incoming call' }, isNew: true };
 }
+
+/**
+ * A caller TCC doesn't have on file: ask the server whether a product's own database knows the number
+ * (server/appSync.ts). It answers with the customer, already saved; null when nobody knows them, the server can't
+ * be reached, or it takes longer than the phone can wait.
+ */
+export async function lookupCaller(remote: string, apps: AppId[], timeoutMs = 2500): Promise<CustomerUser | null> {
+  try {
+    const res = await fetch('/api/sources/lookup', {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ phone: remote }),
+      signal: AbortSignal.timeout(timeoutMs),
+    });
+    if (!res.ok) return null;
+    const found = ((await res.json()) as { customer?: CustomerUser | null }).customer;
+    return found && apps.includes(found.app) ? found : null;
+  } catch {
+    return null;
+  }
+}

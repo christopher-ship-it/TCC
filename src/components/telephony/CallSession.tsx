@@ -8,7 +8,8 @@ import { useStore } from '../../store/StoreContext';
 import type { CustomerUser } from '../../data/types';
 import { hasRealRecording } from '../../lib/attachRecording';
 import { DEFAULT_COUNTRY_CODE, LIVE_DIAL_BLOCKED, callMeta, isRealNumber, dialNumberFor, suggestStatus, telephonyProvider, toCallTelephony } from '../../lib/telephony';
-import { resolveCaller } from '../../lib/inbound';
+import { lookupCaller, resolveCaller } from '../../lib/inbound';
+import { serverStoreEnabled } from '../../store/ServerStoreProvider';
 import { announcePresence } from '../../lib/presence';
 import { can } from '../../lib/access';
 import { APPS } from '../../data/seed';
@@ -47,6 +48,17 @@ function Session({ children }: { children: ReactNode }) {
     const apps = APPS.filter((a) => a.live && can(currentAgent, a.id, 'call')).map((a) => a.id);
     const caller = resolveCaller(state.users, call.remote, apps);
     if (!caller) return; // withheld number, or an agent with no app to file it under: it still rings, it just can't be logged
+    if (caller.isNew && serverStoreEnabled) {
+      // Not on file here, but the product's own database may know them (a sign-up since the last sync): ask briefly,
+      // and file the call under a new record if not.
+      const agentId = currentAgent.id;
+      void lookupCaller(call.remote, apps).then((found) => {
+        const customer = found ?? caller.customer;
+        dispatch({ type: 'ADD_CUSTOMER', customer });
+        controller.tag({ customerId: customer.id, app: customer.app, agentId, direction: 'inbound' });
+      });
+      return;
+    }
     if (caller.isNew) dispatch({ type: 'ADD_CUSTOMER', customer: caller.customer });
     controller.tag({ customerId: caller.customer.id, app: caller.customer.app, agentId: currentAgent.id, direction: 'inbound' });
   }, [call, currentAgent, state.users, dispatch, controller]);
