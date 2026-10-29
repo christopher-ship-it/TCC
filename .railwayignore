@@ -1,0 +1,10 @@
+# Never uploaded by `railway up`: local secrets, local settings and caches.
+.credentials/
+.env.local
+*.local
+.data/
+.claude/
+node_modules/
+dist/
+tools/transcribe/.cache/
+firestore-debug.log
