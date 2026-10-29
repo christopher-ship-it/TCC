@@ -46,6 +46,8 @@ const ENABLED_APPS = ((import.meta as { env?: Record<string, string | undefined>
 const TECSTELLAR_APPS: AppDef[] = ENABLED_APPS.length ? ALL_TECSTELLAR_APPS.filter((a) => ENABLED_APPS.includes(a.id)) : ALL_TECSTELLAR_APPS;
 
 export const APPS: AppDef[] = VM ? VANMOH_APPS : TECSTELLAR_APPS;
+/** Every product, including ones this deployment doesn't run (VITE_APPS) — the sign-in page shows them all. */
+export const ALL_PRODUCTS: AppDef[] = VM ? VANMOH_APPS : ALL_TECSTELLAR_APPS;
 export const STATE_DEFS: StateSeedDef[] = VM ? VANMOH_STATES : TECSTELLAR_STATES;
 export const NO_STATE_WEIGHT = VM ? VANMOH_NO_STATE_WEIGHT : 412;
 

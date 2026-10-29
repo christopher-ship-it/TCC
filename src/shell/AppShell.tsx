@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
-import { Activity, BarChart3, CalendarClock, ChevronDown, ClipboardList, Contact, Database, KeyRound, Flag, Headset, History, Home, LogOut, Map, NotebookPen, Phone, RotateCcw, Search, Shuffle, Users, UsersRound } from 'lucide-react';
+import { Activity, BarChart3, CalendarClock, ChevronDown, ClipboardList, Contact, Database, KeyRound, Flag, Headset, History, Home, LogOut, Map, NotebookPen, Phone, Repeat, RotateCcw, Search, Shuffle, Users, UsersRound } from 'lucide-react';
 import { BRAND_MARK } from '../assets';
 import { APPS } from '../data/seed';
 import type { AppId, Role } from '../data/types';
@@ -188,7 +188,7 @@ function CallPill() {
 }
 
 export default function AppShell() {
-  const { state, currentAgent, dispatch, backend, requestPasswordChange, visibility } = useStore();
+  const { state, currentAgent, dispatch, backend, requestPasswordChange, visibility, product, chooseProduct } = useStore();
   const toast = useToast();
   const navigate = useNavigate();
   const location = useLocation();
@@ -199,7 +199,8 @@ export default function AppShell() {
     const ids = currentAgent.role === 'admin' ? APPS.map((a) => a.id) : currentAgent.apps;
     return APPS.filter((a) => ids.includes(a.id)).map((a) => a.id);
   }, [currentAgent]);
-  const [app, setApp] = useState<AppId | 'all'>('all');
+  // Admins can still look across products from the header; they start in the one they signed in to.
+  const [app, setApp] = useState<AppId | 'all'>(() => (product && APPS.length > 1 ? product : 'all'));
   const scope = useMemo<ScopeValue>(() => ({ app, setApp, visibleApps, apps: app === 'all' ? visibleApps : [app] }), [app, visibleApps]);
 
   useEffect(() => {
@@ -231,7 +232,7 @@ export default function AppShell() {
             <img src={BRAND_MARK} alt="" />
             <span>
               <b>{BRAND.key === 'tecstellar' ? 'Tecstellar' : BRAND.title}</b>
-              <small>Calling desk</small>
+              <small>{APPS.length > 1 && product ? `${APPS.find((a) => a.id === product)?.name} · Calling desk` : 'Calling desk'}</small>
             </span>
           </button>
           <CustomerSearch apps={visibleApps} />
@@ -309,6 +310,16 @@ export default function AppShell() {
                       }}
                     >
                       <KeyRound /> {currentAgent.superAdmin ? 'Change password' : 'Request password change'}
+                    </DropdownMenuItem>
+                  )}
+                  {APPS.length > 1 && (
+                    <DropdownMenuItem
+                      onSelect={() => {
+                        chooseProduct(null);
+                        navigate('/');
+                      }}
+                    >
+                      <Repeat /> Switch product
                     </DropdownMenuItem>
                   )}
                   <DropdownMenuSeparator />

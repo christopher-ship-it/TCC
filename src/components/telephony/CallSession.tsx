@@ -31,7 +31,7 @@ const LOOKUP_DELAYS_MS = [15_000, 60_000, 180_000, 600_000];
 
 function Session({ children }: { children: ReactNode }) {
   const { controller, snapshot } = useTelephony();
-  const { state, dispatch, currentAgent } = useStore();
+  const { state, dispatch, currentAgent, account, product } = useStore();
   const [wrapUp, setWrapUp] = useState<CallSessionValue['wrapUp']>(null);
   const wrapRef = useRef(wrapUp);
   wrapRef.current = wrapUp;
@@ -45,7 +45,10 @@ function Session({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (!call || call.direction !== 'inbound' || call.meta.customerId || !currentAgent || resolved.current === call.id) return;
     resolved.current = call.id;
-    const apps = APPS.filter((a) => a.live && can(currentAgent, a.id, 'call')).map((a) => a.id);
+    // The line rings for every product the agent has, not just the one they're signed in to; an unknown caller is
+    // filed under the current product.
+    const who = account ?? currentAgent;
+    const apps = APPS.filter((a) => a.live && can(who, a.id, 'call')).map((a) => a.id).sort((a, b) => Number(b === product) - Number(a === product));
     const caller = resolveCaller(state.users, call.remote, apps);
     if (!caller) return; // withheld number, or an agent with no app to file it under: it still rings, it just can't be logged
     if (caller.isNew && serverStoreEnabled) {
@@ -61,7 +64,7 @@ function Session({ children }: { children: ReactNode }) {
     }
     if (caller.isNew) dispatch({ type: 'ADD_CUSTOMER', customer: caller.customer });
     controller.tag({ customerId: caller.customer.id, app: caller.customer.app, agentId: currentAgent.id, direction: 'inbound' });
-  }, [call, currentAgent, state.users, dispatch, controller]);
+  }, [call, currentAgent, account, product, state.users, dispatch, controller]);
 
   // A finished call waits here until the agent logs it. A missed or declined incoming call has nothing to wrap up,
   // so it is logged straight away.

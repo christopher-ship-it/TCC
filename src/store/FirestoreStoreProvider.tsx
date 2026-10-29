@@ -23,7 +23,7 @@ import { isReachable } from '../lib/queue';
 import { attachRecording, withAnalysis } from '../lib/attachRecording';
 import { buildCallLogEntry } from '../lib/callLog';
 import { recordingUrlFor } from '../lib/telephony';
-import { auditEntry, StoreContext, type AccountResult, type Action, type State } from './context';
+import { auditEntry, BaseStoreContext, type AccountResult, type Action, type State } from './context';
 
 const DAY_MS = 86400000;
 
@@ -456,5 +456,5 @@ export function FirestoreStoreProvider({ children }: { children: React.ReactNode
     [agents, users, escalations, clearedEscalations, audit, currentAgentId, currentAgent, customerSource, ready, accessProblem],
   );
 
-  return <StoreContext.Provider value={value}>{children}</StoreContext.Provider>;
+  return <BaseStoreContext.Provider value={value}>{children}</BaseStoreContext.Provider>;
 }

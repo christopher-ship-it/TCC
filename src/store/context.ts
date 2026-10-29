@@ -1,6 +1,6 @@
 import { createContext, useContext, type Dispatch } from 'react';
 import type { Seed } from '../data/seed';
-import type { AgentAccount, AuditAction, AuditEntry, CallAnalysis, CallStatus, CallTelephony, CustomerUser, EscalationRecord, Language, Lead, Outcome } from '../data/types';
+import type { AgentAccount, AuditAction, AuditEntry, CallAnalysis, CallStatus, CallTelephony, CustomerUser, AppId, EscalationRecord, Language, Lead, Outcome } from '../data/types';
 
 export interface State {
   agents: AgentAccount[];
@@ -70,7 +70,13 @@ export interface StoreValue {
   ready: boolean;
   backend: 'local' | 'firestore' | 'server';
   /** Firestore (email) and server (username) backends: real per-person sign-in. The local demo store has none. */
-  signInWithPassword?: (emailOrUsername: string, password: string) => Promise<AccountResult>;
+  signInWithPassword?: (emailOrUsername: string, password: string, product?: AppId) => Promise<AccountResult>;
+  /** The product this session works in (src/lib/product.ts). Null until one is picked on the sign-in page. */
+  product: AppId | null;
+  /** Picks (or, with null, leaves) the product. A build with one product has it picked already. */
+  chooseProduct: (app: AppId | null) => void;
+  /** The signed-in person with all their products — `currentAgent` is them inside the chosen product. */
+  account: AgentAccount | null;
   sendPasswordReset?: (email: string) => Promise<AccountResult>;
   /** Adds a person. On Firestore this also creates their login and emails them a link to choose a password. */
   createAgent: (agent: AgentAccount, actorId: string, password?: string) => Promise<AccountResult>;
@@ -94,6 +100,9 @@ export interface StoreValue {
   accessProblem?: string | null;
 }
 
+/** What a backend provides (src/store/*Provider.tsx); StoreContext.tsx adds the product the session works in. */
+export type BaseStoreValue = Omit<StoreValue, 'product' | 'chooseProduct' | 'account'>;
+export const BaseStoreContext = createContext<BaseStoreValue | null>(null);
 export const StoreContext = createContext<StoreValue | null>(null);
 
 export function useStore(): StoreValue {

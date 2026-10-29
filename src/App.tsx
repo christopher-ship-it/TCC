@@ -33,9 +33,10 @@ function LoadingScreen() {
 
 /** Signed in and not suspended — then the agent's phone line wraps every page so calls survive navigation. */
 function Protected() {
-  const { currentAgent, ready } = useStore();
+  const { currentAgent, ready, product } = useStore();
   if (!ready) return <LoadingScreen />;
-  if (!currentAgent || !isActive(currentAgent)) return <Navigate to="/" replace />;
+  // Not signed in, or signed in but not into a product yet: the sign-in page has the product cards.
+  if (!currentAgent || !isActive(currentAgent) || !product) return <Navigate to="/" replace />;
   const shell = <AppShell />;
   return currentAgent.role === 'agent' ? <AgentCallSession>{shell}</AgentCallSession> : shell;
 }

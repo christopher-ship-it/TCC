@@ -6,8 +6,8 @@
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { APPS, STATE_DEFS } from '../data/seed';
-import type { AgentAccount, AuditEntry, CustomerUser, EscalationRecord } from '../data/types';
-import { StoreContext, type AccountResult, type Action, type Notice, type State, type StoreValue } from './context';
+import type { AgentAccount, AppId, AuditEntry, CustomerUser, EscalationRecord } from '../data/types';
+import { BaseStoreContext, type AccountResult, type Action, type Notice, type State, type BaseStoreValue } from './context';
 import { reducer } from './reducer';
 
 export const serverStoreEnabled = import.meta.env.VITE_STORE === 'server';
@@ -288,9 +288,9 @@ export function ServerStoreProvider({ children }: { children: React.ReactNode })
   };
 
   const signInWithPassword = useCallback(
-    (username: string, password: string) =>
+    (username: string, password: string, product?: AppId) =>
       result(async () => {
-        await api('/api/auth/login', { username, password });
+        await api('/api/auth/login', { username, password, ...(product ? { app: product } : {}) });
         cursor.current = null;
         await pull();
       }),
@@ -368,7 +368,7 @@ export function ServerStoreProvider({ children }: { children: React.ReactNode })
 
   const currentAgent = useMemo(() => state.agents.find((a) => a.id === state.currentAgentId) ?? null, [state.agents, state.currentAgentId]);
 
-  const value = useMemo<StoreValue>(
+  const value = useMemo<BaseStoreValue>(
     () => ({
       state,
       dispatch,
@@ -390,5 +390,5 @@ export function ServerStoreProvider({ children }: { children: React.ReactNode })
     [state, dispatch, currentAgent, ready, signInWithPassword, createAgent, setPassword, setupNeeded, setupAllowed, codeRequired, runSetup, pendingCount, syncError, notices, visibility, dismissNotice, changeMyPassword, requestPasswordChange, grantPasswordChange],
   );
 
-  return <StoreContext.Provider value={value}>{children}</StoreContext.Provider>;
+  return <BaseStoreContext.Provider value={value}>{children}</BaseStoreContext.Provider>;
 }

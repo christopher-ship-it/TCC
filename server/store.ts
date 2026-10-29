@@ -4,7 +4,7 @@
 //
 //   GET  /api/auth/me                 → { setupNeeded, setupCodeRequired, agent }
 //   POST /api/auth/setup              → { name, username, password, code?, apps } — the very first admin, once
-//   POST /api/auth/login              → { username, password }
+//   POST /api/auth/login              → { username, password, app? } — with app, only if the account has that product
 //   POST /api/auth/logout
 //   GET  /api/data?since=<cursor>     → everything changed since the cursor (everything, without one)
 //   POST /api/data                    → { agents?, customers?, escalations?, audit?, cleared? } — upserts
@@ -135,6 +135,8 @@ function setSessionCookie(req: IncomingMessage, res: ServerResponse, token: stri
   const attrs = ['Path=/', 'HttpOnly', 'SameSite=Lax', ...(secure(req) ? ['Secure'] : [])];
   res.setHeader('Set-Cookie', token ? `${COOKIE}=${token}; Max-Age=${SESSION_MS / 1000}; ${attrs.join('; ')}` : `${COOKIE}=; Max-Age=0; ${attrs.join('; ')}`);
 }
+
+const PRODUCT_NAMES: Record<string, string> = { realbroks: 'RealBroks', irondrobe: 'IronDrobe', influnet: 'Influnet', vehigo: 'Vehigo', vanmoh: 'Vanmoh' };
 
 const isActive = (a: AgentAccount) => (a.status ?? 'active') === 'active';
 
@@ -341,7 +343,14 @@ export function createStore(getPool: () => Promise<pg.Pool>, env: StoreEnv, read
         logEvent({ level: 'warn', source: 'auth', message: `${row.doc.name} tried to sign in while suspended`, agentId: row.doc.id, agentName: row.doc.name });
         throw new HttpError(403, 'This account is suspended. Ask your admin to reactivate it.');
       }
-      logEvent({ level: 'info', source: 'auth', message: `${row.doc.name} signed in`, agentId: row.doc.id, agentName: row.doc.name });
+      // Signing in to one product (the cards on the sign-in page): only if the account has it. Admins run them all.
+      const product = typeof b.app === 'string' ? b.app.slice(0, 40) : null;
+      if (product && !row.doc.superAdmin && row.doc.role !== 'admin' && !row.doc.apps.includes(product)) {
+        failures.delete(username);
+        logEvent({ level: 'warn', source: 'auth', message: `${row.doc.name} tried to sign in to ${PRODUCT_NAMES[product] ?? product} without access`, agentId: row.doc.id, agentName: row.doc.name });
+        throw new HttpError(403, `Your account doesn’t have ${PRODUCT_NAMES[product] ?? product}. Ask your admin to add it, or pick another product.`);
+      }
+      logEvent({ level: 'info', source: 'auth', message: `${row.doc.name} signed in${product ? ` to ${PRODUCT_NAMES[product] ?? product}` : ''}`, agentId: row.doc.id, agentName: row.doc.name });
       failures.delete(username);
       await newSession(req, res, pool, row.doc.id);
       await writeAudit(pool, auditRow(row.doc, 'signed_in', undefined, 'Signed in'));

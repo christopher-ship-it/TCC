@@ -78,8 +78,14 @@ test('live: first admin, agents with passwords, customers by mobile, calls share
     const agent = client();
     r = await agent('/api/auth/login', { username: 'kavya.r', password: 'nope1234' });
     assert.equal(r.status, 401);
-    r = await agent('/api/auth/login', { username: 'Kavya.R', password: 'kavya123' });
+    // Signing in to a product (the cards on the sign-in page) needs that product on the account; no session otherwise.
+    r = await agent('/api/auth/login', { username: 'kavya.r', password: 'kavya123', app: 'irondrobe' });
+    assert.equal(r.status, 403);
+    assert.match(r.body.error, /doesn’t have IronDrobe/);
+    assert.equal((await agent('/api/auth/me')).body.agent, null, 'no session after a refused product');
+    r = await agent('/api/auth/login', { username: 'Kavya.R', password: 'kavya123', app: 'realbroks' });
     assert.equal(r.status, 200, r.body.error);
+    assert.equal((await client()('/api/auth/login', { username: 'owner', password: 'pass1234', app: 'irondrobe' })).status, 200, 'admins run every product');
     r = await agent('/api/people', { agent: { ...agentDoc, id: 'x', username: 'sneaky' }, password: 'pass1234' });
     assert.equal(r.status, 403, 'agents cannot add people');
 

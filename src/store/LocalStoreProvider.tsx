@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useReducer } from 'react';
 import { generateSeed } from '../data/seed';
 import type { AgentAccount } from '../data/types';
 import { cleanLegacyCallData } from '../lib/attachRecording';
-import { StoreContext, type Action, type State } from './context';
+import { BaseStoreContext, type Action, type State } from './context';
 import { reducer } from './reducer';
 
 const STORAGE_KEY = 'tcc-store-v1';
@@ -50,5 +50,5 @@ export function LocalStoreProvider({ children }: { children: React.ReactNode }) 
   );
   const value = useMemo(() => ({ state, dispatch, currentAgent, ready: true, backend: 'local' as const, createAgent }), [state, currentAgent, createAgent]);
 
-  return <StoreContext.Provider value={value}>{children}</StoreContext.Provider>;
+  return <BaseStoreContext.Provider value={value}>{children}</BaseStoreContext.Provider>;
 }
