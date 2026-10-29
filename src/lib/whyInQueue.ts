@@ -20,8 +20,11 @@ export function whyInQueue(u: CustomerUser): string | null {
     case 'followup':
       return u.followUp ? `Week ${u.followUp.weekNumber} of the follow-up chain — marked positive on ${u.followUp.markedPositiveLabel}${u.followUp.state === 'overdue' ? `, ${u.followUp.overdueDays} days overdue` : ''}.` : 'Warm lead follow-up.';
     case 'errors':
+      if (u.sync?.lastError) return `${u.sync.lastError.message} — call to help them finish.`;
+      if (u.sync?.stageLabel && !u.sync.onboardingCompleted) return `Stopped at “${u.sync.stageLabel}” — call to help them finish setting up.`;
       return `${u.stageTag} — call to help them finish.`;
     case 'inactive':
+      if (u.sync?.lastActiveTs) return `Hasn’t opened the app for ${Math.floor((Date.now() - u.sync.lastActiveTs) / 86_400_000)} days — win-back call.`;
       if (BRAND.fields) return `${BRAND.fields.inactive} ${u.lastOpenLabel.replace(' ago', '')} ago — call before the chit lapses.`;
       return `Hasn’t opened the app since ${u.lastOpenLabel.replace(' ago', '')} ago — win-back call.`;
     default:

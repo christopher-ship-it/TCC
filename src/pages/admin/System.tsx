@@ -13,6 +13,7 @@ import type { AuditEntry } from '../../data/types';
 import type { AgentAccount } from '../../data/types';
 import { ROLE_INFO } from '../../lib/access';
 import { fmtDayTime } from '../../lib/dates';
+import { APPS } from '../../data/seed';
 import { Button, Callout, Chip, Field, Input, PageHead, Tabs, Toggle } from '../../ui/primitives';
 import { useToast } from '../../ui/toastContext';
 
@@ -40,7 +41,12 @@ interface SystemData {
   passwordRequests: { id: string; title: string; body: string; fromName: string; subjectId: string; subjectName: string; ts: number }[];
   activity: AuditEntry[];
   totals: { customers: number; calls: number; callsToday: number };
+  /** Customer sync from each product's own database (server/appSync.ts). */
+  sources?: SourceStatus[];
 }
+
+interface SyncRun { full: boolean; startedAt: number; ms: number; fetched: number; created: number; updated: number; unchanged: number; skipped: { noPhone: number; otherProduct: number; closed: number }; error?: string }
+interface SourceStatus { app: string; host: string; running: boolean; since: string | null; lastFullAt: number | null; last: SyncRun | null }
 
 type Tab = 'health' | 'people' | 'activity' | 'events' | 'requests' | 'endpoints';
 
@@ -172,6 +178,20 @@ export default function System() {
     return () => clearInterval(id);
   }, [load]);
 
+  const [syncing, setSyncing] = useState<string | null>(null);
+  const runSync = async (app: string, full: boolean) => {
+    setSyncing(app);
+    try {
+      const r = await post<SyncRun>('/api/system/sources/sync', { app, full });
+      toast(r.error ? `Sync failed: ${r.error}` : `Synced: ${r.created} new, ${r.updated} updated`);
+    } catch (e) {
+      toast(e instanceof Error ? e.message : 'Sync failed');
+    } finally {
+      setSyncing(null);
+      void load();
+    }
+  };
+
   const runCheck = async (what: string) => {
     setChecks((c) => ({ ...c, [what]: 'running' }));
     try {
@@ -192,6 +212,7 @@ export default function System() {
     if (!h.telecmi.configured) problems.push('Recordings are off: TeleCMI App ID / secret are not set.');
     if (h.setupFormOpen) problems.push('The first-admin setup form is open (TCC_SETUP_CODE is set).');
     if (recentErrors) problems.push(`${recentErrors} error${recentErrors === 1 ? '' : 's'} in the last hour — see Events.`);
+    for (const src of data?.sources ?? []) if (src.last?.error) problems.push(`${src.app} customer sync failed: ${src.last.error}`);
     if (h.gemini.queue.waiting > 3) problems.push(`${h.gemini.queue.waiting} calls waiting for analysis.`);
   }
   const online = data?.people.filter((p) => p.lastSeen && Date.now() - p.lastSeen < 3 * 60_000).length ?? 0;
@@ -298,6 +319,30 @@ export default function System() {
                   <div className="kv"><span>Customers · calls · today</span><span className="mono">{data.totals.customers} · {data.totals.calls} · {data.totals.callsToday}</span></div>
                 </CardContent>
               </Card>
+              {(data.sources ?? []).map((src) => (
+                <Card key={src.app}>
+                  <CardHeader><CardTitle className="flex items-center gap-2"><Dot ok={!!src.last && !src.last.error} />Customer sync · {APPS.find((a) => a.id === src.app)?.name ?? src.app}</CardTitle></CardHeader>
+                  <CardContent className="stack" style={{ gap: 6 }}>
+                    <div className="kv"><span>From</span><span className="mono">{src.host}</span></div>
+                    {src.last ? (
+                      <>
+                        <div className="kv"><span>Last run</span><span>{ago(src.last.startedAt)} · {src.last.full ? 'everyone' : 'changes only'} · {(src.last.ms / 1000).toFixed(1)} s</span></div>
+                        {src.last.error ? <Callout tone="danger">{src.last.error}</Callout> : (
+                          <div className="kv"><span>Fetched · new · updated</span><span className="mono">{src.last.fetched} · {src.last.created} · {src.last.updated}</span></div>
+                        )}
+                        {src.last.skipped.otherProduct + src.last.skipped.noPhone > 0 && (
+                          <div className="kv"><span>Left out</span><span>{[src.last.skipped.noPhone && `${src.last.skipped.noPhone} with no phone`, src.last.skipped.otherProduct && `${src.last.skipped.otherProduct} already another product’s customer`].filter(Boolean).join(' · ')}</span></div>
+                        )}
+                      </>
+                    ) : <div className="muted">Not run yet — it starts a minute after the server does.</div>}
+                    <div className="kv"><span>Last full refresh</span><span>{ago(src.lastFullAt)}</span></div>
+                    <div className="row" style={{ gap: 8 }}>
+                      <Button size="sm" icon={<RefreshCw size={14} />} disabled={src.running || syncing === src.app} onClick={() => void runSync(src.app, false)}>{src.running || syncing === src.app ? 'Syncing…' : 'Sync now'}</Button>
+                      <Button size="sm" variant="secondary" disabled={src.running || syncing === src.app} onClick={() => void runSync(src.app, true)}>Refresh everyone</Button>
+                    </div>
+                  </CardContent>
+                </Card>
+              ))}
               <Card>
                 <CardHeader><CardTitle className="flex items-center gap-2"><Dot ok={h.database.ok} />Database</CardTitle></CardHeader>
                 <CardContent className="stack" style={{ gap: 6 }}>

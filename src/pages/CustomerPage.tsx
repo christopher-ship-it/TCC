@@ -13,6 +13,7 @@ import { customerJourney, durationLabel, isConnected, journeyVerdict } from '../
 import { talkShare } from '../lib/analysis/speakers';
 import { whyInQueue } from '../lib/whyInQueue';
 import { AUTO_FOLLOWUP_DAYS, chainDay } from '../lib/followUps';
+import { daysAgoLabel, fmtDayTime } from '../lib/dates';
 import { formatDuration } from '../telephony';
 import { LeadBadge, OutcomeBadge, SentimentBadge } from '../components/calls/badges';
 import { analysisState } from '../lib/callStatus';
@@ -234,9 +235,21 @@ export default function CustomerPage() {
                 <div className="kv"><span>Plan</span><span>{user.plan}{user.planNote ? ` · ${user.planNote}` : ''}</span></div>
                 <div className="kv"><span>{user.app === 'realbroks' ? 'Listings' : 'Orders'}</span><span className="mono">{user.listings}</span></div>
                 {user.app === 'realbroks' && <div className="kv"><span>Buyers added</span><span className="mono">{user.buyers}</span></div>}
+                {user.app === 'irondrobe' && user.sync && <div className="kv"><span>End customers</span><span className="mono">{user.buyers}</span></div>}
                 <div className="kv"><span>Last opened app</span><span>{user.lastOpenLabel}</span></div>
                 <div className="kv"><span>App version</span><span>{user.appVersion}</span></div>
                 {user.mrr ? <div className="kv"><span>Pays</span><span className="mono">₹{user.mrr.toLocaleString('en-IN')} / mo</span></div> : null}
+              </>
+            )}
+            {user.sync && (
+              <>
+                <div className="kv"><span>Setup reached</span><span>{user.sync.stageLabel ?? '—'}{user.sync.onboardingCompleted ? ' · done' : ''}</span></div>
+                {user.sync.lastActiveTs ? <div className="kv"><span>Last active</span><span>{daysAgoLabel(user.sync.lastActiveTs, Date.now())}</span></div> : null}
+                {user.sync.lastError ? <div className="kv"><span>Last error</span><span>{user.sync.lastError.message}</span></div> : null}
+                {user.sync.platform ? <div className="kv"><span>Phone</span><span>{user.sync.platform === 'ios' ? 'iPhone' : user.sync.platform === 'android' ? 'Android' : user.sync.platform}</span></div> : null}
+                {user.sync.email ? <div className="kv"><span>Email</span><span>{user.sync.email}</span></div> : null}
+                {user.sync.accountStatus !== 'active' ? <div className="kv"><span>Account</span><span>{user.sync.accountStatus === 'deleted' ? 'Deleted in the app' : 'Blocked in the app'}</span></div> : null}
+                <div className="kv"><span>From {app.name}</span><span className="muted">updated {fmtDayTime(user.sync.syncedAt)}</span></div>
               </>
             )}
           </Card>
