@@ -129,5 +129,5 @@ test('api refuses cross-site requests and reports health', async () => {
   assert.equal(await viaProxy('https://evil.example'), 403);
   const ok = await run({ origin: 'http://localhost:5173' });
   assert.equal(ok.status, 200);
-  assert.deepEqual(JSON.parse(ok.body), { ok: true, analysis: true, recordings: false, telecmiAppId: false, database: false });
+  assert.deepEqual(JSON.parse(ok.body), { ok: true, analysis: true, recordings: false, telecmiAppId: false, database: false, customerSync: [] });
 });

@@ -17,9 +17,11 @@ function tccApi(): Plugin {
       api = createApi(readServerEnv(vars, config.root))
     },
     configureServer(server) {
+      api.startBackgroundJobs()
       server.middlewares.use((req, res, next) => void api(req, res, next))
     },
     configurePreviewServer(server) {
+      api.startBackgroundJobs()
       server.middlewares.use((req, res, next) => void api(req, res, next))
     },
   }

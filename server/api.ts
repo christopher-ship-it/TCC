@@ -6,6 +6,8 @@
 //   GET  /api/recordings/:file    → the call recording (Range requests supported, so the player can seek)
 //   POST /api/analyze             → { file, customer?, business?, app?, levels? } → CallAnalysis
 //   POST /api/telephony/status    → { id, password, status: online|offline } → the agent's TeleCMI availability
+//   POST /api/sources/lookup      → { phone } → { customer } an incoming caller found in a product's own database
+//   POST /api/system/sources/sync → { app, full? } run a product's customer sync now (super admin; server/appSync.ts)
 //   /api/auth/*, /api/data, /api/people → sign-in and the shared records (server/store.ts), when a database is set
 
 import type { IncomingMessage, ServerResponse } from 'node:http';
@@ -15,6 +17,7 @@ import { createDb } from './db.ts';
 import { fetchRecording, RECORDING_FILE_RE } from './recordings.ts';
 import { PresenceError, setAgentStatus } from './presence.ts';
 import { createStore, HttpError, requestAgent } from './store.ts';
+import { createSourceSync, SourceError } from './appSync.ts';
 import { analysisQueue, onAnalysisEvent } from './analyze.ts';
 import { endpointStats, logEvent, recentEvents, recentRequests, recordRequest, startedAt, connectEventStore } from './events.ts';
 
@@ -131,8 +134,9 @@ export function createApi(env: ServerEnv) {
     };
   };
 
-  const store = createStore(() => db.ready(), { setupCode: env.setupCode, systemHealth, check }, readJson, send);
-  return async function api(req: IncomingMessage, res: ServerResponse, next: Next) {
+  const sources = db.configured && env.sources.length ? createSourceSync(() => db.ready(), env.sources, { everyMinutes: env.sourceSyncMinutes }) : undefined;
+  const store = createStore(() => db.ready(), { setupCode: env.setupCode, systemHealth, check, sources }, readJson, send);
+  async function api(req: IncomingMessage, res: ServerResponse, next: Next) {
     const url = new URL(req.url ?? '/', 'http://local');
     if (!url.pathname.startsWith('/api/')) return next();
     const t0 = Date.now();
@@ -151,6 +155,7 @@ export function createApi(env: ServerEnv) {
           recordings: Boolean(env.telecmiAppId && env.telecmiSecret),
           telecmiAppId: Boolean(env.telecmiAppId),
           database: db.configured,
+          customerSync: (sources ? env.sources.map((x) => x.app) : []),
         });
       }
 
@@ -202,7 +207,7 @@ export function createApi(env: ServerEnv) {
         return send(res, 200, { analysis: await analyzeRecording(request, env) });
       }
 
-      if (/^\/api\/(auth\/|data$|people|notices|notes|password-requests$|events$|system)/.test(url.pathname)) {
+      if (/^\/api\/(auth\/|data$|people|notices|notes|password-requests$|events$|system|sources\/lookup$)/.test(url.pathname)) {
         if (!db.configured) return send(res, 501, { error: 'No database is connected (DATABASE_URL).', notConfigured: true });
         if (await store(req, res, url)) return;
       }
@@ -218,11 +223,15 @@ export function createApi(env: ServerEnv) {
         if (e.status !== 401) logEvent({ level: 'warn', source: 'api', message: `${req.method} ${url.pathname} → ${e.status}: ${e.message}`, agentId: requestAgent.get(req)?.id, agentName: requestAgent.get(req)?.name });
         return send(res, e.status, { error: e.message });
       }
-      if (e instanceof PresenceError) return send(res, e.status, { error: e.message });
+      if (e instanceof PresenceError || e instanceof SourceError) return send(res, e.status, { error: e.message });
       if (e instanceof NotConfigured) return send(res, 501, { error: e.message, notConfigured: true });
       const message = e instanceof Error ? e.message : 'Request failed.';
       logEvent({ level: 'error', source: 'api', message: `${req.method} ${url.pathname}: ${message}`, agentId: requestAgent.get(req)?.id, agentName: requestAgent.get(req)?.name });
       return send(res, 502, { error: message });
     }
-  };
+  }
+
+  /** The customer sync runs only on a server that serves requests — never during `vite build`. */
+  api.startBackgroundJobs = () => sources?.start();
+  return api;
 }

@@ -17,6 +17,9 @@ import { promisify } from 'node:util';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import type pg from 'pg';
 import { logEvent } from './events.ts';
+import type { SourceSync } from './appSync.ts';
+import { keepSourceFields } from '../src/lib/appSync.ts';
+import type { CustomerUser as FullCustomer } from '../src/data/types.ts';
 // The records as stored. The full shapes live in src/data/types.ts (the browser's); the server only relies on these fields.
 type AppId = string;
 interface AgentAccount {
@@ -157,6 +160,8 @@ async function upsertAgent(db: pg.Pool | pg.PoolClient, a: AgentAccount) {
 /** Two people working the same customer must not lose each other's calls: keep every call either side has. */
 export function mergeCustomer(stored: CustomerUser | undefined, incoming: CustomerUser): CustomerUser {
   if (!stored) return incoming;
+  // A customer linked to the product's own database: the browser's copy may be older than the last sync.
+  incoming = keepSourceFields(stored as unknown as FullCustomer, incoming as unknown as FullCustomer) as unknown as CustomerUser;
   // A browser that has not seen the deletion yet must not quietly bring the customer back; only an explicit `null` does.
   if (stored.deleted && incoming.deleted === undefined) incoming = { ...incoming, deleted: stored.deleted };
   if (incoming.deleted === null) delete incoming.deleted;
@@ -183,6 +188,8 @@ export interface StoreEnv {
   systemHealth?: () => Promise<Record<string, unknown>>;
   /** A live test of one dependency: 'database' | 'gemini' | 'telecmi'. */
   check?: (what: string) => Promise<{ ok: boolean; message: string; ms: number }>;
+  /** Customers synced from each product's own database (server/appSync.ts). */
+  sources?: SourceSync;
 }
 
 export interface Notice {
@@ -255,7 +262,7 @@ export function createStore(getPool: () => Promise<pg.Pool>, env: StoreEnv, read
   /** Handles a store route; false when the path is not one of them. */
   return async function handle(req: IncomingMessage, res: ServerResponse, url: URL): Promise<boolean> {
     const p = url.pathname;
-    if (!p.startsWith('/api/auth/') && p !== '/api/data' && !p.startsWith('/api/people') && !p.startsWith('/api/notices') && !p.startsWith('/api/notes') && p !== '/api/password-requests' && p !== '/api/events' && !p.startsWith('/api/system')) return false;
+    if (!p.startsWith('/api/auth/') && p !== '/api/data' && !p.startsWith('/api/people') && !p.startsWith('/api/notices') && !p.startsWith('/api/notes') && p !== '/api/password-requests' && p !== '/api/events' && !p.startsWith('/api/system') && p !== '/api/sources/lookup') return false;
     const pool = await getPool();
 
     if (req.method === 'GET' && p === '/api/auth/me') {
@@ -630,6 +637,16 @@ export function createStore(getPool: () => Promise<pg.Pool>, env: StoreEnv, read
     }
 
     // ── Super admin only ──────────────────────────────────────────────────────────────────────────────────────
+    // An incoming caller this browser doesn't know: does any product the agent works for?
+    if (req.method === 'POST' && p === '/api/sources/lookup') {
+      const me = await requireMe(req, pool);
+      const b = (await readJson(req)) as { phone?: unknown };
+      const phone = typeof b.phone === 'string' ? b.phone.slice(0, 40) : '';
+      const customer = env.sources?.configured ? await env.sources.lookup(phone, me.apps as FullCustomer['app'][]) : null;
+      send(res, 200, { customer });
+      return true;
+    }
+
     if (p.startsWith('/api/system')) {
       const me = await requireMe(req, pool);
       if (!me.superAdmin) throw new HttpError(403, 'Only the super admin can open this.');
@@ -669,6 +686,7 @@ export function createStore(getPool: () => Promise<pg.Pool>, env: StoreEnv, read
           health: env.systemHealth ? await env.systemHealth() : {},
           people,
           totals: { customers: Number(counts.customers), calls: Number(counts.calls), callsToday: Number(counts.calls_today) },
+          sources: env.sources?.configured ? await env.sources.status() : [],
         });
         return true;
       }
@@ -683,6 +701,14 @@ export function createStore(getPool: () => Promise<pg.Pool>, env: StoreEnv, read
         );
         logEvent({ level: 'info', source: 'system', message: `${me.name} turned the Change log ${next.changeLog ? 'on' : 'off'} for client admins and agents`, agentId: me.id, agentName: me.name });
         send(res, 200, { ok: true, visibility: next });
+        return true;
+      }
+
+      if (req.method === 'POST' && p === '/api/system/sources/sync') {
+        const b = (await readJson(req)) as { app?: unknown; full?: unknown };
+        if (!env.sources?.configured) throw new HttpError(501, 'No product is connected for customer sync.');
+        logEvent({ level: 'info', source: 'sync', message: `${me.name} started a ${b.full ? 'full ' : ''}${String(b.app)} sync`, agentId: me.id, agentName: me.name });
+        send(res, 200, await env.sources.run(String(b.app ?? '') as FullCustomer['app'], b.full === true));
         return true;
       }
 

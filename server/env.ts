@@ -3,6 +3,7 @@
 
 import path from 'node:path';
 import { brandKey, type BrandKey } from '../src/brand/profiles.ts';
+import { sourcesFromEnv, type SourceConfig } from './appSync.ts';
 
 export interface ServerEnv {
   telecmiAppId?: string;
@@ -22,6 +23,10 @@ export interface ServerEnv {
   publicHosts: string[];
   /** Asked for when the very first admin account is created (TCC_SETUP_CODE). Unset = the first visitor may create it. */
   setupCode?: string;
+  /** Products whose own database TCC syncs customers from (<APP>_API_URL + <APP>_API_KEY; server/appSync.ts). */
+  sources: SourceConfig[];
+  /** Minutes between change checks against those products (TCC_SOURCE_SYNC_MINUTES, default 10). */
+  sourceSyncMinutes: number;
 }
 
 const pick = (v: string | undefined) => (v && v.trim() ? v.trim() : undefined);
@@ -37,6 +42,8 @@ export function readServerEnv(vars: Record<string, string | undefined>, root: st
     dataDir: path.join(root, '.data'),
     brand: brandKey(vars.VITE_BRAND),
     setupCode: pick(vars.TCC_SETUP_CODE),
+    sources: sourcesFromEnv(vars),
+    sourceSyncMinutes: Number(pick(vars.TCC_SOURCE_SYNC_MINUTES)) || 10,
     publicHosts: (vars.TCC_PUBLIC_HOSTS ?? '').split(',').map((h) => h.trim().toLowerCase()).filter(Boolean),
   };
 }

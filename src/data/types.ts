@@ -1,7 +1,7 @@
-import type { MediaStats } from '../telephony';
-import type { CallAnalysis } from '../lib/analysis/model';
-import type { LevelSample } from '../lib/analysis/speakers';
-import { BRAND } from '../brand';
+import type { MediaStats } from '../telephony/core/types.ts';
+import type { CallAnalysis } from '../lib/analysis/model.ts';
+import type { LevelSample } from '../lib/analysis/speakers.ts';
+import { BRAND } from '../brand/index.ts';
 
 export type { CallAnalysis, LevelSample };
 
@@ -308,6 +308,31 @@ export interface CustomerUser {
   /** First call unanswered: TCC calls again every day for 14 days (src/lib/followUps.ts). Gone once they answer or the days run out. */
   autoFollowUp?: { startedTs: number; attempts: number };
   deleted?: { byId: string; byName: string; reason: string; ts: number; atLabel: string } | null;
+  /** Set when the customer comes from the product's own database (src/lib/appSync.ts): what TCC last took from it. */
+  sync?: SourceLink;
+}
+
+/** A customer as the product's own database last described them (the TCC Data API, docs/client-api-guide). */
+export interface SourceLink {
+  /** The product's own customer id. */
+  sourceId: string;
+  /** When TCC last changed this customer from the product's data (epoch ms). */
+  syncedAt: number;
+  accountStatus: 'active' | 'blocked' | 'deleted';
+  /** Furthest setup step reached: machine name and the product's label for it. */
+  stage: string | null;
+  stageLabel: string | null;
+  onboardingCompleted: boolean | null;
+  lastError: { code: string; message: string; at: string } | null;
+  registeredTs: number | null;
+  lastActiveTs: number | null;
+  platform: string | null;
+  email: string | null;
+  planName: string | null;
+  renewsTs: number | null;
+  /** The plan as last taken from the product. TCC's own plan fields follow it only when this changes, so an agent's
+   * "mark paid" is not undone by the next sync. */
+  plan: { plan: 'Free' | 'Paid'; paying: boolean; planNote?: string };
 }
 
 // The subset of CustomerUser that TCC itself owns and writes live to
