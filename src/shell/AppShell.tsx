@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { Activity, BarChart3, CalendarClock, ChevronDown, ClipboardList, Contact, Database, KeyRound, Flag, Headset, History, Home, LogOut, Map, NotebookPen, Phone, Repeat, RotateCcw, Search, Shuffle, Users, UsersRound } from 'lucide-react';
-import { BRAND_MARK } from '../assets';
+import { APP_LOGOS, BRAND_MARK } from '../assets';
 import { APPS } from '../data/seed';
 import type { AppId, Role } from '../data/types';
 import { useStore } from '../store/StoreContext';
@@ -218,6 +218,8 @@ export default function AppShell() {
   }, [state.users, visibleApps, currentAgent]);
 
   if (!currentAgent) return null;
+  // The product on show: the one picked in the header, else the one signed in to (nothing when looking across all).
+  const headerApp = APPS.length > 1 ? APPS.find((a) => a.id === (app === 'all' ? product : app)) : undefined;
   const pending = state.escalations.filter((e) => e.status === 'pending' && visibleApps.includes(e.app)).length;
   const firstLiveApp = visibleApps.find((id) => APPS.find((a) => a.id === id)?.live);
   const nav = navFor(currentAgent.role, pending, firstLiveApp, canAnywhere(currentAgent, 'export') || currentAgent.role !== 'agent', backend === 'server', currentAgent.superAdmin || visibility?.changeLog !== false, dueFollowUps);
@@ -228,13 +230,21 @@ export default function AppShell() {
     <ScopeContext.Provider value={scope}>
       <div className="shell">
         <aside className="shell-side">
-          <button type="button" className="shell-brand" onClick={() => navigate('/')} aria-label="Command Center home">
-            <img src={BRAND_MARK} alt="" />
-            <span>
-              <b>{BRAND.key === 'tecstellar' ? 'Tecstellar' : BRAND.title}</b>
-              <small>{APPS.length > 1 && product ? `${APPS.find((a) => a.id === product)?.name} · Calling desk` : 'Calling desk'}</small>
-            </span>
-          </button>
+          {headerApp ? (
+            // The product being worked in, large, so nobody has to wonder which one they're calling for.
+            <button type="button" className="shell-brand shell-brand--product" onClick={() => navigate('/')} aria-label={`${headerApp.name} calling desk, home`}>
+              <img src={APP_LOGOS[headerApp.id]} alt={headerApp.name} />
+              <small>Calling desk · {BRAND.key === 'tecstellar' ? 'Tecstellar' : BRAND.title}</small>
+            </button>
+          ) : (
+            <button type="button" className="shell-brand" onClick={() => navigate('/')} aria-label="Command Center home">
+              <img src={BRAND_MARK} alt="" />
+              <span>
+                <b>{BRAND.key === 'tecstellar' ? 'Tecstellar' : BRAND.title}</b>
+                <small>Calling desk</small>
+              </span>
+            </button>
+          )}
           <CustomerSearch apps={visibleApps} />
           <nav className="shell-nav" aria-label="Main">
             {nav.map((group, gi) => (
