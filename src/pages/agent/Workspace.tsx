@@ -30,6 +30,8 @@ import { customerTypesFor } from '../../data/products';
 import { Button, Callout, Card, Empty, Input, Textarea } from '../../ui/primitives';
 import { useToast } from '../../ui/toastContext';
 import './agent.css';
+import { CustomerName, FillDetailsButton } from '../../components/customers/CustomerDetails';
+import { nameUnknown, placeLine } from '../../lib/appSync';
 
 const STATUS_LABEL: Record<CallStatus, string> = {
   'Answered — DG': 'Answered — DG',
@@ -355,7 +357,7 @@ export default function Workspace() {
                 {list.slice(0, 60).map((u) => (
                   <TableRow key={u.id} data-state={u.id === user.id ? 'selected' : undefined} className="cursor-pointer" onClick={() => !callLive && !session.wrapUp && setParams({ focus: u.id }, { replace: true })}>
                     <TableCell>
-                      <div className="font-medium">{u.name}</div>
+                      <CustomerName user={u} />
                       <div className="mono muted" style={{ fontSize: 12 }}>{u.phone}</div>
                     </TableCell>
                     <TableCell>{u.customerType ? <UiBadge variant="outline">{u.customerType}</UiBadge> : <span className="muted">—</span>}</TableCell>
@@ -371,10 +373,13 @@ export default function Workspace() {
             <UiCard className="p-4">
               <div className="flex items-start justify-between gap-2">
                 <div style={{ minWidth: 0 }}>
-                  <h2 className="truncate">{user.name}</h2>
-                  <div className="muted">{user.business} · {user.city}, {user.effectiveState}</div>
+                  <h2 className="truncate">{nameUnknown(user) ? 'Name not given' : user.name}</h2>
+                  <div className="muted">{placeLine(user)}</div>
                 </div>
-                <span className="mono muted" style={{ fontSize: 12 }}>{user.shopCode}</span>
+                <div className="flex flex-col items-end gap-1.5">
+                  <span className="mono muted" style={{ fontSize: 12 }}>{user.shopCode}</span>
+                  <FillDetailsButton user={user} />
+                </div>
               </div>
               <div className="mt-3 flex flex-wrap gap-1.5">
                 <UiBadge variant="outline">{LANGUAGE_SCRIPT[user.language]}{user.language !== 'English' ? ` · ${user.language}` : ''}</UiBadge>

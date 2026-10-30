@@ -15,6 +15,7 @@ import { AUTO_FOLLOWUP_DAYS, addDays, chainDay, dayFromInput, inRange, inputFrom
 import { LeadBadge, OutcomeBadge } from '../components/calls/badges';
 import { Button, Card, Chip, Empty, Input, PageHead, Select } from '../ui/primitives';
 import { Pager, usePaged } from '../ui/Pager';
+import { CustomerName } from '../components/customers/CustomerDetails';
 
 const RANGES: { key: FollowUpRange; label: string }[] = [
   { key: 'overdue', label: 'Overdue' },
@@ -172,7 +173,7 @@ export default function FollowUps() {
                   return (
                     <TableRow key={u.id} className="cursor-pointer" onClick={() => navigate(`/customers/${u.id}`)}>
                       <TableCell>
-                        <div className="font-medium">{u.name}</div>
+                        <CustomerName user={u} />
                         <div className="mono muted" style={{ fontSize: 12 }}>{u.phone}</div>
                       </TableCell>
                       {multiApp && <TableCell>{APPS.find((a) => a.id === u.app)?.name}</TableCell>}

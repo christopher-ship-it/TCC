@@ -16,6 +16,7 @@ import { Chip, Empty, Input, PageHead, Button } from '../ui/primitives';
 import { isConnected } from '../lib/metrics';
 import { useToast } from '../ui/toastContext';
 import { Pager, usePaged } from '../ui/Pager';
+import { CustomerName } from '../components/customers/CustomerDetails';
 
 export default function Customers() {
   const { state, currentAgent } = useStore();
@@ -89,7 +90,7 @@ export default function Customers() {
               {pageRows.map((u) => (
                 <TableRow key={u.id} className="cursor-pointer" onClick={() => navigate(`/customers/${u.id}`)}>
                   <TableCell>
-                    <div className="font-medium">{u.name}</div>
+                    <CustomerName user={u} />
                     <div className="mono muted" style={{ fontSize: 12 }}>{u.phone}</div>
                   </TableCell>
                   {apps.length > 1 && <TableCell>{APPS.find((a) => a.id === u.app)?.name}</TableCell>}

@@ -310,7 +310,12 @@ export interface CustomerUser {
   deleted?: { byId: string; byName: string; reason: string; ts: number; atLabel: string } | null;
   /** Set when the customer comes from the product's own database (src/lib/appSync.ts): what TCC last took from it. */
   sync?: SourceLink;
+  /** Details an agent typed in because the product had none (name, shop, city). Kept until the product sends its own. */
+  filledIn?: { fields: DetailField[]; byName: string; ts: number };
 }
+
+/** The customer details an agent may fill in when the product's database has them empty. */
+export type DetailField = 'name' | 'business' | 'city';
 
 /** A customer as the product's own database last described them (the TCC Data API, docs/client-api-guide). */
 export interface SourceLink {
@@ -330,6 +335,8 @@ export interface SourceLink {
   email: string | null;
   planName: string | null;
   renewsTs: number | null;
+  /** Details the product's database had empty at the last sync, so an agent may fill them in. Unset on older syncs. */
+  missing?: DetailField[];
   /** The plan as last taken from the product. TCC's own plan fields follow it only when this changes, so an agent's
    * "mark paid" is not undone by the next sync. */
   plan: { plan: 'Free' | 'Paid'; paying: boolean; planNote?: string };

@@ -8,7 +8,7 @@
 //    plan changes, so an agent's "mark paid" stands until the product says otherwise.
 //  - TCC owns everything its people do: calls, notes, owner, follow-ups, positive/negative, customer type, language.
 //    The queue and stage tag come from the product only while nobody in TCC has worked the customer yet.
-import type { AppId, CustomerUser, Language, PaymentDue, QueueKey, SourceLink, TicketRecord } from '../data/types.ts';
+import type { AppId, CustomerUser, DetailField, Language, PaymentDue, QueueKey, SourceLink, TicketRecord } from '../data/types.ts';
 import { customerTypesFor } from '../data/products.ts';
 import { TECSTELLAR_STATES } from '../data/states.ts';
 import { normalizePhone } from '../telephony/core/phone-number.ts';
@@ -185,9 +185,12 @@ export function applySource(
   const since = registered ?? [lastActive, ts(src.usage?.last_action_at)].filter((t): t is number => t !== null).sort((a, b) => a - b)[0] ?? now;
   const business = clean(src.business_name);
   const plan = planOf(src);
+  const missing = (['name', 'business', 'city'] as const).filter((f) => !clean(f === 'name' ? src.name : f === 'business' ? src.business_name : src.city));
+  // What an agent typed in stays while the product still has nothing for that detail.
+  const typed = (existing?.filledIn?.fields ?? []).filter((f) => missing.includes(f));
 
   const profile: Pick<CustomerUser, (typeof SOURCE_PROFILE_FIELDS)[number]> = {
-    name: clean(src.name) ?? business ?? existing?.name ?? `+${digits}`,
+    name: clean(src.name) ?? (typed.includes('name') ? existing!.name : business ?? existing?.name ?? `+${digits}`),
     business: business ?? (existing && !existing.adHoc ? existing.business : 'Customer'),
     city: clean(src.city) ?? (existing && !existing.adHoc ? existing.city : '—'),
     state,
@@ -215,6 +218,7 @@ export function applySource(
     email: clean(src.email),
     planName: clean(src.plan?.name),
     renewsTs: ts(src.plan?.renews_at),
+    missing,
     plan,
   };
 
@@ -249,6 +253,11 @@ export function applySource(
   };
 
   const next: CustomerUser = { ...base, ...profile, app, adHoc: false, sync: link };
+  // Once the product sends a detail an agent filled in, the product's wins and the note of who typed it goes.
+  if (existing?.filledIn) {
+    if (typed.length) next.filledIn = { ...existing.filledIn, fields: typed };
+    else delete next.filledIn;
+  }
   // A dialled-in or incoming-call record becomes the real customer: it keeps its calls, and gets a proper language.
   if (!existing || existing.adHoc) next.language = languageOf(src.preferred_language, stateLanguage, state !== null);
   const planChanged = !existing?.sync || SOURCE_PLAN_FIELDS.some((f) => existing.sync!.plan[f] !== plan[f]);
@@ -316,6 +325,14 @@ export function keepSourceFields(stored: CustomerUser, incoming: CustomerUser): 
     else out[k] = stored[k];
   };
   for (const f of SOURCE_PROFILE_FIELDS) put(f);
+  // Except the details the product has none of: there an agent's latest entry stands, filled in or cleared (fillDetails).
+  // A browser that never touched them sends no newer `filledIn`, so it can't undo someone else's entry.
+  const typed = incoming.filledIn;
+  if (typed && typed.ts >= (stored.filledIn?.ts ?? 0)) {
+    const open = editableDetails(stored);
+    for (const f of open) if (typed.fields.includes(f) || stored.filledIn?.fields.includes(f)) out[f] = incoming[f];
+  } else if (stored.filledIn) out.filledIn = stored.filledIn;
+  else delete out.filledIn;
   if ((incoming.sync?.syncedAt ?? 0) < stored.sync.syncedAt) {
     const seen = incoming.sync?.plan;
     if (!seen || SOURCE_PLAN_FIELDS.every((f) => incoming[f] === seen[f])) for (const f of SOURCE_PLAN_FIELDS) put(f);
@@ -324,5 +341,49 @@ export function keepSourceFields(stored: CustomerUser, incoming: CustomerUser): 
   out.sync = stored.sync;
   return out;
 }
+
+const PHONE_ONLY = /^\+?[\d\s-]{7,}$/;
+
+/** True when TCC knows nothing but the customer's number: the product has no name or shop for them, and no one has added one. */
+export const nameUnknown = (u: Pick<CustomerUser, 'name' | 'sync'>): boolean => !!u.sync && PHONE_ONLY.test(u.name.trim());
+
+/**
+ * The details an agent may fill in for a synced customer: the ones the product had empty at the last sync, plus any an
+ * agent already filled. (Customers synced before `missing` was recorded: judged by the placeholders the sync left.)
+ */
+export function editableDetails(u: Pick<CustomerUser, 'name' | 'business' | 'city' | 'sync' | 'filledIn'>): DetailField[] {
+  if (!u.sync) return [];
+  const missing = u.sync.missing ?? (['name', 'business', 'city'] as const).filter((f) => (f === 'name' ? PHONE_ONLY.test(u.name.trim()) : f === 'business' ? u.business === 'Customer' : u.city === '—'));
+  return (['name', 'business', 'city'] as const).filter((f) => missing.includes(f) || u.filledIn?.fields.includes(f));
+}
+
+/**
+ * The change that saves an agent's entries for a customer's missing details. An empty entry puts the placeholder back.
+ * With only a shop name, the shop stands in as the name (as it does when the product sends a shop and no name).
+ */
+export function fillDetails(u: CustomerUser, entry: Partial<Record<DetailField, string>>, byName: string, now = Date.now()): Partial<CustomerUser> {
+  const open = editableDetails(u);
+  const fields = new Set(u.filledIn?.fields ?? []);
+  const patch: Partial<CustomerUser> = {};
+  const placeholder: Record<DetailField, string> = { name: u.phone, business: 'Customer', city: '—' };
+  for (const f of open) {
+    if (entry[f] === undefined) continue;
+    const v = entry[f]!.trim().replace(/\s+/g, ' ').slice(0, 120);
+    patch[f] = v || placeholder[f];
+    if (v) fields.add(f);
+    else fields.delete(f);
+  }
+  if (!fields.has('name') && open.includes('name') && fields.has('business') && PHONE_ONLY.test((patch.name ?? u.name).trim())) {
+    patch.name = patch.business ?? u.business;
+    fields.add('name');
+  }
+  // Always set, even with nothing left filled in: an empty list is how a cleared entry reaches the server.
+  patch.filledIn = { fields: (['name', 'business', 'city'] as const).filter((f) => fields.has(f)), byName, ts: now };
+  return patch;
+}
+
+/** "Ravi Ironing · Coimbatore, Tamil Nadu", leaving out the placeholders the sync uses for details the product lacks. */
+export const placeLine = (u: Pick<CustomerUser, 'business' | 'city' | 'effectiveState'>): string =>
+  [u.business !== 'Customer' && u.business, [u.city !== '—' && u.city, u.effectiveState].filter(Boolean).join(', ')].filter(Boolean).join(' · ');
 
 export { tail as phoneTail };

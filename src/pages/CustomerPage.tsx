@@ -23,6 +23,8 @@ import { Badge, Button, Callout, Card, Empty, Field, PageHead, Select, Stat, Tex
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { useToast } from '../ui/toastContext';
 import './customer.css';
+import { FillDetailsButton, filledInNote } from '../components/customers/CustomerDetails';
+import { nameUnknown, placeLine } from '../lib/appSync';
 
 export default function CustomerPage() {
   const { id } = useParams<{ id: string }>();
@@ -62,15 +64,16 @@ export default function CustomerPage() {
         eyebrow={<button type="button" className="btn btn--link" onClick={() => navigate(-1)}>← Back</button>}
         title={
           <span className="row" style={{ gap: 12 }}>
-            {user.name}
+            {nameUnknown(user) ? 'Name not given' : user.name}
             <Badge tone={verdict.tone}>{verdict.label}</Badge>
             <LeadBadge lead={user.lead} />
           </span>
         }
-        desc={user.manual ? [user.phone, user.business, user.city].filter((x) => x && x !== '—').join(' · ') : `${user.business} · ${user.city}, ${user.effectiveState} · ${user.phone}`}
+        desc={user.manual ? [user.phone, user.business, user.city].filter((x) => x && x !== '—').join(' · ') : `${placeLine(user)} · ${user.phone}${filledInNote(user) ? ` · ${filledInNote(user)}` : ''}`}
         actions={
           <>
-            {canCall && !gone && <Button variant="primary" icon={<Headset size={16} />} onClick={() => navigate(`/work/${user.app}?${user.queue ? `queue=${user.queue}&` : ''}focus=${user.id}`)}>Call {user.name.split(' ')[0]}</Button>}
+            {canCall && !gone && <Button variant="primary" icon={<Headset size={16} />} onClick={() => navigate(`/work/${user.app}?${user.queue ? `queue=${user.queue}&` : ''}focus=${user.id}`)}>{nameUnknown(user) ? 'Call' : `Call ${user.name.split(' ')[0]}`}</Button>}
+            {!gone && <FillDetailsButton user={user} size="md" />}
             {!gone && <Button icon={<Trash2 size={15} />} onClick={() => setRemoving(true)}>Delete</Button>}
             {can(agent, user.app, 'tickets') && !gone && <Button icon={<Ticket size={15} />} onClick={() => setTicket(true)}>Raise ticket</Button>}
             {user.paymentDue && !gone && can(agent, user.app, 'payments') && (

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { applySource, keepSourceFields, pickPerNumber, sameCustomer, sourceQueue, type SourceCustomer, type SourceMeta } from '../appSync.ts';
+import { applySource, editableDetails, fillDetails, keepSourceFields, nameUnknown, pickPerNumber, sameCustomer, sourceQueue, type SourceCustomer, type SourceMeta } from '../appSync.ts';
 import { adHocCustomer } from '../directDial.ts';
 import type { CustomerUser } from '../../data/types.ts';
 
@@ -159,4 +159,49 @@ test('a browser saving an older copy can’t undo the sync, but keeps what the a
   // Not linked to a product: untouched.
   const plain = { ...v1, sync: undefined };
   assert.equal(keepSourceFields(plain, { ...plain, name: 'X' }).name, 'X');
+});
+
+test('a customer the product knows only by number: an agent fills in the details, and the product’s own win later', () => {
+  const bare = { name: null, business_name: null, city: null, state: null };
+  const c = ok(applySource(undefined, src(bare), 'irondrobe', META, NOW));
+  assert.deepEqual([c.name, c.business, c.city], ['+919876543210', 'Customer', '—']);
+  assert.deepEqual(c.sync?.missing, ['name', 'business', 'city']);
+  assert.ok(nameUnknown(c));
+
+  // The agent types a name and shop on the call; a later sync with still nothing keeps them.
+  const filled = { ...c, ...fillDetails(c, { name: 'Ravi', business: 'Ravi Ironing', city: '' }, 'Priya', NOW) } as CustomerUser;
+  assert.deepEqual([filled.name, filled.business, filled.city, filled.filledIn?.fields], ['Ravi', 'Ravi Ironing', '—', ['name', 'business']]);
+  assert.ok(!nameUnknown(filled));
+  const again = ok(applySource(filled, src(bare), 'irondrobe', META, NOW + 600_000));
+  assert.deepEqual([again.name, again.business, again.filledIn?.byName], ['Ravi', 'Ravi Ironing', 'Priya']);
+
+  // The product gets a name: theirs wins, and the note says only the shop is still the agent's.
+  const named = ok(applySource(again, src({ ...bare, name: 'Ravi Shankar' }), 'irondrobe', META, NOW + 1_200_000));
+  assert.deepEqual([named.name, named.business, named.filledIn?.fields], ['Ravi Shankar', 'Ravi Ironing', ['business']]);
+  assert.deepEqual(editableDetails(named), ['business', 'city']);
+});
+
+test('only a shop typed in: the shop stands in as the name', () => {
+  const c = ok(applySource(undefined, src({ name: null, business_name: null }), 'irondrobe', META, NOW));
+  const patch = fillDetails(c, { business: 'Lakshmi Laundry' }, 'Priya', NOW);
+  assert.deepEqual([patch.name, patch.business, patch.filledIn?.fields], ['Lakshmi Laundry', 'Lakshmi Laundry', ['name', 'business']]);
+  assert.deepEqual(editableDetails(c), ['name', 'business'], 'the city came from the product, so it is not the agent’s to change');
+});
+
+test('the server keeps an agent’s details, a cleared entry, and never lets a stale browser undo them', () => {
+  const stored = ok(applySource(undefined, src({ name: null, business_name: null, city: null }), 'irondrobe', META, NOW));
+  // A browser edit to a detail the product has: refused. To a missing one, with the agent's note: kept.
+  const typed = { ...stored, ...fillDetails(stored, { name: 'Ravi' }, 'Priya', NOW + 1), state: 'Kerala' } as CustomerUser;
+  const saved = keepSourceFields(stored, typed);
+  assert.equal(saved.name, 'Ravi');
+  assert.equal(saved.state, stored.state);
+  // A stale browser (no note) sends the old placeholder along with its own change: the name stays.
+  const stale = keepSourceFields(saved, { ...stored, lead: 'positive' });
+  assert.deepEqual([stale.name, stale.lead, stale.filledIn?.fields], ['Ravi', 'positive', ['name']]);
+  // Clearing it puts the number back.
+  const cleared = keepSourceFields(saved, { ...saved, ...fillDetails(saved, { name: '' }, 'Priya', NOW + 2) } as CustomerUser);
+  assert.deepEqual([cleared.name, cleared.filledIn?.fields], ['+919876543210', []]);
+  // Customers synced before the missing list was kept: judged from the placeholders.
+  const { missing: _m, ...oldLink } = stored.sync!;
+  assert.deepEqual(editableDetails({ ...stored, sync: oldLink as CustomerUser['sync'] }), ['name', 'business', 'city']);
 });
