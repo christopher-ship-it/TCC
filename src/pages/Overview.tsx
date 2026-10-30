@@ -16,6 +16,7 @@ import { MetricChart } from '../ui/MetricChart';
 import { BarList } from '../ui/charts';
 import { CallRowItem } from '../components/calls/CallRowItem';
 import { PageHead } from '../ui/primitives';
+import { SuperAdminTotals } from './admin/Totals';
 
 /** A fresh deployment: what to do first, ticked off as it happens. Gone once someone has made a call. */
 function GettingStarted() {
@@ -52,7 +53,7 @@ function GettingStarted() {
 }
 
 export default function Overview() {
-  const { state } = useStore();
+  const { state, currentAgent } = useStore();
   const { apps } = useScope();
   const [open, setOpen] = useState<AgentScore | null>(null);
 
@@ -71,6 +72,8 @@ export default function Overview() {
     <div className="page">
       <PageHead title="Overview" desc="What the calling team did today. Click an agent for the detail." />
       <GettingStarted />
+      {currentAgent?.superAdmin && <SuperAdminTotals />}
+      {currentAgent?.superAdmin && <h2 className="text-base font-semibold" style={{ marginTop: 8 }}>Today</h2>}
 
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         {[

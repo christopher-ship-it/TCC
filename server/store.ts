@@ -11,6 +11,7 @@
 //   POST /api/people                  → { agent, password } — adds a person with their login
 //   POST /api/people/:id/password     → { password } — sets a person's password
 //   GET/POST /api/notes, DELETE /api/notes/:id → an agent's own notes, and notes admins leave for every agent
+//   GET  /api/system/counts           → { notes: [{ app, audience, count }] } — for the super admin's overview
 
 import crypto from 'node:crypto';
 import { promisify } from 'node:util';
@@ -710,6 +711,13 @@ export function createStore(getPool: () => Promise<pg.Pool>, env: StoreEnv, read
         );
         logEvent({ level: 'info', source: 'system', message: `${me.name} turned the Change log ${next.changeLog ? 'on' : 'off'} for client admins and agents`, agentId: me.id, agentName: me.name });
         send(res, 200, { ok: true, visibility: next });
+        return true;
+      }
+
+      // Counts for the super admin's overview that the browser doesn't hold itself: notes are fetched per person.
+      if (req.method === 'GET' && p === '/api/system/counts') {
+        const notes = (await pool.query<{ app: string | null; audience: string; n: string }>("select nullif(doc->>'app', '') as app, audience, count(*) as n from notes group by 1, 2")).rows;
+        send(res, 200, { notes: notes.map((r) => ({ app: r.app, audience: r.audience, count: Number(r.n) })) });
         return true;
       }
 
