@@ -1,7 +1,7 @@
 import type { CallDirection, Credentials, MediaStats, Meta, ProviderEvent, TelephonyProvider } from '../../core/types.ts';
 import { acquireMicrophone, isVirtualInput } from '../../core/microphone.ts';
 import type { RecordingQuery } from '../../core/types.ts';
-import { fetchIncomingCdr, fetchOutgoingCdr, fetchUserToken, pickRecording } from './cdr.ts';
+import { describeMiss, fetchIncomingCdr, fetchOutgoingCdr, fetchUserToken, pickRecording } from './cdr.ts';
 
 /** Regional signalling hosts from TeleCMI's Browser SDK docs. */
 export const TELECMI_REGIONS = {
@@ -359,6 +359,8 @@ export class TeleCmiProvider implements TelephonyProvider {
   private userToken: string | null = null;
   private trace: { remote: string; startedAt: number; answeredAt: number | null; direction: CallDirection } | null = null;
   private readonly claimedRecordings = new Set<string>();
+  /** Why the last findRecording() found nothing, in words (for the event log). */
+  lookupNote = '';
   /** Newest merged sample from the poll + the SDK's own sampler; re-emitted with 'ended'. */
   private lastStats: MediaStats | null = null;
   /** Who was loud when, one entry per stats sample after answer — see MediaStats.timeline. */
@@ -445,12 +447,24 @@ export class TeleCmiProvider implements TelephonyProvider {
   /** The recording for a finished call: asks the agent's own call records (`out_cdr`, or `in_cdr` for a call they
    *  took) and matches on the other party's number + start time. */
   async findRecording(q: RecordingQuery): Promise<string | undefined> {
-    if (!this.userToken) return undefined;
+    this.lookupNote = '';
+    if (!this.userToken) {
+      this.lookupNote = 'no TeleCMI REST token (softphone REST login failed or expired) — call records cannot be read';
+      return undefined;
+    }
+    const kind = q.direction === 'inbound' ? 'in_cdr' : 'out_cdr';
     const fetchCdr = q.direction === 'inbound' ? fetchIncomingCdr : fetchOutgoingCdr;
-    const entries = await fetchCdr(this.userToken, q.startedAt - 5 * 60_000, q.startedAt + 10 * 60_000);
+    let entries: Awaited<ReturnType<typeof fetchOutgoingCdr>>;
+    try {
+      entries = await fetchCdr(this.userToken, q.startedAt - 5 * 60_000, q.startedAt + 10 * 60_000);
+    } catch (e) {
+      this.lookupNote = `${kind} request failed: ${e instanceof Error ? e.message : String(e)}`;
+      throw e;
+    }
     const file = pickRecording(entries, q, this.claimedRecordings);
     if (file) this.claimedRecordings.add(file);
-    if (this.config.debug) console.debug(`[phone] ${q.direction === 'inbound' ? 'in_cdr' : 'out_cdr'}`, { returned: entries.length, picked: file ?? null });
+    else this.lookupNote = describeMiss(kind, entries, q, this.claimedRecordings);
+    if (this.config.debug) console.debug(`[phone] ${kind}`, { returned: entries.length, picked: file ?? null, note: this.lookupNote });
     return file;
   }
 

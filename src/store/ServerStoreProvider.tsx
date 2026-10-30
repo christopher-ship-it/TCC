@@ -75,7 +75,7 @@ function mergeIn<T extends { id: string }>(cur: T[], incoming: T[], unsaved: Map
 }
 
 /** Tells the super admin about a problem in this browser. Best effort; never throws. */
-function report(level: 'warn' | 'error', message: string, detail?: unknown) {
+export function report(level: 'warn' | 'error', message: string, detail?: unknown) {
   void fetch('/api/events', { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ level, message: message.slice(0, 500), detail: { page: location.hash, ...((detail as object) ?? {}) } }) }).catch(() => {});
 }
 

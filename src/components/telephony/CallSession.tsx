@@ -9,7 +9,7 @@ import type { CustomerUser } from '../../data/types';
 import { hasRealRecording } from '../../lib/attachRecording';
 import { DEFAULT_COUNTRY_CODE, LIVE_DIAL_BLOCKED, callMeta, isRealNumber, dialNumberFor, suggestStatus, telephonyProvider, toCallTelephony } from '../../lib/telephony';
 import { lookupCaller, resolveCaller } from '../../lib/inbound';
-import { serverStoreEnabled } from '../../store/ServerStoreProvider';
+import { report, serverStoreEnabled } from '../../store/ServerStoreProvider';
 import { announcePresence } from '../../lib/presence';
 import { can } from '../../lib/access';
 import { APPS } from '../../data/seed';
@@ -27,7 +27,8 @@ const DIAL_ERROR = {
   'call-in-progress': 'Finish the current call first.',
 } as const;
 
-const LOOKUP_DELAYS_MS = [15_000, 60_000, 180_000, 600_000];
+// TeleCMI can take well over 10 minutes to publish a recording, so keep asking (every 10 min) for the rest of the 24 h window.
+const LOOKUP_DELAYS_MS = [15_000, 60_000, 180_000, 600_000, ...Array.from({ length: 12 }, (_, i) => 900_000 + i * 600_000)];
 
 function Session({ children }: { children: ReactNode }) {
   const { controller, snapshot } = useTelephony();
@@ -120,9 +121,15 @@ function Session({ children }: { children: ReactNode }) {
         const tries = lookups.current.get(call.id) ?? 0;
         if (tries >= LOOKUP_DELAYS_MS.length || Date.now() - call.atTs < LOOKUP_DELAYS_MS[tries]) continue;
         lookups.current.set(call.id, tries + 1);
-        void controller.findRecording({ remote: t.remote, startedAt: t.startedAt, talkSeconds: t.durationSec, direction: t.direction }).then((file) => {
-          if (file) dispatch({ type: 'ATTACH_RECORDING', file, entryId: call.id });
-        });
+        void controller
+          .findRecording({ remote: t.remote, startedAt: t.startedAt, talkSeconds: t.durationSec, direction: t.direction })
+          .then((file) => {
+            if (file) return dispatch({ type: 'ATTACH_RECORDING', file, entryId: call.id });
+            const note = controller.lastLookupNote || 'no reason given';
+            console.warn(`[phone] No recording found for call ${call.id} (lookup ${tries + 1}/${LOOKUP_DELAYS_MS.length}): ${note}`);
+            // The super admin's event log gets the first, a middle and the last attempt — enough to see why, without noise.
+            if (serverStoreEnabled && (tries === 0 || tries === 3 || tries === LOOKUP_DELAYS_MS.length - 1)) report('warn', `Recording not found (lookup ${tries + 1}/${LOOKUP_DELAYS_MS.length}): ${note}`, { callId: call.id, remote: t.remote?.slice(-4), startedAt: t.startedAt });
+          });
       }
     };
     tick();

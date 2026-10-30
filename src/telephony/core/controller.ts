@@ -156,12 +156,18 @@ export class PhoneController {
     }
   }
 
+  /** Why the last findRecording() came back empty, when the provider can say. */
+  lastLookupNote = '';
+
   /** Ask the provider for the recording of a finished call. Resolves to a file name, or undefined when unknown / unsupported. */
   async findRecording(query: RecordingQuery): Promise<string | undefined> {
+    this.lastLookupNote = '';
     try {
       return await this.provider.findRecording?.(query);
     } catch {
       return undefined;
+    } finally {
+      this.lastLookupNote = (this.provider as { lookupNote?: string }).lookupNote ?? '';
     }
   }
 

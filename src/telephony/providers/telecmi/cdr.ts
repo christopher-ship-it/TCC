@@ -73,6 +73,18 @@ export function pickRecording(entries: CdrEntry[], q: RecordingQuery, claimed: R
   return best?.file;
 }
 
+/** Why no record matched, for the event log: how many came back and how far off the closest one was. */
+export function describeMiss(kind: string, entries: CdrEntry[], q: RecordingQuery, claimed: ReadonlySet<string> = new Set()): string {
+  if (!entries.length) return `${kind} returned no records with a recording between 5 min before and 10 min after the call started`;
+  const want = tail(q.remote);
+  const rows = entries.slice(0, 5).map((e) => {
+    const party = q.direction === 'inbound' ? e.from : e.to;
+    const dt = e.timeMs === undefined ? 'no time' : `${Math.round((e.timeMs - q.startedAt) / 1000)}s`;
+    return `${tail(party) === want ? 'same number' : `other number …${tail(party).slice(-4)}`}, ${dt} from start${claimed.has(e.filename) ? ', already used' : ''}`;
+  });
+  return `${kind} returned ${entries.length} record(s), none matched (window ±${WINDOW_MS / 1000}s): ${rows.join(' | ')}`;
+}
+
 export async function fetchUserToken(id: string, password: string, fetchImpl: typeof fetch = fetch): Promise<string | null> {
   try {
     const res = await fetchImpl(`${TELECMI_REST}/user/login`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id, password }) });
