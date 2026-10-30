@@ -8,7 +8,7 @@ import { BRAND, outcomeLabel } from '../../brand';
 
 const F = BRAND.fields;
 import { CALL_STATUS_LIST, NEGATIVE_OUTCOMES, OUTCOME_LIST, POSITIVE_OUTCOMES, QUEUES, type AppId, type CallStatus, type Outcome, type QueueKey } from '../../data/types';
-import { queueCounts, tasksForQueue } from '../../lib/queue';
+import { outOfReach, queueCounts, tasksForQueue } from '../../lib/queue';
 import { queueNote } from '../../lib/queueNotes';
 import { whyInQueue } from '../../lib/whyInQueue';
 import { can, LANGUAGE_SCRIPT } from '../../lib/access';
@@ -96,6 +96,8 @@ export default function Workspace() {
   const types = appId ? customerTypesFor(appId) : [];
   const queueTasks = useMemo(() => (appId && selectedQueue ? tasksForQueue(agent, state.users, appId, selectedQueue).filter((u) => !skipped.has(u.id)) : []), [agent, state.users, appId, selectedQueue, skipped]);
   const list = useMemo(() => (typeFilter === 'All' ? queueTasks : queueTasks.filter((u) => u.customerType === typeFilter)), [queueTasks, typeFilter]);
+  // Only worked out when this person has nothing to call: why the product's other customers aren't theirs.
+  const unreachable = useMemo(() => (appId && queueTasks.length === 0 ? outOfReach(agent, state.users, appId) : null), [agent, state.users, appId, queueTasks.length]);
   const focusId = params.get('focus');
   // The customer on a live or unlogged call stays on screen even after leaving the queue.
   const pinnedId = session.liveCustomerId ?? session.wrapUp?.customerId ?? null;
@@ -318,9 +320,22 @@ export default function Workspace() {
 
       {!user ? (
         <UiCard>
-          <Empty icon={<Inbox size={24} />} title="All caught up">
+          <Empty icon={<Inbox size={24} />} title={unreachable && unreachable.total > 0 ? 'Nothing for you to call here' : 'All caught up'}>
             Nothing left in {QUEUES.find((q) => q.key === selectedQueue)?.label ?? 'this queue'} for {app.name}{typeFilter !== 'All' ? ` as ${typeFilter}` : ''} in your languages and states.
             {skipped.size > 0 && <> You skipped {skipped.size}. <button type="button" className="btn btn--link" onClick={() => setSkipped(new Set())}>Bring them back</button></>}
+            {unreachable && unreachable.total > 0 && (
+              <div className="mt-3" style={{ textAlign: 'left' }}>
+                <Callout tone="accent">
+                  {unreachable.total.toLocaleString('en-IN')} {app.name} customer{unreachable.total === 1 ? ' is' : 's are'} waiting where your account doesn’t reach:
+                  <ul style={{ margin: '6px 0 0 18px', listStyle: 'disc' }}>
+                    {QUEUES.filter((q) => unreachable.lists[q.key]).map((q) => <li key={q.key}>{unreachable.lists[q.key]!.toLocaleString('en-IN')} in {q.label}, a list you aren’t given</li>)}
+                    {unreachable.states > 0 && <li>{unreachable.states.toLocaleString('en-IN')} in states you don’t cover</li>}
+                    {unreachable.languages > 0 && <li>{unreachable.languages.toLocaleString('en-IN')} who speak a language you don’t</li>}
+                  </ul>
+                  <div style={{ marginTop: 6 }}>Ask your admin to add these to your account under People.</div>
+                </Callout>
+              </div>
+            )}
             {addFirst && <div className="mt-3"><UiButton onClick={() => setAdding(true)}><UserPlus /> Add a customer to call</UiButton></div>}
           </Empty>
         </UiCard>

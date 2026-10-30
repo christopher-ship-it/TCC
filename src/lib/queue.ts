@@ -1,5 +1,5 @@
-import type { AgentAccount, AppId, CustomerUser, QueueKey } from '../data/types';
-import { callbackIsDue, startOfDay } from './followUps';
+import type { AgentAccount, AppId, CustomerUser, QueueKey } from '../data/types.ts';
+import { callbackIsDue, startOfDay } from './followUps.ts';
 
 export function isReachable(agent: AgentAccount, user: CustomerUser): boolean {
   if (!agent.apps.includes(user.app)) return false;
@@ -89,4 +89,24 @@ export function reachableCount(scope: Pick<AgentAccount, 'apps' | 'languages' | 
     n++;
   }
   return n;
+}
+
+/**
+ * Customers of one product waiting in a call list that this person can't see, and the first reason why: the list isn't
+ * on their account, or the customer's state or language isn't. Shown when their own lists are empty, so "nothing to
+ * call" never hides "your account doesn't cover these customers".
+ */
+export function outOfReach(agent: AgentAccount, users: CustomerUser[], appId: AppId, now = Date.now()): { lists: Partial<Record<QueueKey, number>>; states: number; languages: number; total: number } {
+  const out = { lists: {} as Partial<Record<QueueKey, number>>, states: 0, languages: 0, total: 0 };
+  if (!agent.apps.includes(appId)) return out;
+  for (const u of users) {
+    if (u.app !== appId || u.manual || u.adHoc) continue;
+    const q = queueOf(u, now);
+    if (!q || isReachable(agent, u) && agent.queues.includes(q)) continue;
+    out.total++;
+    if (!agent.queues.includes(q)) out.lists[q] = (out.lists[q] ?? 0) + 1;
+    else if (!agent.states.includes(u.effectiveState)) out.states++;
+    else out.languages++;
+  }
+  return out;
 }
