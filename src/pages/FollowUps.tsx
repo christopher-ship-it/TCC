@@ -14,6 +14,7 @@ import { can } from '../lib/access';
 import { AUTO_FOLLOWUP_DAYS, addDays, chainDay, dayFromInput, inRange, inputFromDay, isFollowUpOf, rangeBounds, scheduledFollowUps, startOfDay, type FollowUpRange, type ScheduledFollowUp } from '../lib/followUps';
 import { LeadBadge, OutcomeBadge } from '../components/calls/badges';
 import { Button, Card, Chip, Empty, Input, PageHead, Select } from '../ui/primitives';
+import { Pager, usePaged } from '../ui/Pager';
 
 const RANGES: { key: FollowUpRange; label: string }[] = [
   { key: 'overdue', label: 'Overdue' },
@@ -81,11 +82,15 @@ export default function FollowUps() {
   const shown = scoped.filter((f) => inRange(f.dueTs, bounds));
   const count = (r: FollowUpRange) => scoped.filter((f) => inRange(f.dueTs, rangeBounds(r, now, customRange))).length;
 
+  // One page of follow-ups at a time, still grouped by day; a day's heading counts all of that day's, not just the page's.
+  const { items: pageItems, pager } = usePaged(shown, `${range}|${from}|${to}|${lead}|${who}|${apps.join()}`);
+  const perDay = new Map<number, number>();
+  for (const f of shown) perDay.set(f.dueTs, (perDay.get(f.dueTs) ?? 0) + 1);
   const days = useMemo(() => {
     const map = new Map<number, ScheduledFollowUp[]>();
-    for (const f of shown) map.set(f.dueTs, [...(map.get(f.dueTs) ?? []), f]);
+    for (const f of pageItems) map.set(f.dueTs, [...(map.get(f.dueTs) ?? []), f]);
     return [...map.entries()];
-  }, [shown]);
+  }, [pageItems]);
 
   const multiApp = apps.length > 1;
   const callable = (u: CustomerUser) => isAgent && can(me, u.app, 'call');
@@ -147,7 +152,7 @@ export default function FollowUps() {
         </Card>
       ) : (
         days.map(([dueTs, list]) => (
-          <Card key={dueTs} title={dayTitle(dueTs, today)} sub={`${list.length} customer${list.length === 1 ? '' : 's'}`} pad={false}>
+          <Card key={dueTs} title={dayTitle(dueTs, today)} sub={`${perDay.get(dueTs) ?? list.length} customer${(perDay.get(dueTs) ?? list.length) === 1 ? '' : 's'}`} pad={false}>
             <Table>
               <TableHeader>
                 <TableRow data-head>
@@ -201,6 +206,7 @@ export default function FollowUps() {
           </Card>
         ))
       )}
+      {shown.length > 0 && <Pager pager={pager} noun="follow-ups" />}
     </div>
   );
 }

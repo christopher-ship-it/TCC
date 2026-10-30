@@ -5,6 +5,7 @@ import type { AuditAction } from '../../data/types';
 import { canAnywhere } from '../../lib/access';
 import { downloadText } from '../../lib/metrics';
 import { Badge, Button, Empty, Input, PageHead, Select, type Tone } from '../../ui/primitives';
+import { Pager, usePaged } from '../../ui/Pager';
 
 const ACTIONS: Record<AuditAction, { label: string; tone: Tone }> = {
   signed_in: { label: 'Signed in', tone: 'neutral' },
@@ -47,6 +48,8 @@ export default function AuditLog() {
     .filter((e) => !who || e.actorId === who)
     .filter((e) => !q.trim() || `${e.actorName} ${e.target ?? ''} ${e.detail}`.toLowerCase().includes(q.trim().toLowerCase()));
 
+  const { items: pageRows, pager } = usePaged(rows, `${kind}|${who}|${q}`);
+
   const actors = [...new Map(state.audit.map((e) => [e.actorId, e.actorName])).entries()];
 
   function exportCsv() {
@@ -84,7 +87,7 @@ export default function AuditLog() {
           <table className="tbl">
             <thead><tr><th>When</th><th>Who</th><th>What</th><th>Details</th></tr></thead>
             <tbody>
-              {rows.slice(0, 500).map((e) => (
+              {pageRows.map((e) => (
                 <tr key={e.id}>
                   <td className="mono" style={{ fontSize: 13, whiteSpace: 'nowrap' }}>{new Date(e.ts).toLocaleString('en-IN', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', hour12: false })}</td>
                   <td style={{ fontWeight: 500 }}>{e.actorName}</td>
@@ -96,6 +99,7 @@ export default function AuditLog() {
           </table>
         </div>
       )}
+      {rows.length > 0 && <Pager pager={pager} noun="changes" />}
     </div>
   );
 }

@@ -15,6 +15,7 @@ import type { Lead } from '../data/types';
 import { Chip, Empty, Input, PageHead, Button } from '../ui/primitives';
 import { isConnected } from '../lib/metrics';
 import { useToast } from '../ui/toastContext';
+import { Pager, usePaged } from '../ui/Pager';
 
 export default function Customers() {
   const { state, currentAgent } = useStore();
@@ -41,6 +42,8 @@ export default function Customers() {
       .filter((u) => !t || u.name.toLowerCase().includes(t) || u.business.toLowerCase().includes(t) || (digits.length >= 3 && u.phone.replace(/\D/g, '').includes(digits)))
       .sort((a, b) => (b.callHistory[0]?.atTs ?? 0) - (a.callHistory[0]?.atTs ?? 0) || a.name.localeCompare(b.name));
   }, [state.users, apps, mine, me.id, me.name, q, lead]);
+
+  const { items: pageRows, pager } = usePaged(rows, `${q}|${mine}|${lead}|${apps.join()}`);
 
   const ownerName = (id: string | null) => (id ? state.agents.find((a) => a.id === id)?.name ?? '—' : 'Anyone');
 
@@ -83,7 +86,7 @@ export default function Customers() {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {rows.slice(0, 500).map((u) => (
+              {pageRows.map((u) => (
                 <TableRow key={u.id} className="cursor-pointer" onClick={() => navigate(`/customers/${u.id}`)}>
                   <TableCell>
                     <div className="font-medium">{u.name}</div>
@@ -100,6 +103,7 @@ export default function Customers() {
               ))}
             </TableBody>
           </Table>
+          <div className="px-3"><Pager pager={pager} noun="customers" /></div>
         </Card>
       )}
 

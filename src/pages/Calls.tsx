@@ -13,6 +13,7 @@ import { analysisState } from '../lib/callStatus';
 import { ColumnChart, Legend } from '../ui/charts';
 import { Badge, Button, Card, Empty, Input, PageHead, Segmented, Select, Stat } from '../ui/primitives';
 import { useToast } from '../ui/toastContext';
+import { Pager, usePaged } from '../ui/Pager';
 
 type Period = 'today' | '7' | '30' | 'all';
 type Result = 'all' | 'connected' | 'positive' | 'negative' | 'missed' | 'flagged';
@@ -30,7 +31,6 @@ export default function Calls() {
   const [result, setResult] = useState<Result>('all');
   const [who, setWho] = useState('');
   const [q, setQ] = useState('');
-  const [limit, setLimit] = useState(60);
 
   const since = useMemo(() => {
     if (period === 'all') return undefined;
@@ -56,6 +56,7 @@ export default function Calls() {
     });
   }, [scoped, q, result]);
 
+  const { items: pageRows, pager } = usePaged(rows, `${period}|${result}|${who}|${q}|${apps.join()}`);
   const connected = rows.filter((r) => isConnected(r.call)).length;
   const sentiment = sentimentSummary(rows);
   const talk = rows.reduce((n, r) => n + (r.call.telephony?.durationSec ?? 0), 0);
@@ -126,7 +127,7 @@ export default function Calls() {
               </tr>
             </thead>
             <tbody>
-              {rows.slice(0, limit).map(({ user, call }) => {
+              {pageRows.map(({ user, call }) => {
                 const a = analysisState(call);
                 return (
                   <tr key={call.id} className="is-clickable" onClick={() => navigate(`/customers/${user.id}/calls/${call.id}`)}>
@@ -147,7 +148,7 @@ export default function Calls() {
           </table>
         </div>
       )}
-      {rows.length > limit && <Button onClick={() => setLimit((l) => l + 100)} style={{ alignSelf: 'center' }}>Show more ({rows.length - limit} left)</Button>}
+      {rows.length > 0 && <Pager pager={pager} noun="calls" />}
     </div>
   );
 }

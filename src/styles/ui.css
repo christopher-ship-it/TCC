@@ -259,3 +259,12 @@
 .line-status { position: relative; }
 .line-status__pop { position: absolute; right: 0; top: calc(100% + 8px); width: 300px; z-index: 60; }
 .shell-pill--off { border-color: rgba(255, 180, 120, 0.55); }
+
+/* Paging under long lists (src/ui/Pager.tsx): count on the left, rows per page and the arrows on the right. */
+.pager { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; padding: 10px 2px; font-size: 13px; color: var(--ink-2); }
+.pager__count { margin-right: auto; }
+.pager__count b { color: var(--ink); font-weight: 600; font-variant-numeric: tabular-nums; }
+.pager__size { display: inline-flex; align-items: center; gap: 6px; }
+.select--sm { height: 30px; padding-top: 0; padding-bottom: 0; font-size: 13px; width: auto; }
+.pager__nav { display: inline-flex; align-items: center; gap: 8px; }
+.pager__page { font-variant-numeric: tabular-nums; white-space: nowrap; }
