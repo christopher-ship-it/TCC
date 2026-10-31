@@ -11,6 +11,7 @@
 import type { AppId, CustomerUser, DetailField, Language, PaymentDue, QueueKey, SourceLink, TicketRecord } from '../data/types.ts';
 import { customerTypesFor } from '../data/products.ts';
 import { TECSTELLAR_STATES } from '../data/states.ts';
+import { customerLanguageFrom, languageForState } from './languages.ts';
 import { normalizePhone } from '../telephony/core/phone-number.ts';
 
 const DAY_MS = 86_400_000;
@@ -63,11 +64,6 @@ export const SOURCE_PLAN_FIELDS = ['plan', 'paying', 'planNote'] as const satisf
 /** Tickets that came from the product, as opposed to ones an agent raised in TCC. */
 const SOURCE_TICKET_PREFIX = 'src-';
 
-const LANGUAGE_CODES: Record<string, Language> = {
-  ta: 'Tamil', te: 'Telugu', kn: 'Kannada', ml: 'Malayalam', hi: 'Hindi', bn: 'Bengali', en: 'English',
-  tamil: 'Tamil', telugu: 'Telugu', kannada: 'Kannada', malayalam: 'Malayalam', hindi: 'Hindi', bengali: 'Bengali', english: 'English',
-};
-
 /** States agents aren't set up for, routed to the nearest one they are (an agent's states come from TECSTELLAR_STATES). */
 const NEAREST_STATE: Record<string, string> = {
   Puducherry: 'Tamil Nadu', 'Andaman and Nicobar Islands': 'Tamil Nadu', Lakshadweep: 'Kerala', Goa: 'Maharashtra',
@@ -96,14 +92,13 @@ const clean = (v: string | null | undefined) => (typeof v === 'string' && v.trim
 function placeOf(rawState: string | null): { state: string | null; effectiveState: string; stateLanguage: Language } {
   const listed = TECSTELLAR_STATES.find((s) => s.name === rawState);
   const effective = listed ?? TECSTELLAR_STATES.find((s) => s.name === (rawState && NEAREST_STATE[rawState])) ?? TECSTELLAR_STATES.find((s) => s.name === HOME_STATE)!;
-  return { state: listed ? listed.name : null, effectiveState: effective.name, stateLanguage: effective.language };
+  // The team's rule decides the language, even for a state agents are not set up for (Goa and Lakshadweep call in Hindi).
+  return { state: listed ? listed.name : null, effectiveState: effective.name, stateLanguage: rawState ? languageForState(rawState) : effective.language };
 }
 
-/** A regional language the customer chose in the app beats the state's; an English app is not a reason to call in English. */
-function languageOf(preferred: string | null | undefined, stateLanguage: Language, hasState: boolean): Language {
-  const chosen = preferred ? LANGUAGE_CODES[preferred.trim().toLowerCase()] : undefined;
-  if (chosen && chosen !== 'English') return chosen;
-  return hasState || !chosen ? stateLanguage : chosen;
+/** A language the customer chose in the app beats the state's; English is not a reason to call in English. */
+function languageOf(preferred: string | null | undefined, stateLanguage: Language): Language {
+  return customerLanguageFrom(preferred) ?? stateLanguage;
 }
 
 /** Which call list the product's data puts a customer in. Most urgent first; one list per customer. */
@@ -259,7 +254,7 @@ export function applySource(
     else delete next.filledIn;
   }
   // A dialled-in or incoming-call record becomes the real customer: it keeps its calls, and gets a proper language.
-  if (!existing || existing.adHoc) next.language = languageOf(src.preferred_language, stateLanguage, state !== null);
+  if (!existing || existing.adHoc) next.language = languageOf(src.preferred_language, stateLanguage);
   const planChanged = !existing?.sync || SOURCE_PLAN_FIELDS.some((f) => existing.sync!.plan[f] !== plan[f]);
   if (planChanged) {
     next.plan = plan.plan;

@@ -7,7 +7,8 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import { useStore } from '../../store/StoreContext';
 import { APPS } from '../../data/seed';
 import type { AppId, CustomerUser, Language } from '../../data/types';
-import { ALL_LANGUAGES, can } from '../../lib/access';
+import { can } from '../../lib/access';
+import { CUSTOMER_LANGUAGES, primaryLanguageOf } from '../../lib/languages';
 import { DEFAULT_COUNTRY_CODE } from '../../lib/telephony';
 import { directDialDigits } from '../../lib/directDial';
 import { customerIdFor, findByMobile } from '../../lib/customers';
@@ -28,7 +29,7 @@ export function AddCustomerDialog({ appId, onClose, onAdded, callLabel }: {
   const [app, setApp] = useState<AppId>(appId ?? products[0]?.id ?? 'realbroks');
   const [mobile, setMobile] = useState('');
   const [name, setName] = useState('');
-  const [language, setLanguage] = useState<Language>(me.languages[0] ?? 'English');
+  const [language, setLanguage] = useState<Language>(primaryLanguageOf(me) ?? 'Hindi');
   const [city, setCity] = useState('');
   const [business, setBusiness] = useState('');
   const [note, setNote] = useState('');
@@ -43,7 +44,8 @@ export function AddCustomerDialog({ appId, onClose, onAdded, callLabel }: {
     name: !name.trim() ? 'Enter their name.' : null,
   };
   const agents = state.agents.filter((a) => a.role === 'agent' && (a.status ?? 'active') === 'active' && a.apps.includes(app));
-  const languages = [...me.languages, ...ALL_LANGUAGES.filter((l) => !me.languages.includes(l))];
+  const mine = CUSTOMER_LANGUAGES.filter((l) => me.languages.includes(l));
+  const languages = [...mine, ...CUSTOMER_LANGUAGES.filter((l) => !mine.includes(l))];
 
   function submit(call: boolean) {
     setTried(true);

@@ -51,7 +51,7 @@ export interface AppDef {
   live: boolean;
 }
 
-export type Language = 'Tamil' | 'Telugu' | 'Kannada' | 'Malayalam' | 'Hindi' | 'Bengali' | 'English';
+export type Language = 'Tamil' | 'Malayalam' | 'Telugu' | 'Kannada' | 'Hindi' | 'Others' | 'English';
 
 export interface StateDef {
   name: string;
@@ -78,6 +78,8 @@ export interface AgentAccount {
   apps: AppId[];
   queues: QueueKey[];
   languages: Language[];
+  /** The language this person is asked for first when customers are handed out. One of `languages`, never English. */
+  primaryLanguage?: Language;
   states: string[];
   dailyTarget: number;
   clickToDial: boolean;

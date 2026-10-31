@@ -2,6 +2,7 @@
 // (capabilities), and — for calling — which queues, languages and states they work.
 
 import type { AgentAccount, AppId, Capability, Language, QueueKey, Role } from '../data/types';
+import { AGENT_LANGUAGES } from './languages.ts';
 
 export const ALL_APPS: AppId[] = ['realbroks', 'irondrobe', 'influnet', 'vehigo', 'vanmoh'];
 
@@ -81,11 +82,11 @@ export const LANGUAGE_SCRIPT: Record<Language, string> = {
   Kannada: 'ಕನ್ನಡ',
   Malayalam: 'മലയാളം',
   Hindi: 'हिन्दी',
-  Bengali: 'বাংলা',
+  Others: 'Others',
   English: 'English',
 };
 
-export const ALL_LANGUAGES: Language[] = ['Tamil', 'Telugu', 'Kannada', 'Malayalam', 'Hindi', 'Bengali', 'English'];
+export const ALL_LANGUAGES: Language[] = AGENT_LANGUAGES;
 
 /** A plain-language sentence list describing a person's scope — shown while it is being edited. */
 export function describeScope(a: Pick<AgentAccount, 'role' | 'apps' | 'queues' | 'languages' | 'states' | 'capabilities'>, appName: (id: AppId) => string, queueLabel: (q: QueueKey) => string): { can: string[]; cannot: string[] } {

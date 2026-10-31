@@ -8,7 +8,7 @@ import { customerTypesFor } from '../data/products';
 
 export const TRANSCRIBE_URL = ((import.meta.env.VITE_TRANSCRIBE_URL as string | undefined)?.trim() || 'http://127.0.0.1:8787').replace(/\/$/, '');
 
-const LANGUAGE_CODES: Record<Language, string> = { Tamil: 'ta', Telugu: 'te', Kannada: 'kn', Malayalam: 'ml', Hindi: 'hi', Bengali: 'bn', English: 'en' };
+const LANGUAGE_CODES: Record<Language, string | undefined> = { Tamil: 'ta', Telugu: 'te', Kannada: 'kn', Malayalam: 'ml', Hindi: 'hi', Others: undefined, English: 'en' };
 
 /** The customer's language as a Whisper hint. Skipped in test mode, where the person on the phone is the tester, not the customer. */
 export function languageHint(language?: Language): string | undefined {

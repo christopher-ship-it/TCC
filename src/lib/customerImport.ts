@@ -3,6 +3,7 @@
 // (src/data/seed.ts). Excel: "Save As" → CSV UTF-8 before uploading.
 import { normalizePhone } from '../telephony/core/phone-number.ts';
 import type { AppId, CustomerUser, Language } from '../data/types.ts';
+import { customerLanguageFrom, languageForState } from './languages.ts';
 import { customerTypesFor } from '../data/products.ts';
 
 export const CUSTOMER_CSV_COLUMNS = [
@@ -114,7 +115,7 @@ export function parseCustomerCsv(text: string, stateDefs: StateCatalogEntry[]): 
     const plan = planRaw === 'paid' ? 'Paid' : 'Free';
 
     const langRaw = get(idx.language);
-    const language = (langRaw as Language) || stateDef?.language || 'English';
+    const language: Language = customerLanguageFrom(langRaw) ?? stateDef?.language ?? (stateRaw ? languageForState(stateRaw) : 'Tamil');
 
     const registeredAtRaw = get(idx.registeredAt);
     const registeredTs = registeredAtRaw ? Date.parse(registeredAtRaw) : NaN;

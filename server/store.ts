@@ -429,7 +429,7 @@ export function createStore(getPool: () => Promise<pg.Pool>, env: StoreEnv, read
           if (me.role === 'supervisor' && (stored.role !== 'agent' || a.role !== 'agent') && a.id !== me.id) continue;
           if (me.role === 'admin' && !me.superAdmin && stored.role === 'admin' && a.id !== me.id && a.role !== 'admin' && !(await client.query("select 1 from agents where role = 'admin' and status = 'active' and id <> $1 and not coalesce((doc->>'superAdmin')::boolean, false)", [a.id])).rowCount) throw new HttpError(409, 'Keep at least one admin.');
           let next: AgentAccount = { ...a };
-          if (me.role !== 'admin' && a.id === me.id) next = { ...a, role: stored.role, status: stored.status, apps: stored.apps, capabilities: stored.capabilities, queues: me.role === 'agent' ? stored.queues : a.queues, languages: me.role === 'agent' ? stored.languages : a.languages, states: me.role === 'agent' ? stored.states : a.states, username: stored.username };
+          if (me.role !== 'admin' && a.id === me.id) next = { ...a, role: stored.role, status: stored.status, apps: stored.apps, capabilities: stored.capabilities, queues: me.role === 'agent' ? stored.queues : a.queues, languages: me.role === 'agent' ? stored.languages : a.languages, primaryLanguage: me.role === 'agent' ? stored.primaryLanguage : a.primaryLanguage, states: me.role === 'agent' ? stored.states : a.states, username: stored.username };
           if (a.id === me.id) next = { ...next, role: stored.role, status: stored.status };
           const username = next.username.trim().toLowerCase();
           if (username !== stored.username.toLowerCase()) {

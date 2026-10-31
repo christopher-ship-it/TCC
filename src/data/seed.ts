@@ -107,7 +107,7 @@ const TECSTELLAR_AGENTS: AgentAccount[] = [
   {
     id: 'munees-a', name: 'Munees A', username: 'munees.a', role: 'supervisor', status: 'active', createdTs: NOW - 300 * DAY_MS,
     apps: ['realbroks', 'irondrobe'], queues: ['new', 'tickets', 'payments', 'followup', 'errors', 'inactive'],
-    languages: ['Tamil', 'Telugu', 'Kannada', 'Malayalam', 'Hindi', 'Bengali', 'English'],
+    languages: ['Tamil', 'Telugu', 'Kannada', 'Malayalam', 'Hindi', 'Others', 'English'],
     states: TECSTELLAR_STATES.map((s) => s.name),
     dailyTarget: 0, clickToDial: true, lastActiveLabel: 'now',
     telecmiUserId: '5000_33338836',

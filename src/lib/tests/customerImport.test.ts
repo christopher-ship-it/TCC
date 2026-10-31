@@ -35,7 +35,7 @@ test('defaults city/state/language from state defs when left blank', () => {
   assert.deepEqual(errors, []);
   assert.equal(customers[0].city, 'Chennai');
   assert.equal(customers[0].effectiveState, 'Tamil Nadu');
-  assert.equal(customers[0].language, 'English');
+  assert.equal(customers[0].language, 'Tamil');
   assert.equal(customers[0].business, 'Meena Reddy');
 });
 

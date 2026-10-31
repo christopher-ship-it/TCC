@@ -1,7 +1,8 @@
 import { useState } from 'react';
 import { useStore } from '../../store/StoreContext';
 import type { CustomerUser, Language } from '../../data/types';
-import { ALL_LANGUAGES, LANGUAGE_SCRIPT } from '../../lib/access';
+import { LANGUAGE_SCRIPT } from '../../lib/access';
+import { CUSTOMER_LANGUAGES } from '../../lib/languages';
 import { Button, Callout, Field, Segmented, Select, Sheet, Textarea } from '../../ui/primitives';
 import { useToast } from '../../ui/toastContext';
 
@@ -10,9 +11,9 @@ export function EscalateDialog({ user, onClose }: { user: CustomerUser; onClose:
   const { state, dispatch, currentAgent } = useStore();
   const toast = useToast();
   const agent = currentAgent!;
-  const others = ALL_LANGUAGES.filter((l) => !agent.languages.includes(l));
+  const others = CUSTOMER_LANGUAGES.filter((l) => !agent.languages.includes(l));
   const [tab, setTab] = useState<'reroute' | 'escalate'>('reroute');
-  const [lang, setLang] = useState<Language>(others[0] ?? 'English');
+  const [lang, setLang] = useState<Language>(others[0] ?? 'Hindi');
   const [note, setNote] = useState('');
   const [reason, setReason] = useState('Pricing question');
   const [urgency, setUrgency] = useState<'normal' | 'urgent'>('normal');
@@ -50,7 +51,7 @@ export function EscalateDialog({ user, onClose }: { user: CustomerUser; onClose:
         <>
           <Field label="Language the customer speaks" htmlFor="esc-lang">
             <Select id="esc-lang" value={lang} onChange={(e) => { setLang(e.target.value as Language); setOwner(''); }}>
-              {ALL_LANGUAGES.map((l) => <option key={l} value={l}>{LANGUAGE_SCRIPT[l] !== l ? `${LANGUAGE_SCRIPT[l]} · ${l}` : l}</option>)}
+              {CUSTOMER_LANGUAGES.map((l) => <option key={l} value={l}>{LANGUAGE_SCRIPT[l] !== l ? `${LANGUAGE_SCRIPT[l]} · ${l}` : l}</option>)}
             </Select>
           </Field>
           <Callout tone={covering.length ? 'accent' : 'warn'}>

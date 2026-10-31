@@ -133,6 +133,27 @@ export const MIGRATIONS: { version: number; name: string; sql: string }[] = [
       create index call_recordings_remote_idx on call_recordings (remote, started_at);
     `,
   },
+  {
+    version: 6,
+    name: 'languages: Others added, Bengali and English-for-customers retired',
+    sql: `
+      -- People who spoke Bengali now speak Hindi (order kept, no duplicates).
+      update agents set doc = jsonb_set(doc, '{languages}', (
+        select coalesce(jsonb_agg(v order by o), '[]'::jsonb)
+        from (select case when e = 'Bengali' then 'Hindi' else e end as v, min(ord) as o
+              from jsonb_array_elements_text(doc->'languages') with ordinality as t(e, ord) group by 1) s))
+      where doc->'languages' ? 'Bengali';
+      -- Customers are never called in English or Bengali: Bengali goes to Hindi, English to the state's language.
+      update customers set doc = jsonb_set(doc, '{language}', to_jsonb(case
+          when doc->>'language' = 'Bengali' then 'Hindi'
+          when coalesce(doc->>'effectiveState', 'Tamil Nadu') in ('Tamil Nadu', 'Puducherry') then 'Tamil'
+          when doc->>'effectiveState' = 'Kerala' then 'Malayalam'
+          when doc->>'effectiveState' = 'Karnataka' then 'Kannada'
+          when doc->>'effectiveState' in ('Andhra Pradesh', 'Telangana') then 'Telugu'
+          else 'Hindi' end::text))
+      where doc->>'language' in ('Bengali', 'English');
+    `,
+  },
 ];
 
 export interface DbHealth {

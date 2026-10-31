@@ -3,8 +3,9 @@ import { Check, ShieldCheck, UserX, UserCheck, X } from 'lucide-react';
 import { useStore } from '../../store/StoreContext';
 import { APPS, STATE_DEFS } from '../../data/seed';
 import { BRAND, WHITE_LABEL } from '../../brand';
+import { AGENT_LANGUAGES, primaryLanguageOf } from '../../lib/languages';
 import { QUEUES, type AgentAccount, type AppId, type Capability, type Language, type QueueKey, type Role } from '../../data/types';
-import { ACCESS_TEMPLATES, ALL_LANGUAGES, CAPABILITIES, LANGUAGE_SCRIPT, ROLE_INFO, canManage, capsFor, describeScope, isActive } from '../../lib/access';
+import { ACCESS_TEMPLATES, CAPABILITIES, LANGUAGE_SCRIPT, ROLE_INFO, canManage, capsFor, describeScope, isActive } from '../../lib/access';
 import { reachableCount } from '../../lib/queue';
 import { fmtDayTime } from '../../lib/dates';
 import { Avatar, Badge, Button, Callout, CheckBox, Chip, Field, Input, Sheet, Tabs, Toggle } from '../../ui/primitives';
@@ -23,6 +24,7 @@ interface Draft {
   capabilities: Partial<Record<AppId, Capability[]>>;
   queues: QueueKey[];
   languages: Language[];
+  primaryLanguage: Language | null;
   states: string[];
   dailyTarget: number;
   clickToDial: boolean;
@@ -35,11 +37,11 @@ const queueLabel = (q: QueueKey) => QUEUES.find((x) => x.key === q)?.label ?? q;
 function toDraft(a?: AgentAccount): Draft {
   if (!a) {
     const t = ACCESS_TEMPLATES[0];
-    return { name: '', username: '', email: '', phone: '', role: t.role, trainee: !!t.trainee, apps: [APPS[0].id], capabilities: { [APPS[0].id]: t.caps }, queues: t.queues, languages: ['Tamil'], states: ['Tamil Nadu'], dailyTarget: t.dailyTarget, clickToDial: true, telecmiUserId: '' };
+    return { name: '', username: '', email: '', phone: '', role: t.role, trainee: !!t.trainee, apps: [APPS[0].id], capabilities: { [APPS[0].id]: t.caps }, queues: t.queues, languages: ['Tamil'], primaryLanguage: 'Tamil', states: ['Tamil Nadu'], dailyTarget: t.dailyTarget, clickToDial: true, telecmiUserId: '' };
   }
   const caps: Partial<Record<AppId, Capability[]>> = {};
   for (const app of a.apps) caps[app] = capsFor(a, app);
-  return { name: a.name, username: a.username, email: a.email ?? '', phone: a.phone ?? '', role: a.role, trainee: !!a.trainee, apps: a.apps, capabilities: caps, queues: a.queues, languages: a.languages, states: a.states, dailyTarget: a.dailyTarget, clickToDial: a.clickToDial, telecmiUserId: a.telecmiUserId ?? '' };
+  return { name: a.name, username: a.username, email: a.email ?? '', phone: a.phone ?? '', role: a.role, trainee: !!a.trainee, apps: a.apps, capabilities: caps, queues: a.queues, languages: a.languages, primaryLanguage: primaryLanguageOf(a), states: a.states, dailyTarget: a.dailyTarget, clickToDial: a.clickToDial, telecmiUserId: a.telecmiUserId ?? '' };
 }
 
 const list = (xs: string[]) => (xs.length ? xs.join(', ') : 'none');
@@ -65,6 +67,7 @@ function diff(before: Draft, after: Draft): string[] {
   }
   if (before.queues.join() !== after.queues.join()) out.push(`Queues: ${list(after.queues.map(queueLabel))}`);
   if (before.languages.join() !== after.languages.join()) out.push(`Languages: ${list(after.languages)}`);
+  if (before.primaryLanguage !== after.primaryLanguage) out.push(`Primary language: ${after.primaryLanguage ?? 'none'}`);
   if (before.states.join() !== after.states.join()) out.push(`States: ${after.states.length > 3 ? `${after.states.length} states` : list(after.states)}`);
   if (before.dailyTarget !== after.dailyTarget) out.push(`Daily target: ${after.dailyTarget}`);
   if (before.telecmiUserId !== after.telecmiUserId) out.push(`Phone line: ${after.telecmiUserId || 'none'}`);
@@ -167,6 +170,7 @@ export function PersonEditor({ person, onClose }: { person?: AgentAccount; onClo
       capabilities: d.role === 'admin' ? undefined : d.capabilities,
       queues: d.role === 'admin' ? [] : d.queues,
       languages: d.languages,
+      primaryLanguage: primaryLanguageOf({ languages: d.languages, primaryLanguage: d.primaryLanguage ?? undefined }) ?? undefined,
       states: d.states,
       dailyTarget: d.dailyTarget,
       clickToDial: d.clickToDial,
@@ -384,14 +388,22 @@ export function PersonEditor({ person, onClose }: { person?: AgentAccount; onClo
               <div className="stack" style={{ gap: 8 }}>
                 <span className="section-label">Languages they speak</span>
                 <div className="lang-grid">
-                  {ALL_LANGUAGES.map((l) => (
+                  {AGENT_LANGUAGES.map((l) => (
                     <button key={l} type="button" className="lang-card" aria-pressed={d.languages.includes(l)} onClick={() => set('languages', toggleIn(d.languages, l))}>
                       <b>{LANGUAGE_SCRIPT[l]}</b>
                       <span>{l}</span>
                     </button>
                   ))}
                 </div>
-                <span className="muted" style={{ fontSize: 13 }}>Customers are matched by language first. Customers with no state on file count as Tamil Nadu.</span>
+                <span className="muted" style={{ fontSize: 13 }}>Customers are matched by language first. Customers with no state on file count as Tamil Nadu. English is a second language only: customers are never called in it.</span>
+                <span className="section-label" style={{ marginTop: 8 }}>Primary language</span>
+                <div className="row">
+                  {d.languages.filter((l) => l !== 'English').map((l) => (
+                    <Chip key={l} pressed={primaryLanguageOf({ languages: d.languages, primaryLanguage: d.primaryLanguage ?? undefined }) === l} onClick={() => set('primaryLanguage', l)}>{l}</Chip>
+                  ))}
+                  {!d.languages.some((l) => l !== 'English') && <span className="muted" style={{ fontSize: 13 }}>Pick a language above first.</span>}
+                </div>
+                <span className="muted" style={{ fontSize: 13 }}>Customers who speak this language are given to this person first; others share the rest.</span>
               </div>
               <div className="stack" style={{ gap: 8 }}>
                 <div className="row" style={{ justifyContent: 'space-between' }}>
