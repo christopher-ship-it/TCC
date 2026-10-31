@@ -55,7 +55,7 @@ export interface SourceMeta {
 
 /** The profile fields the product owns once a customer is linked. */
 export const SOURCE_PROFILE_FIELDS = [
-  'name', 'business', 'city', 'state', 'effectiveState', 'registeredAtLabel', 'registeredDaysAgo', 'listings', 'buyers', 'lastOpenLabel', 'appVersion', 'active',
+  'name', 'business', 'city', 'state', 'effectiveState', 'stateName', 'registeredAtLabel', 'registeredDaysAgo', 'listings', 'buyers', 'lastOpenLabel', 'appVersion', 'active',
 ] as const satisfies readonly (keyof CustomerUser)[];
 
 /** The plan fields TCC takes from the product only when the product's plan changes. */
@@ -190,6 +190,7 @@ export function applySource(
     city: clean(src.city) ?? (existing && !existing.adHoc ? existing.city : '—'),
     state,
     effectiveState,
+    stateName: clean(src.state) ?? undefined,
     registeredAtLabel: registered ? dayLabel(registered) : 'Not recorded',
     registeredDaysAgo: Math.max(0, Math.floor((now - since) / DAY_MS)),
     listings: src.usage?.primary_count ?? 0,

@@ -284,6 +284,8 @@ export interface CustomerUser {
   city: string;
   state: string | null;
   effectiveState: string;
+  /** The state exactly as the product sent it, even one TCC has no agents for (src/lib/geo.ts draws it on the map). */
+  stateName?: string;
   language: Language;
   registeredAtLabel: string;
   registeredDaysAgo: number;

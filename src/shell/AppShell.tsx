@@ -62,7 +62,7 @@ function navFor(role: Role, pendingEscalations: number, firstApp: AppId | undefi
   const overview: NavItem = { to: role === 'admin' ? '/overview' : '/team', label: 'Overview', icon: <Home size={s} /> };
   return [
     { items: [overview, ...team] },
-    { title: 'Manage', items: [...people, ...(X && role === 'admin' ? [{ to: '/geography', label: 'Geography', icon: <Map size={s} /> }] : [])] },
+    { title: 'Manage', items: [...people, ...(role === 'admin' ? [{ to: '/geography', label: 'Customer map', icon: <Map size={s} /> }] : [])] },
   ];
 }
 

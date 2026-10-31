@@ -15,6 +15,7 @@
     "emulators": "npx -y firebase-tools@14.27.0 emulators:start --only auth,firestore --project tcc-local"
   },
   "dependencies": {
+    "@svg-maps/india": "^2.0.0",
     "@tailwindcss/vite": "^4.3.3",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",

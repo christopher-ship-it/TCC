@@ -17,6 +17,7 @@ import { ChipFilter, FilterBar, SearchFilter, SelectFilter, useFilters } from '.
 import { CUSTOMER_LANGUAGES } from '../lib/languages';
 import { queueOf } from '../lib/queue';
 import { textMatch } from '../lib/filters';
+import { mapStateOf } from '../lib/geo';
 import { isConnected } from '../lib/metrics';
 import { useToast } from '../ui/toastContext';
 import { Pager, usePaged } from '../ui/Pager';
@@ -43,7 +44,7 @@ export default function Customers() {
         .filter((u) => !f.lead || u.lead === f.lead)
         .filter((u) => !f.prod || u.app === f.prod)
         .filter((u) => !f.lang || u.language === f.lang)
-        .filter((u) => !f.state || u.effectiveState === f.state)
+        .filter((u) => !f.state || (mapStateOf(u) ?? u.effectiveState) === f.state)
         .filter((u) => !f.list || (queueOf(u, Date.now()) ?? 'none') === f.list)
         .filter((u) => !f.prio || (u.priority ?? 'none') === f.prio)
         .filter((u) => !f.rating || (u.rating ?? 'none') === f.rating)
@@ -54,7 +55,7 @@ export default function Customers() {
     [base, f],
   );
   const types = useMemo(() => [...new Set(base.map((u) => u.customerType).filter((t): t is string => !!t))].sort(), [base]);
-  const states = useMemo(() => [...new Set(base.map((u) => u.effectiveState))].sort(), [base]);
+  const states = useMemo(() => [...new Set(base.map((u) => mapStateOf(u) ?? u.effectiveState))].sort(), [base]);
 
   const { items: pageRows, pager } = usePaged(rows, Object.values(f).join('|') + apps.join());
 

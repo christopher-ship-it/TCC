@@ -137,6 +137,7 @@ export function parseCustomerCsv(text: string, stateDefs: StateCatalogEntry[]): 
       city,
       state,
       effectiveState,
+      stateName: stateRaw || undefined,
       language,
       registeredAtLabel: new Date(validTs).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }),
       registeredDaysAgo,
