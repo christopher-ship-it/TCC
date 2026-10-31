@@ -1,9 +1,15 @@
 // Calling people back. An agent can set a date on any call. When the first try ends unanswered (no answer / not
 // reachable) and nobody set one, TCC calls again every day for 14 days — until they answer or the 14 days run out.
-import type { AgentAccount, CustomerUser, Priority, Rating } from '../data/types.ts';
+import type { AgentAccount, CallLogEntry, CustomerUser, Priority, Rating } from '../data/types.ts';
+
+/** A call that reached the customer: marked answered, or someone talked. */
+export const isConnected = (c: Pick<CallLogEntry, 'status' | 'telephony'>): boolean => c.status.startsWith('Answered') || (c.telephony?.durationSec ?? 0) > 0;
 
 export const AUTO_FOLLOWUP_DAYS = 14;
 const DAY = 86_400_000;
+
+/** Put on a customer whose 14 days of daily calls ended with no answer. They leave the queues and wait in their own list. */
+export const NO_ANSWER_ENDED_TAG = 'No answer in 14 days';
 
 /** Days until the next call after a positive one, by how positive it was. */
 export const RATING_DAYS: Record<Rating, number> = { Good: 7, Average: 5, Okay: 3 };

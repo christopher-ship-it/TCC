@@ -54,7 +54,7 @@ export const NO_STATE_WEIGHT = VM ? VANMOH_NO_STATE_WEIGHT : 412;
 const TECSTELLAR_AGENTS: AgentAccount[] = [
   {
     id: 'ravi-s', name: 'Ravi S', username: 'ravi.s', role: 'agent', status: 'active', createdTs: NOW - 160 * DAY_MS,
-    apps: ['realbroks'], queues: ['new', 'followup', 'inactive'],
+    apps: ['realbroks'], queues: ['new', 'followup', 'inactive', 'noanswer', 'unreached'],
     languages: ['Tamil', 'Telugu', 'Kannada'],
     states: ['Tamil Nadu', 'Telangana', 'Andhra Pradesh', 'Karnataka'],
     dailyTarget: 50, clickToDial: true, lastActiveLabel: '2 min ago',
@@ -64,7 +64,7 @@ const TECSTELLAR_AGENTS: AgentAccount[] = [
   },
   {
     id: 'abhinaya-m', name: 'Abhinaya M', username: 'abhinaya.m', role: 'agent', status: 'active', createdTs: NOW - 160 * DAY_MS,
-    apps: ['realbroks', 'irondrobe'], queues: ['new', 'tickets', 'payments', 'followup', 'errors', 'inactive'],
+    apps: ['realbroks', 'irondrobe'], queues: ['new', 'tickets', 'payments', 'followup', 'errors', 'inactive', 'noanswer', 'unreached'],
     languages: ['Tamil', 'Hindi'],
     states: ['Tamil Nadu', 'Maharashtra', 'Delhi', 'Uttar Pradesh', 'Gujarat', 'Rajasthan', 'Madhya Pradesh', 'West Bengal'],
     dailyTarget: 50, clickToDial: true, lastActiveLabel: 'now · on call',
@@ -95,7 +95,7 @@ const TECSTELLAR_AGENTS: AgentAccount[] = [
   },
   {
     id: 'priya-n', name: 'Priya N', username: 'priya.n', role: 'agent', trainee: true, status: 'active', createdTs: NOW - 52 * DAY_MS,
-    apps: ['irondrobe'], queues: ['new'],
+    apps: ['irondrobe'], queues: ['new', 'noanswer', 'unreached'],
     languages: ['Tamil', 'Telugu'],
     states: ['Tamil Nadu'],
     dailyTarget: 30, clickToDial: true, lastActiveLabel: 'Yesterday',
@@ -106,7 +106,7 @@ const TECSTELLAR_AGENTS: AgentAccount[] = [
   },
   {
     id: 'munees-a', name: 'Munees A', username: 'munees.a', role: 'supervisor', status: 'active', createdTs: NOW - 300 * DAY_MS,
-    apps: ['realbroks', 'irondrobe'], queues: ['new', 'tickets', 'payments', 'followup', 'errors', 'inactive'],
+    apps: ['realbroks', 'irondrobe'], queues: ['new', 'tickets', 'payments', 'followup', 'errors', 'inactive', 'noanswer', 'unreached'],
     languages: ['Tamil', 'Telugu', 'Kannada', 'Malayalam', 'Hindi', 'Others', 'English'],
     states: TECSTELLAR_STATES.map((s) => s.name),
     dailyTarget: 0, clickToDial: true, lastActiveLabel: 'now',

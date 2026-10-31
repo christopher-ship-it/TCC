@@ -67,11 +67,11 @@ export interface AccessTemplate {
 }
 
 export const ACCESS_TEMPLATES: AccessTemplate[] = [
-  { id: 'new-agent', label: 'New agent', help: 'New registrations and follow-ups. Calls are reviewed.', role: 'agent', queues: ['new', 'followup'], caps: ['call', 'tickets', 'recordings'], dailyTarget: 30, trainee: true },
-  { id: 'follow-up', label: 'Follow-up caller', help: 'Works warm leads through the weekly follow-up chain.', role: 'agent', queues: ['followup', 'inactive'], caps: ['call', 'tickets', 'recordings'], dailyTarget: 50 },
+  { id: 'new-agent', label: 'New agent', help: 'New registrations and follow-ups. Calls are reviewed.', role: 'agent', queues: ['new', 'followup', 'noanswer', 'unreached'], caps: ['call', 'tickets', 'recordings'], dailyTarget: 30, trainee: true },
+  { id: 'follow-up', label: 'Follow-up caller', help: 'Works warm leads through the weekly follow-up chain.', role: 'agent', queues: ['followup', 'inactive', 'noanswer', 'unreached'], caps: ['call', 'tickets', 'recordings'], dailyTarget: 50 },
   { id: 'payments', label: 'Payments desk', help: 'Dues, failed payments and drop-offs. Can mark dues paid.', role: 'agent', queues: ['payments', 'errors'], caps: ['call', 'tickets', 'recordings', 'payments'], dailyTarget: 50 },
   { id: 'support', label: 'Support desk', help: 'Tickets and app errors.', role: 'agent', queues: ['tickets', 'errors'], caps: ['call', 'tickets', 'recordings'], dailyTarget: 40 },
-  { id: 'supervisor', label: 'Supervisor', help: 'Every queue, team numbers, audits and access for agents.', role: 'supervisor', queues: ['new', 'tickets', 'payments', 'followup', 'errors', 'inactive'], caps: DEFAULT_CAPS.supervisor, dailyTarget: 0 },
+  { id: 'supervisor', label: 'Supervisor', help: 'Every queue, team numbers, audits and access for agents.', role: 'supervisor', queues: ['new', 'tickets', 'payments', 'followup', 'errors', 'inactive', 'noanswer', 'unreached'], caps: DEFAULT_CAPS.supervisor, dailyTarget: 0 },
   { id: 'admin', label: 'Admin', help: 'Full access to every app, person and number.', role: 'admin', queues: [], caps: DEFAULT_CAPS.admin, dailyTarget: 0 },
 ];
 

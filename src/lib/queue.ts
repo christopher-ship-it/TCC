@@ -1,5 +1,5 @@
-import type { AgentAccount, AppId, CustomerUser, QueueKey } from '../data/types.ts';
-import { callbackIsDue, startOfDay } from './followUps.ts';
+import { QUEUES, type AgentAccount, type AppId, type CustomerUser, type QueueKey } from '../data/types.ts';
+import { NO_ANSWER_ENDED_TAG, callbackIsDue, isConnected, priorityRank, startOfDay } from './followUps.ts';
 
 export function isReachable(agent: AgentAccount, user: CustomerUser): boolean {
   if (!agent.apps.includes(user.app)) return false;
@@ -15,10 +15,18 @@ export function visibleQueuesFor(agent: AgentAccount): QueueKey[] {
   return agent.queues;
 }
 
-/** A customer with a call-back date waits out of every queue until that day, then shows up under Follow-up. */
-function queueOf(u: CustomerUser, now: number): QueueKey | null {
+/** 14 days of daily calls ended with nobody picking up, and nobody has reached them since. */
+export const isUnreached = (u: CustomerUser): boolean => !u.queue && !u.callback && u.stageTag === NO_ANSWER_ENDED_TAG && !u.callHistory.some(isConnected);
+
+/**
+ * Which call list a customer is in right now. A customer with a call-back date waits out of every list until that day,
+ * then shows up under "No answer" (the automatic daily calls) or "Follow-up" (a date an agent chose). After the 14
+ * days they sit in "Not reached" until someone gets through.
+ */
+export function queueOf(u: CustomerUser, now: number): QueueKey | null {
   if (u.deleted) return null;
-  if (u.callback) return callbackIsDue(u, now) ? 'followup' : null;
+  if (u.callback) return callbackIsDue(u, now) ? (u.callback.auto ? 'noanswer' : 'followup') : null;
+  if (isUnreached(u)) return 'unreached';
   return u.queue;
 }
 
@@ -28,12 +36,26 @@ export function tasksForQueue(agent: AgentAccount, users: CustomerUser[], appId:
   return sortQueue(queueKey, list, now);
 }
 
+/** Yesterday's sign-ups first (the team's first call), then today's, then older ones newest first. */
+const newRank = (days: number) => (days === 1 ? 0 : days === 0 ? 1 : days + 1);
+
 function sortQueue(queueKey: QueueKey, list: CustomerUser[], now: number): CustomerUser[] {
   const arr = list.slice();
+  const byPriority = (a: CustomerUser, b: CustomerUser) => priorityRank(a.priority) - priorityRank(b.priority);
   switch (queueKey) {
+    case 'new':
+      arr.sort((a, b) => newRank(a.registeredDaysAgo) - newRank(b.registeredDaysAgo));
+      return arr;
+    case 'noanswer':
+      // High priority first, then the longest waiting, then the ones closest to running out of the 14 days.
+      arr.sort((a, b) => byPriority(a, b) || (a.callback?.dueTs ?? 0) - (b.callback?.dueTs ?? 0) || (b.autoFollowUp?.attempts ?? 0) - (a.autoFollowUp?.attempts ?? 0));
+      return arr;
+    case 'unreached':
+      arr.sort((a, b) => byPriority(a, b) || (b.callHistory[0]?.atTs ?? 0) - (a.callHistory[0]?.atTs ?? 0));
+      return arr;
     case 'followup': {
       const state = (u: CustomerUser) => (u.callback ? (u.callback.dueTs < startOfDay(now) ? 'overdue' : 'due-today') : u.followUp?.state);
-      arr.sort((a, b) => rank(state(a)) - rank(state(b)) || (b.followUp?.overdueDays ?? 0) - (a.followUp?.overdueDays ?? 0) || (a.callback?.dueTs ?? 0) - (b.callback?.dueTs ?? 0));
+      arr.sort((a, b) => byPriority(a, b) || rank(state(a)) - rank(state(b)) || (b.followUp?.overdueDays ?? 0) - (a.followUp?.overdueDays ?? 0) || (a.callback?.dueTs ?? 0) - (b.callback?.dueTs ?? 0));
       return arr;
     }
     case 'payments':
@@ -60,7 +82,7 @@ function payRank(status?: string) {
 }
 
 export function queueCounts(agent: AgentAccount, users: CustomerUser[], appId: AppId | null): Record<QueueKey, number> {
-  const keys: QueueKey[] = ['new', 'tickets', 'payments', 'followup', 'errors', 'inactive'];
+  const keys: QueueKey[] = QUEUES.map((q) => q.key);
   const out = {} as Record<QueueKey, number>;
   for (const k of keys) out[k] = tasksForQueue(agent, users, appId, k).length;
   return out;
@@ -68,11 +90,12 @@ export function queueCounts(agent: AgentAccount, users: CustomerUser[], appId: A
 
 export function totalOpenTasks(agent: AgentAccount, users: CustomerUser[], appId: AppId | null, includeInactive = false): number {
   const counts = queueCounts(agent, users, appId);
-  return (Object.keys(counts) as QueueKey[]).reduce((sum, k) => (k === 'inactive' && !includeInactive ? sum : sum + counts[k]), 0);
+  return (Object.keys(counts) as QueueKey[]).reduce((sum, k) => ((k === 'inactive' || k === 'unreached') && !includeInactive ? sum : sum + counts[k]), 0);
 }
 
 export function nextTask(agent: AgentAccount, users: CustomerUser[], appId: AppId | null): { queue: QueueKey; user: CustomerUser } | null {
-  const order: QueueKey[] = ['new', 'tickets', 'payments', 'followup', 'errors', 'inactive'];
+  // "Call next" works down the team's order; the 14-day unreached list is for agents to pick from, not served automatically.
+  const order: QueueKey[] = ['new', 'noanswer', 'followup', 'tickets', 'payments', 'errors', 'inactive'];
   for (const q of order) {
     const tasks = tasksForQueue(agent, users, appId, q);
     if (tasks.length) return { queue: q, user: tasks[0] };

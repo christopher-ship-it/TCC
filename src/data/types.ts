@@ -5,7 +5,7 @@ import { BRAND } from '../brand/index.ts';
 
 export type { CallAnalysis, LevelSample };
 
-export type QueueKey = 'new' | 'tickets' | 'payments' | 'followup' | 'errors' | 'inactive';
+export type QueueKey = 'new' | 'noanswer' | 'followup' | 'unreached' | 'tickets' | 'payments' | 'errors' | 'inactive';
 
 /** One-line diagnosis of which audio direction failed, from the last WebRTC stats sample. */
 export function telephonyQualitySummary(q: MediaStats | undefined | null): string | null {
@@ -32,12 +32,14 @@ export interface QueueDef {
 }
 
 export const QUEUES: QueueDef[] = ([
-  { key: 'new', order: 1, label: 'New registrations', short: 'New' },
-  { key: 'tickets', order: 2, label: 'Tickets & flags', short: 'Tickets' },
-  { key: 'payments', order: 3, label: 'Payments & dues', short: 'Payments' },
-  { key: 'followup', order: 4, label: 'Positive follow-up', short: 'Follow-up' },
-  { key: 'errors', order: 5, label: 'Errors & drop-offs', short: 'Errors' },
-  { key: 'inactive', order: 6, label: 'Inactive 30+ days', short: 'Inactive' },
+  { key: 'new', order: 1, label: 'New installs', short: 'New' },
+  { key: 'noanswer', order: 2, label: 'No answer & not reachable', short: 'No answer' },
+  { key: 'followup', order: 3, label: 'Positive follow-up', short: 'Follow-up' },
+  { key: 'unreached', order: 4, label: 'Not reached in 14 days', short: 'Unreached' },
+  { key: 'tickets', order: 5, label: 'Tickets & flags', short: 'Tickets' },
+  { key: 'payments', order: 6, label: 'Payments & dues', short: 'Payments' },
+  { key: 'errors', order: 7, label: 'Errors & drop-offs', short: 'Errors' },
+  { key: 'inactive', order: 8, label: 'Inactive 30+ days', short: 'Inactive' },
 ] as QueueDef[]).map((q) => ({ ...q, ...BRAND.queueLabels[q.key] }));
 
 /** Tecstellar's apps, plus each white-label client's own line of business (src/brand). */

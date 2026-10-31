@@ -1,11 +1,17 @@
 import type { CustomerUser } from '../data/types';
 import { BRAND } from '../brand';
+import { chainDay, AUTO_FOLLOWUP_DAYS } from './followUps';
+import { queueOf } from './queue';
 
 const days = (n: number) => (n === 0 ? 'today' : `${n} day${n === 1 ? '' : 's'} ago`);
 
 /** Why this customer is in front of the agent — the first thing to read before dialling. */
 export function whyInQueue(u: CustomerUser): string | null {
-  switch (u.queue) {
+  switch (queueOf(u, Date.now()) ?? u.queue) {
+    case 'noanswer':
+      return u.autoFollowUp ? `Didn’t pick up. Day ${Math.min(chainDay(u.autoFollowUp), AUTO_FOLLOWUP_DAYS)} of ${AUTO_FOLLOWUP_DAYS} of daily calls.` : 'Didn’t pick up. Called again as planned.';
+    case 'unreached':
+      return `Nobody picked up in ${AUTO_FOLLOWUP_DAYS} days of daily calls. Try again when you have time.`;
     case 'new':
       if (BRAND.fields) return `${BRAND.fields.newVerb} ${days(u.registeredDaysAgo)} and hasn’t ${BRAND.fields.notYet} yet.`;
       return u.listings === 0

@@ -19,7 +19,7 @@ import { Phone } from '../../components/telephony/Phone';
 import { useCallSession } from '../../components/telephony/callSessionContext';
 import { EscalateDialog } from '../../components/agent/EscalateDialog';
 import { TicketDialog } from '../../components/agent/TicketDialog';
-import { OutcomeBadge, SentimentBadge } from '../../components/calls/badges';
+import { OutcomeBadge, PriorityBadge, SentimentBadge, priorityRowStyle } from '../../components/calls/badges';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Button as UiButton } from '@/components/ui/button';
@@ -355,10 +355,11 @@ export default function Workspace() {
               </TableHeader>
               <TableBody>
                 {list.slice(0, 60).map((u) => (
-                  <TableRow key={u.id} data-state={u.id === user.id ? 'selected' : undefined} className="cursor-pointer" onClick={() => !callLive && !session.wrapUp && setParams({ focus: u.id }, { replace: true })}>
+                  <TableRow key={u.id} data-state={u.id === user.id ? 'selected' : undefined} className="cursor-pointer" style={priorityRowStyle(u.priority)} onClick={() => !callLive && !session.wrapUp && setParams({ focus: u.id }, { replace: true })}>
                     <TableCell>
                       <CustomerName user={u} />
                       <div className="mono muted" style={{ fontSize: 12 }}>{u.phone}</div>
+                      {u.priority && <div style={{ marginTop: 3 }}><PriorityBadge priority={u.priority} /></div>}
                     </TableCell>
                     <TableCell>{u.customerType ? <UiBadge variant="outline">{u.customerType}</UiBadge> : <span className="muted">—</span>}</TableCell>
                     <TableCell className="text-muted-foreground">{u.city}</TableCell>

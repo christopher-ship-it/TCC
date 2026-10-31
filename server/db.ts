@@ -154,6 +154,16 @@ export const MIGRATIONS: { version: number; name: string; sql: string }[] = [
       where doc->>'language' in ('Bengali', 'English');
     `,
   },
+  {
+    version: 7,
+    name: 'call lists: No answer and Not reached, given to whoever calls new or follow-up customers',
+    sql: `
+      update agents set doc = jsonb_set(doc, '{queues}', (doc->'queues') || '["noanswer", "unreached"]'::jsonb)
+      where jsonb_typeof(doc->'queues') = 'array'
+        and (doc->'queues' ? 'new' or doc->'queues' ? 'followup')
+        and not doc->'queues' ? 'noanswer';
+    `,
+  },
 ];
 
 export interface DbHealth {

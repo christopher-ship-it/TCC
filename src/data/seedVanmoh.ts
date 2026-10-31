@@ -67,7 +67,7 @@ const agent = (a: Partial<AgentAccount> & Pick<AgentAccount, 'id' | 'name' | 'us
 export const VANMOH_AGENTS: AgentAccount[] = [
   agent({
     id: 'kavitha-r', name: 'Kavitha R', username: 'kavitha.r', role: 'agent', telecmiUserId: '5001_33338836',
-    queues: ['new', 'followup'], languages: ['Tamil', 'English'], lastActiveLabel: '3 min ago',
+    queues: ['new', 'followup', 'noanswer', 'unreached'], languages: ['Tamil', 'English'], lastActiveLabel: '3 min ago',
     todayCalls: 48, todayConnected: 33, todayPositive: 14, todaySubscribed: 3, todayOverdue: 2, avgHandleLabel: '3m 25s', workingQueueLabel: 'New enquiries',
   }),
   agent({
@@ -78,18 +78,18 @@ export const VANMOH_AGENTS: AgentAccount[] = [
   }),
   agent({
     id: 'deepika-s', name: 'Deepika S', username: 'deepika.s', role: 'agent', telecmiUserId: '5003_33338836',
-    queues: ['tickets', 'payments', 'new'], languages: ['Tamil', 'Malayalam', 'English'], states: ['Tamil Nadu', 'Kerala'], lastActiveLabel: '20 min ago',
+    queues: ['tickets', 'payments', 'new', 'noanswer', 'unreached'], languages: ['Tamil', 'Malayalam', 'English'], states: ['Tamil Nadu', 'Kerala'], lastActiveLabel: '20 min ago',
     todayCalls: 39, todayConnected: 28, todayPositive: 11, todaySubscribed: 1, todayOverdue: 4, avgHandleLabel: '4m 05s', workingQueueLabel: 'Complaints & requests',
   }),
   agent({
     id: 'manikandan-p', name: 'Manikandan P', username: 'manikandan.p', role: 'agent', trainee: true, telecmiUserId: '5004_33338836',
-    queues: ['new'], dailyTarget: 30, createdTs: NOW - 30 * DAY_MS, lastActiveLabel: 'Yesterday',
+    queues: ['new', 'noanswer', 'unreached'], dailyTarget: 30, createdTs: NOW - 30 * DAY_MS, lastActiveLabel: 'Yesterday',
     capabilities: { vanmoh: ['call', 'recordings'] },
     todayCalls: 17, todayConnected: 10, todayPositive: 4, todaySubscribed: 0, todayOverdue: 0, avgHandleLabel: '5m 50s', workingQueueLabel: 'New enquiries',
   }),
   agent({
     id: 'lakshmi-v', name: 'Lakshmi V', username: 'lakshmi.v', role: 'supervisor', telecmiUserId: '5000_33338836',
-    queues: ['new', 'tickets', 'payments', 'followup', 'errors', 'inactive'], languages: ['Tamil', 'Malayalam', 'English'], states: ['Tamil Nadu', 'Kerala'],
+    queues: ['new', 'tickets', 'payments', 'followup', 'errors', 'inactive', 'noanswer', 'unreached'], languages: ['Tamil', 'Malayalam', 'English'], states: ['Tamil Nadu', 'Kerala'],
     dailyTarget: 0, createdTs: NOW - 300 * DAY_MS, lastActiveLabel: 'now',
   }),
   agent({

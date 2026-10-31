@@ -4,7 +4,7 @@ import type { CustomerUser, EscalationRecord, Outcome, QueueKey } from '../data/
 import { NEGATIVE_OUTCOMES, OUTCOME_LIST, overlayFromUser } from '../data/types';
 import { customerTypesFor } from '../data/products';
 import { isConnected } from '../lib/metrics';
-import { planFollowUp, startOfDay } from '../lib/followUps';
+import { NO_ANSWER_ENDED_TAG, planFollowUp, startOfDay } from '../lib/followUps';
 import { fmtDay, fmtDayTime } from '../lib/dates';
 import { isReachable } from '../lib/queue';
 import { attachRecording, withAnalysis } from '../lib/attachRecording';
@@ -71,7 +71,7 @@ export function reducer(state: State, action: Action): State {
         if (plan.ended) {
           next.attempt = u.attempt + 1;
           next.queue = null;
-          next.stageTag = 'No answer in 14 days';
+          next.stageTag = NO_ANSWER_ENDED_TAG;
           return next;
         }
 
