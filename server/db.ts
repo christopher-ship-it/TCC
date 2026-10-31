@@ -117,6 +117,22 @@ export const MIGRATIONS: { version: number; name: string; sql: string }[] = [
       create index notes_audience_idx on notes (audience);
     `,
   },
+  {
+    version: 5,
+    name: 'recordings announced by the carrier webhook',
+    sql: `
+      create table call_recordings (
+        file text primary key,
+        direction text,
+        remote text not null,
+        agent_user text,
+        started_at bigint not null,
+        talk_seconds int,
+        received_at timestamptz not null default now()
+      );
+      create index call_recordings_remote_idx on call_recordings (remote, started_at);
+    `,
+  },
 ];
 
 export interface DbHealth {
@@ -129,7 +145,7 @@ export interface DbHealth {
   tables?: Record<string, number>;
 }
 
-const TABLES = ['agents', 'customers', 'escalations', 'audit_log', 'call_analyses', 'settings', 'logins', 'sessions', 'events', 'notices', 'notes'] as const;
+const TABLES = ['agents', 'customers', 'escalations', 'audit_log', 'call_analyses', 'settings', 'logins', 'sessions', 'events', 'notices', 'notes', 'call_recordings'] as const;
 
 export function createDb(url: string | undefined) {
   let pool: pg.Pool | undefined;

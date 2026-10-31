@@ -18,6 +18,8 @@ export interface ServerEnv {
   dataDir: string;
   /** The white label this deployment runs as (VITE_BRAND; unset = Tecstellar). Shapes the call-analysis prompt. */
   brand: BrandKey;
+  /** Shared secret in the TeleCMI webhook URL (TCC_WEBHOOK_SECRET). Unset = the webhook accepts nothing. */
+  webhookSecret?: string;
   /** Extra addresses the app is served at through a proxy that rewrites the Host header (TCC_PUBLIC_HOSTS,
    *  comma-separated) — e.g. vanmohchitfunds.buziness365.com, forwarded by BusinessOS to this service. */
   publicHosts: string[];
@@ -42,6 +44,7 @@ export function readServerEnv(vars: Record<string, string | undefined>, root: st
     dataDir: path.join(root, '.data'),
     brand: brandKey(vars.VITE_BRAND),
     setupCode: pick(vars.TCC_SETUP_CODE),
+    webhookSecret: pick(vars.TCC_WEBHOOK_SECRET),
     sources: sourcesFromEnv(vars),
     sourceSyncMinutes: Number(pick(vars.TCC_SOURCE_SYNC_MINUTES)) || 10,
     publicHosts: (vars.TCC_PUBLIC_HOSTS ?? '').split(',').map((h) => h.trim().toLowerCase()).filter(Boolean),

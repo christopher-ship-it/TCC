@@ -18,6 +18,7 @@ import { promisify } from 'node:util';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import type pg from 'pg';
 import { logEvent } from './events.ts';
+import { findRecordedCall } from './webhook.ts';
 import type { SourceSync } from './appSync.ts';
 import { keepSourceFields } from '../src/lib/appSync.ts';
 import type { CustomerUser as FullCustomer } from '../src/data/types.ts';
@@ -629,6 +630,17 @@ export function createStore(getPool: () => Promise<pg.Pool>, env: StoreEnv, read
       const me = await requireMe(req, pool);
       await pool.query('update notices set done_at = now() where id = $1 and agent_id = $2', [decodeURIComponent(doneRoute[1]), me.id]);
       send(res, 200, { ok: true });
+      return true;
+    }
+
+    // The recording TeleCMI announced for a call (webhook), found by the other party's number and start time.
+    if (req.method === 'GET' && p === '/api/recording-lookup') {
+      await requireMe(req, pool);
+      const remote = url.searchParams.get('remote') ?? '';
+      const startedAt = Number(url.searchParams.get('startedAt'));
+      const direction = url.searchParams.get('direction') ?? undefined;
+      if (!/\d{6,}/.test(remote) || !Number.isFinite(startedAt)) return send(res, 400, { error: 'remote and startedAt are required.' }), true;
+      send(res, 200, { file: (await findRecordedCall(pool, { remote, startedAt, direction })) ?? null });
       return true;
     }
 

@@ -4,6 +4,8 @@
 //   GET  /api/health              → which server features are configured
 //   GET  /api/db/health           → Neon connectivity, schema version and row counts (never the connection string)
 //   GET  /api/recordings/:file    → the call recording (Range requests supported, so the player can seek)
+//   POST /api/telephony/webhook   → TeleCMI's call-detail webhook (?secret=TCC_WEBHOOK_SECRET); stores recording file names
+//   GET  /api/recording-lookup    → ?remote&startedAt&direction → { file } from those stored names (signed-in agents)
 //   POST /api/analyze             → { file, customer?, business?, app?, levels? } → CallAnalysis
 //   POST /api/telephony/status    → { id, password, status: online|offline } → the agent's TeleCMI availability
 //   POST /api/sources/lookup      → { phone } → { customer } an incoming caller found in a product's own database
@@ -15,6 +17,7 @@ import { analyzeRecording, NotConfigured, type AnalyzeRequest } from './analyze.
 import type { ServerEnv } from './env.ts';
 import { createDb } from './db.ts';
 import { fetchRecording, RECORDING_FILE_RE } from './recordings.ts';
+import { parseCdrWebhook, saveRecordedCall, webhookAuthorised } from './webhook.ts';
 import { PresenceError, setAgentStatus } from './presence.ts';
 import { createStore, HttpError, requestAgent } from './store.ts';
 import { createSourceSync, SourceError } from './appSync.ts';
@@ -207,7 +210,23 @@ export function createApi(env: ServerEnv) {
         return send(res, 200, { analysis: await analyzeRecording(request, env) });
       }
 
-      if (/^\/api\/(auth\/|data$|people|notices|notes|password-requests$|events$|system|sources\/lookup$)/.test(url.pathname)) {
+      // TeleCMI's call-detail webhook: it announces each recording, so TCC no longer depends on an agent's browser to find it.
+      if (req.method === 'POST' && url.pathname === '/api/telephony/webhook') {
+        if (!webhookAuthorised(url.searchParams.get('secret') ?? (req.headers['x-webhook-secret'] as string | undefined), env.webhookSecret)) return send(res, 401, { error: 'Not allowed.' });
+        if (!db.configured) return send(res, 501, { error: 'No database is connected (DATABASE_URL).', notConfigured: true });
+        const body = await readJson(req, 64 * 1024);
+        const rec = parseCdrWebhook(body);
+        if (rec) {
+          await saveRecordedCall(await db.ready(), rec);
+          logEvent({ level: 'info', source: 'telephony', message: `TeleCMI announced a recording (${rec.direction ?? 'call'} …${rec.remote.slice(-4)}, ${rec.talkSeconds ?? '?'}s)` });
+        } else {
+          const t = (body as { type?: unknown; status?: unknown; record?: unknown } | null) ?? {};
+          logEvent({ level: 'info', source: 'telephony', message: `TeleCMI webhook without a recording (type ${String(t.type)}, status ${String(t.status)}, record ${String(t.record)})` });
+        }
+        return send(res, 200, { ok: true });
+      }
+
+      if (/^\/api\/(auth\/|data$|recording-lookup$|people|notices|notes|password-requests$|events$|system|sources\/lookup$)/.test(url.pathname)) {
         if (!db.configured) return send(res, 501, { error: 'No database is connected (DATABASE_URL).', notConfigured: true });
         if (await store(req, res, url)) return;
       }
