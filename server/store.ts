@@ -21,6 +21,7 @@ import { logEvent } from './events.ts';
 import { findRecordedCall } from './webhook.ts';
 import type { SourceSync } from './appSync.ts';
 import type { Assigner } from './assign.ts';
+import { canSignOut, isOnline, type PresenceRow } from '../src/lib/signedIn.ts';
 import { keepSourceFields } from '../src/lib/appSync.ts';
 import type { CustomerUser as FullCustomer } from '../src/data/types.ts';
 // The records as stored. The full shapes live in src/data/types.ts (the browser's); the server only relies on these fields.
@@ -663,6 +664,40 @@ export function createStore(getPool: () => Promise<pg.Pool>, env: StoreEnv, read
       const direction = url.searchParams.get('direction') ?? undefined;
       if (!/\d{6,}/.test(remote) || !Number.isFinite(startedAt)) return send(res, 400, { error: 'remote and startedAt are required.' }), true;
       send(res, 200, { file: (await findRecordedCall(pool, { remote, startedAt, direction })) ?? null });
+      return true;
+    }
+
+    // Who is signed in right now, for the people who run the team (admins and supervisors, for their own products).
+    if (req.method === 'GET' && p === '/api/presence') {
+      const me = await requireMe(req, pool);
+      if (me.role === 'agent') throw new HttpError(403, 'Only admins and supervisors can see who is signed in.');
+      const rows = (
+        await pool.query<{ doc: AgentAccount; last_seen: string | null; sessions: string }>(
+          `select a.doc, max(s.last_seen_at) as last_seen, count(s.token_hash) filter (where s.expires_at > now()) as sessions
+           from agents a left join sessions s on s.agent_id = a.id group by a.id, a.doc order by a.doc->>'name'`,
+        )
+      ).rows;
+      const now = Date.now();
+      const people: PresenceRow[] = rows
+        .filter((r) => me.superAdmin || (!r.doc.superAdmin && (me.role === 'admin' || r.doc.apps.some((a) => me.apps.includes(a)))))
+        .map((r) => {
+          const lastSeen = r.last_seen ? Date.parse(r.last_seen) : null;
+          const sessions = Number(r.sessions);
+          return { id: r.doc.id, name: r.doc.name, role: r.doc.role, apps: r.doc.apps, languages: r.doc.languages, status: r.doc.status, lastSeen, sessions, online: isOnline(lastSeen, sessions, now), canSignOut: canSignOut(me, r.doc) };
+        });
+      send(res, 200, { people, now });
+      return true;
+    }
+
+    // Sign someone out from here: their sessions end, and their next click sends them to the sign-in page.
+    const so = p.match(/^\/api\/people\/([^/]+)\/signout$/);
+    if (req.method === 'POST' && so) {
+      const me = await requireMe(req, pool);
+      const target = (await pool.query<{ doc: AgentAccount }>('select doc from agents where id = $1', [decodeURIComponent(so[1])])).rows[0]?.doc;
+      if (!target || !canSignOut(me, target)) throw new HttpError(403, 'You can’t sign this person out.');
+      const ended = (await pool.query('delete from sessions where agent_id = $1', [target.id])).rowCount ?? 0;
+      await writeAudit(pool, auditRow(me, 'signed_out', target.name, `Signed ${target.name} out (${ended} session${ended === 1 ? '' : 's'})`));
+      send(res, 200, { ok: true, ended });
       return true;
     }
 

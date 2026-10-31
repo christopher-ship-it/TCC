@@ -8,6 +8,8 @@
 //   GET  /api/recording-lookup    → ?remote&startedAt&direction → { file } from those stored names (signed-in agents)
 //   POST /api/analyze             → { file, customer?, business?, app?, levels? } → CallAnalysis
 //   POST /api/telephony/status    → { id, password, status: online|offline } → the agent's TeleCMI availability
+//   GET  /api/presence            → who is signed in right now (admins, supervisors)
+//   POST /api/people/:id/signout  → ends someone's sessions (admins, for their own people)
 //   POST /api/assignments/run     → hands out customers now (signed-in agents); who holds how many
 //   POST /api/sources/lookup      → { phone } → { customer } an incoming caller found in a product's own database
 //   POST /api/system/sources/sync → { app, full? } run a product's customer sync now (super admin; server/appSync.ts)
@@ -229,7 +231,7 @@ export function createApi(env: ServerEnv) {
         return send(res, 200, { ok: true });
       }
 
-      if (/^\/api\/(auth\/|data$|recording-lookup$|people|notices|notes|password-requests$|events$|assignments\/|system|sources\/lookup$)/.test(url.pathname)) {
+      if (/^\/api\/(auth\/|data$|recording-lookup$|people|notices|notes|password-requests$|events$|assignments\/|presence$|system|sources\/lookup$)/.test(url.pathname)) {
         if (!db.configured) return send(res, 501, { error: 'No database is connected (DATABASE_URL).', notConfigured: true });
         if (await store(req, res, url)) return;
       }

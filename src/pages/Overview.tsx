@@ -16,7 +16,12 @@ import { MetricChart } from '../ui/MetricChart';
 import { BarList } from '../ui/charts';
 import { CallRowItem } from '../components/calls/CallRowItem';
 import { PageHead } from '../ui/primitives';
+import { FilterBar, SearchFilter, SelectFilter, useFilters } from '../ui/filters';
+import { AGENT_LANGUAGES } from '../lib/languages';
+import { textMatch } from '../lib/filters';
+import { APPS } from '../data/seed';
 import { SuperAdminTotals } from './admin/Totals';
+import { SignedInNow } from './admin/SignedInNow';
 
 /** A fresh deployment: what to do first, ticked off as it happens. Gone once someone has made a call. */
 function GettingStarted() {
@@ -56,6 +61,7 @@ export default function Overview() {
   const { state, currentAgent } = useStore();
   const { apps } = useScope();
   const [open, setOpen] = useState<AgentScore | null>(null);
+  const { values: of, set: setOf, reset: resetOf, active: ofActive } = useFilters(['oq', 'olang', 'oprod', 'ocalling', 'orole'] as const);
 
   const startOfToday = useMemo(() => new Date().setHours(0, 0, 0, 0), []);
   const week = useMemo(() => allCalls(state.users, { apps, since: startOfToday - 6 * DAY }), [state.users, apps, startOfToday]);
@@ -67,13 +73,20 @@ export default function Overview() {
   const openTickets = state.users.filter((u) => apps.includes(u.app) && u.queue === 'tickets').length;
   const callsToday = (name: string) => today.filter((r) => r.call.agentName === name).length;
   const activeToday = new Set(today.map((r) => r.call.agentName)).size;
+  const shownScores = scores
+    .filter((s) => !of.olang || s.agent.languages.includes(of.olang as never))
+    .filter((s) => !of.oprod || s.agent.apps.includes(of.oprod as never))
+    .filter((s) => !of.ocalling || (of.ocalling === 'yes') === (callsToday(s.agent.name) > 0))
+    .filter((s) => !of.orole || (of.orole === 'trainee') === !!s.agent.trainee)
+    .filter((s) => textMatch(of.oq, s.agent.name, s.agent.languages.join(' ')));
 
   return (
     <div className="page">
       <PageHead title="Overview" desc="What the calling team did today. Click an agent for the detail." />
       <GettingStarted />
-      {currentAgent?.superAdmin && <SuperAdminTotals />}
-      {currentAgent?.superAdmin && <h2 className="text-base font-semibold" style={{ marginTop: 8 }}>Today</h2>}
+      {currentAgent?.role === 'admin' && <SuperAdminTotals />}
+      {currentAgent?.role !== 'agent' && <SignedInNow />}
+      {currentAgent?.role === 'admin' && <h2 className="text-base font-semibold" style={{ marginTop: 8 }}>Today</h2>}
 
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         {[
@@ -96,6 +109,15 @@ export default function Overview() {
 
       <Card>
         <div className="px-4 pt-3 pb-2 text-base font-semibold">Agents</div>
+        <div className="px-4 pb-3">
+          <FilterBar active={ofActive} onReset={resetOf} shown={shownScores.length} total={scores.length} noun="agents">
+            <SearchFilter value={of.oq} onChange={(v) => setOf('oq', v)} placeholder="Agent name or language" label="Find an agent" />
+            <SelectFilter label="Language" value={of.olang} onChange={(v) => setOf('olang', v)} options={AGENT_LANGUAGES.map((l) => ({ value: l, label: l }))} />
+            {apps.length > 1 && <SelectFilter label="Product" value={of.oprod} onChange={(v) => setOf('oprod', v)} options={APPS.filter((a) => apps.includes(a.id)).map((a) => ({ value: a.id, label: a.name }))} />}
+            <SelectFilter label="Calling today" value={of.ocalling} onChange={(v) => setOf('ocalling', v)} all="Calling today: any" options={[{ value: 'yes', label: 'Has called today' }, { value: 'no', label: 'No calls yet' }]} />
+            <SelectFilter label="Experience" value={of.orole} onChange={(v) => setOf('orole', v)} all="Everyone" options={[{ value: 'trainee', label: 'Trainees' }, { value: 'regular', label: 'Not trainees' }]} />
+          </FilterBar>
+        </div>
         <Table>
           <TableHeader>
             <TableRow data-head>
@@ -107,7 +129,7 @@ export default function Overview() {
             </TableRow>
           </TableHeader>
           <TableBody>
-            {scores.map((s) => {
+            {shownScores.map((s) => {
               const n = callsToday(s.agent.name);
               const pct = s.agent.dailyTarget ? Math.min(100, Math.round((n / s.agent.dailyTarget) * 100)) : 0;
               return (

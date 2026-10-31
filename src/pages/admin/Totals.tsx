@@ -32,18 +32,19 @@ function Breakdown({ title, children }: { title: string; children: ReactNode }) 
 }
 
 export function SuperAdminTotals() {
-  const { state, backend } = useStore();
+  const { state, backend, currentAgent } = useStore();
+  const superAdmin = !!currentAgent?.superAdmin;
   const { apps } = useScope();
   const [notes, setNotes] = useState<NoteCount[] | null>(null);
 
   useEffect(() => {
-    if (backend !== 'server') return;
+    if (backend !== 'server' || !superAdmin) return;
     let live = true;
     notesCall<{ notes: NoteCount[] }>('GET', '/api/system/counts').then((r) => live && setNotes(r.notes)).catch(() => undefined);
     return () => {
       live = false;
     };
-  }, [backend]);
+  }, [backend, superAdmin]);
 
   const { overall: t, byApp } = useMemo(
     () => countEverything({ users: state.users, agents: state.agents, escalations: state.escalations, notes }, apps),
@@ -54,9 +55,9 @@ export function SuperAdminTotals() {
   return (
     <section className="stack" aria-labelledby="totals-head">
       <div>
-        <h2 id="totals-head" className="text-base font-semibold">Everything in TCC</h2>
+        <h2 id="totals-head" className="text-base font-semibold">{superAdmin ? 'Everything in TCC' : 'Everything in your products'}</h2>
         <p className="text-muted-foreground" style={{ fontSize: 13.5 }}>
-          All-time totals{products.length === 1 ? ` for ${products[0].name}` : ' across every product'}. Only you see this.
+          All-time totals{products.length === 1 ? ` for ${products[0].name}` : superAdmin ? ' across every product' : ' across your products'}. {superAdmin ? 'Only you see this.' : 'Only admins see this.'}
         </p>
       </div>
 
@@ -65,7 +66,7 @@ export function SuperAdminTotals() {
         <Stat label="Calls made" value={n(t.calls)} note={`${n(t.connected)} connected (${pct(t.connected, t.calls)}) · ${n(t.callsToday)} today`} />
         <Stat label="Talk time" value={durationLabel(t.talkSec)} note={`${n(t.incoming)} incoming calls`} />
         <Stat label="Follow-ups" value={n(t.followUps)} tone={t.followUpsOverdue ? 'warn' : undefined} note={`${n(t.followUpsOverdue)} overdue · ${n(t.followUpsToday)} today`} />
-        <Stat label="Notes" value={n(t.notes)} note={t.notes === null ? 'Kept on TCC’s server only' : `${n(t.notesForAgents)} left for agents`} />
+        {superAdmin && <Stat label="Notes" value={n(t.notes)} note={t.notes === null ? 'Kept on TCC’s server only' : `${n(t.notesForAgents)} left for agents`} />}
         <Stat label="Escalations" value={n(t.escalations)} tone={t.escalationsWaiting ? 'warn' : undefined} note={`${n(t.escalationsWaiting)} waiting · ${n(t.escalationsUrgent)} urgent`} />
         <Stat label="Positive / negative" value={`${n(t.positive)} / ${n(t.negative)}`} note={`${n(t.neverCalled)} customers never called`} />
         <Stat label="Agents" value={n(t.agents)} note={`${n(t.supervisors)} supervisors · ${n(t.admins)} admins`} />
@@ -83,7 +84,7 @@ export function SuperAdminTotals() {
                   <TableHead className="text-right">Calls</TableHead>
                   <TableHead className="text-right">Connected</TableHead>
                   <TableHead className="text-right">Follow-ups</TableHead>
-                  <TableHead className="text-right">Notes</TableHead>
+                  {superAdmin && <TableHead className="text-right">Notes</TableHead>}
                   <TableHead className="text-right">Escalations</TableHead>
                   <TableHead className="text-right">Agents</TableHead>
                 </TableRow>
@@ -98,7 +99,7 @@ export function SuperAdminTotals() {
                       <TableCell className="text-right tabular-nums">{n(r.calls)}</TableCell>
                       <TableCell className="text-right tabular-nums">{n(r.connected)}{r.calls > 0 && <Sub>{pct(r.connected, r.calls)}</Sub>}</TableCell>
                       <TableCell className="text-right tabular-nums">{n(r.followUps)}{r.followUpsOverdue > 0 && <Sub>{n(r.followUpsOverdue)} overdue</Sub>}</TableCell>
-                      <TableCell className="text-right tabular-nums">{n(r.notes)}</TableCell>
+                      {superAdmin && <TableCell className="text-right tabular-nums">{n(r.notes)}</TableCell>}
                       <TableCell className="text-right tabular-nums">{n(r.escalations)}{r.escalationsWaiting > 0 && <Sub>{n(r.escalationsWaiting)} waiting</Sub>}</TableCell>
                       <TableCell className="text-right tabular-nums">{n(r.agents)}{r.supervisors > 0 && <Sub>+ {n(r.supervisors)} supervisor{r.supervisors === 1 ? '' : 's'}</Sub>}</TableCell>
                     </TableRow>

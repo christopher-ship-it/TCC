@@ -7,8 +7,8 @@ import { logEvent } from './events.ts';
 import { DEFAULT_CAPACITY, planAssignments, type AssignmentPlan } from '../src/lib/assignment.ts';
 import type { AgentAccount, CustomerUser } from '../src/data/types.ts';
 
-/** An agent counts as online while their browser has talked to the server in the last 15 minutes. */
-export const ONLINE_MINUTES = 15;
+import { ONLINE_MINUTES } from '../src/lib/signedIn.ts';
+export { ONLINE_MINUTES };
 const LOCK_KEY = 727401;
 
 export interface AssignSummary {
