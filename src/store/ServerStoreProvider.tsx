@@ -147,7 +147,7 @@ export function ServerStoreProvider({ children }: { children: React.ReactNode })
       } else {
         setSyncError(e instanceof Error ? e.message : 'Could not save.');
         report('warn', `Save failed: ${e instanceof Error ? e.message : String(e)}`);
-        if (e instanceof ApiError && e.status >= 400 && e.status < 500) {
+        if (e instanceof ApiError && e.status >= 400 && e.status < 500 && e.status !== 429) {
           // The server refused this change (no permission, a username taken): drop it rather than retry forever,
           // and reload so the screen shows what was actually saved.
           unsaved.current = { agents: new Map(), users: new Map(), escalations: new Map() };
