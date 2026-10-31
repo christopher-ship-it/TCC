@@ -191,6 +191,8 @@ export interface CallLogEntry {
   followUpTs?: number;
   /** Positive or negative, as the agent marked it after this call (Lead). */
   lead?: Lead;
+  /** What the agent said about the AI's reading of this call (src/lib/aiFeedback.ts). */
+  analysisFeedback?: { verdict: 'good' | 'partly' | 'wrong'; outcome?: string; sentiment?: 'positive' | 'neutral' | 'negative'; note?: string; ts: number };
   /** How positive, for a call marked positive. */
   rating?: Rating;
   /** The priority the agent gave the follow-up after this call. */

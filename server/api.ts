@@ -10,6 +10,9 @@
 //   POST /api/telephony/status    → { id, password, status: online|offline } → the agent's TeleCMI availability
 //   GET  /api/presence            → who is signed in right now (admins, supervisors)
 //   POST /api/people/:id/signout  → ends someone's sessions (admins, for their own people)
+//   GET  /api/audit/page?before=  → the next 100 older change-log entries (archive included)
+//   GET  /api/logs/export?kind=activity|events&days=N → the log as a CSV file (archive included)
+//   POST /api/feedback            → an agent's verdict on the AI's reading of a call (the AI then learns from it)
 //   POST /api/assignments/run     → hands out customers now (signed-in agents); who holds how many
 //   POST /api/sources/lookup      → { phone } → { customer } an incoming caller found in a product's own database
 //   POST /api/system/sources/sync → { app, full? } run a product's customer sync now (super admin; server/appSync.ts)
@@ -25,6 +28,9 @@ import { PresenceError, setAgentStatus } from './presence.ts';
 import { createStore, HttpError, requestAgent } from './store.ts';
 import { createSourceSync, SourceError } from './appSync.ts';
 import { createAssigner } from './assign.ts';
+import { createLimiter, requesterOf } from './rateLimit.ts';
+import { startRetention } from './retention.ts';
+import { createLearning } from './aiLearning.ts';
 import { analysisQueue, onAnalysisEvent } from './analyze.ts';
 import { endpointStats, logEvent, recentEvents, recentRequests, recordRequest, startedAt, connectEventStore } from './events.ts';
 
@@ -137,13 +143,16 @@ export function createApi(env: ServerEnv) {
       setupFormOpen: Boolean(env.setupCode),
       endpoints: endpointStats(),
       requests: recentRequests(),
-      events: await recentEvents(db.configured ? await db.ready().catch(() => null) : null, 1000),
+      events: await recentEvents(db.configured ? await db.ready().catch(() => null) : null, 100),
     };
   };
 
   const sources = db.configured && env.sources.length ? createSourceSync(() => db.ready(), env.sources, { everyMinutes: env.sourceSyncMinutes }) : undefined;
+  const learning = db.configured ? createLearning(() => db.ready()) : undefined;
+  const limiter = createLimiter();
+  const limitedRecently = new Map<string, number>();
   const assigner = db.configured ? createAssigner(() => db.ready(), { capacity: env.assignCapacity }) : undefined;
-  const store = createStore(() => db.ready(), { setupCode: env.setupCode, systemHealth, check, sources, assigner }, readJson, send);
+  const store = createStore(() => db.ready(), { setupCode: env.setupCode, systemHealth, check, sources, assigner, learning }, readJson, send);
   async function api(req: IncomingMessage, res: ServerResponse, next: Next) {
     const url = new URL(req.url ?? '/', 'http://local');
     if (!url.pathname.startsWith('/api/')) return next();
@@ -154,6 +163,20 @@ export function createApi(env: ServerEnv) {
       recordRequest({ ts: t0, method: req.method ?? 'GET', path: url.pathname, status: res.statusCode, ms: Date.now() - t0, agentName: requestAgent.get(req)?.name });
     });
     if (!sameOrigin(req, env.publicHosts)) return send(res, 403, { error: 'Cross-site request refused.' });
+
+    // Brakes: every request counts against the first rule it matches (server/rateLimit.ts).
+    const who = requesterOf(req);
+    const verdict = limiter.check(req.method ?? 'GET', url.pathname, who);
+    if (!verdict.ok) {
+      const key = `${verdict.rule.id}|${who.person ?? who.address}`;
+      if (Date.now() - (limitedRecently.get(key) ?? 0) > 10 * 60_000) {
+        limitedRecently.set(key, Date.now());
+        if (limitedRecently.size > 500) limitedRecently.clear();
+        logEvent({ level: 'warn', source: 'ratelimit', message: `Slowed down “${verdict.rule.label}” (${verdict.rule.limit} per ${Math.round(verdict.rule.windowMs / 60_000)} min)`, detail: { rule: verdict.rule.id, path: url.pathname } });
+      }
+      res.setHeader?.('Retry-After', String(verdict.retryAfterSec));
+      return send(res, 429, { error: `Too many requests. Try again in ${verdict.retryAfterSec} seconds.`, retryAfter: verdict.retryAfterSec });
+    }
 
     try {
       if (req.method === 'GET' && url.pathname === '/api/health') {
@@ -212,7 +235,7 @@ export function createApi(env: ServerEnv) {
           customerTypes: Array.isArray(body.customerTypes) ? body.customerTypes.filter((t): t is string => typeof t === 'string').slice(0, 8).map((t) => t.slice(0, 40)) : undefined,
           levels: isLevels(body.levels) ? body.levels : undefined,
         };
-        return send(res, 200, { analysis: await analyzeRecording(request, env) });
+        return send(res, 200, { analysis: await analyzeRecording({ ...request, lessons: (await learning?.lessonsFor(request.app).catch(() => '')) || undefined }, env) });
       }
 
       // TeleCMI's call-detail webhook: it announces each recording, so TCC no longer depends on an agent's browser to find it.
@@ -231,7 +254,7 @@ export function createApi(env: ServerEnv) {
         return send(res, 200, { ok: true });
       }
 
-      if (/^\/api\/(auth\/|data$|recording-lookup$|people|notices|notes|password-requests$|events$|assignments\/|presence$|system|sources\/lookup$)/.test(url.pathname)) {
+      if (/^\/api\/(auth\/|data$|recording-lookup$|people|notices|notes|password-requests$|events$|assignments\/|presence$|audit\/|logs\/|feedback$|system|sources\/lookup$)/.test(url.pathname)) {
         if (!db.configured) return send(res, 501, { error: 'No database is connected (DATABASE_URL).', notConfigured: true });
         if (await store(req, res, url)) return;
       }
@@ -259,6 +282,7 @@ export function createApi(env: ServerEnv) {
   api.startBackgroundJobs = () => {
     sources?.start();
     assigner?.start();
+    if (db.configured) startRetention(() => db.ready());
   };
   return api;
 }

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
-import { Activity, BarChart3, CalendarClock, ChevronDown, ClipboardList, Contact, Database, KeyRound, Flag, Headset, History, Home, LogOut, Map, NotebookPen, Phone, Repeat, RotateCcw, Search, Shuffle, Users, UsersRound } from 'lucide-react';
+import { Activity, BarChart3, CalendarClock, ChevronDown, ClipboardList, Contact, Database, KeyRound, Flag, Headset, History, Home, LogOut, Map, NotebookPen, Phone, Plug, Repeat, RotateCcw, Search, Shuffle, Sparkles, Users, UsersRound } from 'lucide-react';
 import { APP_LOGOS, BRAND_MARK } from '../assets';
 import { APPS } from '../data/seed';
 import type { AppId, Role } from '../data/types';
@@ -224,7 +224,7 @@ export default function AppShell() {
   const pending = state.escalations.filter((e) => e.status === 'pending' && visibleApps.includes(e.app)).length;
   const firstLiveApp = visibleApps.find((id) => APPS.find((a) => a.id === id)?.live);
   const nav = navFor(currentAgent.role, pending, firstLiveApp, canAnywhere(currentAgent, 'export') || currentAgent.role !== 'agent', backend === 'server', currentAgent.superAdmin || visibility?.changeLog !== false, dueFollowUps);
-  if (currentAgent.superAdmin) nav.unshift({ title: 'Super admin', items: [{ to: '/system', label: 'System', icon: <Activity size={17} /> }] });
+  if (currentAgent.superAdmin) nav.unshift({ title: 'Super admin', items: [{ to: '/system', label: 'System', icon: <Activity size={17} /> }, { to: '/system/api', label: 'API', icon: <Plug size={17} /> }, ...(currentAgent.superAdmin ? [{ to: '/system/ai', label: 'AI accuracy', icon: <Sparkles size={17} /> }] : [])] });
   const showScope = currentAgent.role !== 'agent' && visibleApps.length > 1 && !location.pathname.startsWith('/people') && !location.pathname.startsWith('/audit') && !location.pathname.startsWith('/customers');
 
   return (

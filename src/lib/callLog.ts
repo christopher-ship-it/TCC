@@ -12,6 +12,7 @@ export interface LogCallInput {
   lead?: Lead;
   rating?: Rating;
   priority?: Priority;
+  analysisFeedback?: CallLogEntry['analysisFeedback'];
   telephony?: CallTelephony;
   analysis?: CallAnalysis;
 }
@@ -51,6 +52,7 @@ export function buildCallLogEntry(now: number, agentName: string, user: Customer
     ...(input.lead ? { lead: input.lead } : {}),
     ...(input.rating ? { rating: input.rating } : {}),
     ...(input.priority ? { priority: input.priority } : {}),
+    ...(input.analysisFeedback ? { analysisFeedback: input.analysisFeedback } : {}),
     telephony,
     analysis,
   };

@@ -48,6 +48,8 @@ export interface AnalysisContext {
   customerTypes?: string[];
   /** Measured "who was audible when", from speakingSummary(). */
   speaking?: string;
+  /** What the team's corrections of earlier analyses teach (src/lib/aiFeedback.ts). Empty until there is enough feedback. */
+  lessons?: string;
 }
 
 /** `brand` is the deployment's white label (src/brand); the business context changes, the JSON contract does not. */
@@ -67,7 +69,7 @@ Rules:
 - customerType: ${ctx.customerTypes?.length ? `exactly one of ${ctx.customerTypes.join(' | ')}, or "" when the call does not make it clear` : '""'}.
 - sentiment is an integer 0-100 for how receptive the customer was (50 = neutral).
 - Keep summary to 2-3 plain sentences a supervisor can read in ten seconds.
-
+${ctx.lessons ? `\nLessons from this team's corrections of earlier analyses. Apply them silently; do not mention them:\n${ctx.lessons}\n` : ''}
 Customer: ${ctx.customer || 'unknown'}. Business: ${ctx.business || 'unknown'}. App: ${ctx.app || 'unknown'}.
 ${ctx.speaking ? `Measured on the line (each side recorded separately, so this is exact) — seconds where one side was audible: ${ctx.speaking}.` : ''}
 

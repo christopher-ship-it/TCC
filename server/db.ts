@@ -164,6 +164,48 @@ export const MIGRATIONS: { version: number; name: string; sql: string }[] = [
         and not doc->'queues' ? 'noanswer';
     `,
   },
+  {
+    version: 8,
+    name: 'log archives: old change-log entries and events move out of the live tables',
+    sql: `
+      create table audit_archive (
+        id text primary key,
+        ts timestamptz not null,
+        actor_id text not null,
+        action text not null,
+        doc jsonb not null
+      );
+      create index audit_archive_ts_idx on audit_archive (ts desc);
+      create table events_archive (
+        id bigserial primary key,
+        ts timestamptz not null,
+        level text not null,
+        source text not null,
+        message text not null,
+        agent_id text,
+        doc jsonb not null
+      );
+      create index events_archive_ts_idx on events_archive (ts desc);
+    `,
+  },
+  {
+    version: 9,
+    name: 'agents’ feedback on the AI’s call readings',
+    sql: `
+      create table ai_feedback (
+        id text primary key,
+        entry_id text not null,
+        app text not null,
+        agent_id text not null,
+        ts timestamptz not null default now(),
+        kind text not null,
+        verdict text not null,
+        doc jsonb not null
+      );
+      create index ai_feedback_ts_idx on ai_feedback (ts desc);
+      create index ai_feedback_app_idx on ai_feedback (app, ts desc);
+    `,
+  },
 ];
 
 export interface DbHealth {
@@ -176,7 +218,7 @@ export interface DbHealth {
   tables?: Record<string, number>;
 }
 
-const TABLES = ['agents', 'customers', 'escalations', 'audit_log', 'call_analyses', 'settings', 'logins', 'sessions', 'events', 'notices', 'notes', 'call_recordings'] as const;
+const TABLES = ['agents', 'customers', 'escalations', 'audit_log', 'audit_archive', 'call_analyses', 'settings', 'logins', 'sessions', 'events', 'events_archive', 'ai_feedback', 'notices', 'notes', 'call_recordings'] as const;
 
 export function createDb(url: string | undefined) {
   let pool: pg.Pool | undefined;

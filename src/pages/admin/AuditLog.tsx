@@ -6,6 +6,7 @@ import { canAnywhere } from '../../lib/access';
 import { downloadText } from '../../lib/metrics';
 import { Badge, Button, Empty, PageHead, Select, type Tone } from '../../ui/primitives';
 import { SearchFilter, SelectFilter, useFilters } from '../../ui/filters';
+import { notesCall } from '../../lib/notes';
 import { DATE_RANGES, dateWindow, inWindow, type DateRange } from '../../lib/filters';
 import { Pager, usePaged } from '../../ui/Pager';
 
@@ -36,7 +37,7 @@ const KIND: Record<Exclude<Kind, 'all'>, AuditAction[]> = {
 
 /** The change log: who changed what, when. Admins see everyone; supervisors see their own team's changes. */
 export default function AuditLog() {
-  const { state, currentAgent, dispatch } = useStore();
+  const { state, currentAgent, dispatch, backend } = useStore();
   const actor = currentAgent!;
   const [kind, setKind] = useState<Kind>('all');
   const [who, setWho] = useState('');
@@ -46,12 +47,33 @@ export default function AuditLog() {
   const team = useMemo(() => new Set(state.agents.filter((a) => a.role === 'agent' || a.id === actor.id).map((a) => a.id)), [state.agents, actor.id]);
   const teamNames = useMemo(() => new Set(state.agents.filter((a) => team.has(a.id)).map((a) => a.name)), [state.agents, team]);
 
-  const rows = state.audit
+  const [older, setOlder] = useState<typeof state.audit>([]);
+  const [more, setMore] = useState<boolean | null>(null);
+  const [loadingOlder, setLoadingOlder] = useState(false);
+  const everything = useMemo(() => {
+    const seen = new Set<string>();
+    return [...state.audit, ...older].filter((e) => (seen.has(e.id) ? false : (seen.add(e.id), true))).sort((x, y) => y.ts - x.ts);
+  }, [state.audit, older]);
+  const rows = everything
     .filter((e) => actor.role === 'admin' || team.has(e.actorId) || (e.target && teamNames.has(e.target)))
     .filter((e) => kind === 'all' || KIND[kind].includes(e.action))
     .filter((e) => !who || e.actorId === who)
     .filter((e) => inWindow(e.ts, win))
     .filter((e) => !q.trim() || `${e.actorName} ${e.target ?? ''} ${e.detail}`.toLowerCase().includes(q.trim().toLowerCase()));
+
+  async function loadOlder() {
+    setLoadingOlder(true);
+    try {
+      const before = everything.length ? everything[everything.length - 1].ts : Date.now();
+      const r = await notesCall<{ entries: typeof state.audit; more: boolean }>('GET', `/api/audit/page?before=${before}`);
+      setOlder((cur) => [...cur, ...r.entries]);
+      setMore(r.more);
+    } catch {
+      setMore(null);
+    } finally {
+      setLoadingOlder(false);
+    }
+  }
 
   const { items: pageRows, pager } = usePaged(rows, `${kind}|${who}|${q}|${af.adate}`);
 
@@ -108,6 +130,13 @@ export default function AuditLog() {
         </div>
       )}
       {rows.length > 0 && <Pager pager={pager} noun="changes" />}
+      {backend === 'server' && (
+        <div className="row" style={{ gap: 10, alignItems: 'center' }}>
+          <Button onClick={() => void loadOlder()} disabled={loadingOlder || more === false}>{loadingOlder ? 'Loading…' : more === false ? 'That is everything' : 'Load 100 older'}</Button>
+          <a className="btn btn--sm" href="/api/logs/export?kind=activity&days=730" download>Download the full log (CSV)</a>
+          <span className="muted" style={{ fontSize: 12.5 }}>The screen loads the latest 100. Older entries are kept for 90 days here and then archived, and the download includes them.</span>
+        </div>
+      )}
     </div>
   );
 }

@@ -21,7 +21,11 @@ import { logEvent } from './events.ts';
 import { findRecordedCall } from './webhook.ts';
 import type { SourceSync } from './appSync.ts';
 import type { Assigner } from './assign.ts';
+import type { Learning } from './aiLearning.ts';
+import { parseFeedback } from '../src/lib/aiFeedback.ts';
 import { canSignOut, isOnline, type PresenceRow } from '../src/lib/signedIn.ts';
+import { outboundStats, recentOutbound } from './outbound.ts';
+import { describeRules } from './rateLimit.ts';
 import { keepSourceFields } from '../src/lib/appSync.ts';
 import type { CustomerUser as FullCustomer } from '../src/data/types.ts';
 // The records as stored. The full shapes live in src/data/types.ts (the browser's); the server only relies on these fields.
@@ -197,6 +201,35 @@ export function keepOwner(stored: CustomerUser | undefined, incoming: CustomerUs
   return out;
 }
 
+/** The most the screens load at once. Older entries are paged in or downloaded (server/retention.ts keeps them). */
+export const LOG_PAGE = 100;
+
+/**
+ * Change-log entries one person may see, newest first. The super admin sees everything; client admins and agents never
+ * see what the super admin or Tecstellar's tools did, nor customer deletions, and see nothing when the super admin has
+ * turned the log off for them. `before` pages back in time; `archive` also reads the entries moved out of the live table.
+ */
+export async function auditFor(pool: pg.Pool, me: AgentAccount, o: { visible: boolean; since?: string; before?: number; limit?: number; archive?: boolean }): Promise<AuditEntry[]> {
+  const limit = Math.min(500, Math.max(1, o.limit ?? LOG_PAGE));
+  if (!me.superAdmin && !o.visible) return [];
+  const args: unknown[] = [];
+  const where: string[] = [];
+  if (o.since) { args.push(o.since); where.push(`ts > $${args.length}::timestamptz`); }
+  if (o.before) { args.push(o.before); where.push(`ts < to_timestamp($${args.length} / 1000.0)`); }
+  if (!me.superAdmin) {
+    const supers = (await pool.query<{ id: string; n: string }>("select id, doc->>'name' as n from agents where coalesce((doc->>'superAdmin')::boolean, false)")).rows;
+    args.push([...supers.map((x) => x.id), 'tecstellar-cli']);
+    where.push(`(doc->>'actorId') <> all($${args.length}::text[])`);
+    args.push(supers.map((x) => x.n));
+    where.push(`coalesce(doc->>'target', '') <> all($${args.length}::text[])`);
+    where.push("(doc->>'action') <> 'customer_deleted'");
+  }
+  args.push(limit);
+  const src = o.archive ? 'select ts, doc from audit_log union all select ts, doc from audit_archive' : 'select ts, doc from audit_log';
+  const rows = await pool.query<{ doc: AuditEntry }>(`select doc from (${src}) u ${where.length ? `where ${where.join(' and ')}` : ''} order by ts desc limit $${args.length}`, args);
+  return rows.rows.map((r) => r.doc);
+}
+
 /** A tiny brake on password guessing: 10 failures per username per 15 minutes. */
 const failures = new Map<string, number[]>();
 function tooManyFailures(key: string): boolean {
@@ -217,6 +250,8 @@ export interface StoreEnv {
   sources?: SourceSync;
   /** Hands customers out to agents (server/assign.ts). */
   assigner?: Assigner;
+  /** Agents' feedback on the AI's call readings (server/aiLearning.ts). */
+  learning?: Learning;
 }
 
 export interface Notice {
@@ -414,21 +449,7 @@ export function createStore(getPool: () => Promise<pg.Pool>, env: StoreEnv, read
       // Client admins and agents never see what the super admin (or Tecstellar's setup tool) did, or anything about them;
       // and when the super admin has turned the Change log off for them, they get none. Customer deletions (and their
       // reasons) are the super admin's alone.
-      let audit: AuditEntry[] = [];
-      if (me.superAdmin) {
-        audit = (await pool.query<{ doc: AuditEntry }>(`select doc from audit_log where ${since ? 'ts > $1::timestamptz' : 'true'} order by ts desc limit 1000`, args)).rows.map((r) => r.doc);
-      } else if (visibility.changeLog) {
-        const supers = (await pool.query<{ id: string; n: string }>("select id, doc->>'name' as n from agents where coalesce((doc->>'superAdmin')::boolean, false)")).rows;
-        const n = args.length;
-        audit = (
-          await pool.query<{ doc: AuditEntry }>(
-            `select doc from audit_log where ${since ? 'ts > $1::timestamptz' : 'true'}
-               and actor_id <> all($${n + 1}::text[]) and coalesce(doc->>'target', '') <> all($${n + 2}::text[]) and action <> 'customer_deleted'
-             order by ts desc limit 1000`,
-            [...args, [...supers.map((s) => s.id), 'tecstellar-cli'], supers.map((s) => s.n)],
-          )
-        ).rows.map((r) => r.doc);
-      }
+      const audit = await auditFor(pool, me, { visible: visibility.changeLog, since: since ?? undefined, limit: LOG_PAGE });
       const cleared = (await pool.query<{ value: unknown }>(`select value from settings where key = 'clearedEscalations' and ${after}`, args)).rows[0]?.value;
       send(res, 200, { cursor, me, agents, customers, escalations, audit, cleared, visibility, notices: await openNotices(pool, me.id) });
       return true;
@@ -701,6 +722,65 @@ export function createStore(getPool: () => Promise<pg.Pool>, env: StoreEnv, read
       return true;
     }
 
+    // An agent's verdict on the AI's reading of a call. Stored under the signed-in agent whatever the browser says.
+    if (req.method === 'POST' && p === '/api/feedback') {
+      const me = await requireMe(req, pool);
+      if (!env.learning) throw new HttpError(501, 'Feedback needs the database.');
+      const row = parseFeedback(await readJson(req, 32 * 1024), me);
+      if (typeof row === 'string') throw new HttpError(400, row);
+      if (me.role !== 'admin' && !me.apps.includes(row.app)) throw new HttpError(403, 'That product is not on your account.');
+      await env.learning.save(row);
+      send(res, 200, { ok: true });
+      return true;
+    }
+
+    // Older change-log entries, one page at a time, for the Change log page and the System activity tab.
+    if (req.method === 'GET' && p === '/api/audit/page') {
+      const me = await requireMe(req, pool);
+      if (me.role === 'agent') throw new HttpError(403, 'Only admins and supervisors can read the change log.');
+      const before = Number(url.searchParams.get('before'));
+      const entries = await auditFor(pool, me, { visible: (await getVisibility(pool)).changeLog, before: Number.isFinite(before) && before > 0 ? before : undefined, limit: LOG_PAGE + 1, archive: true });
+      send(res, 200, { entries: entries.slice(0, LOG_PAGE), more: entries.length > LOG_PAGE });
+      return true;
+    }
+
+    // The whole log as a file, archive included: what is not on screen is kept for exactly this.
+    if (req.method === 'GET' && p === '/api/logs/export') {
+      const me = await requireMe(req, pool);
+      const kind = url.searchParams.get('kind') === 'events' ? 'events' : 'activity';
+      if (me.role === 'agent') throw new HttpError(403, 'Only admins and supervisors can download logs.');
+      if (kind === 'events' && !me.superAdmin) throw new HttpError(403, 'Only the super admin can download events.');
+      const days = Math.min(730, Math.max(1, Number(url.searchParams.get('days')) || 90));
+      const esc = (v: unknown) => `"${String(v ?? '').replace(/"/g, '""').replace(/[\r\n]+/g, ' ')}"`;
+      let header: string[];
+      let lines: string[];
+      if (kind === 'events') {
+        const r = await pool.query<{ doc: { ts: number; level: string; source: string; message: string; agentName?: string } }>(
+          `select doc from (select ts, doc from events union all select ts, doc from events_archive) u where ts > now() - ($1 || ' days')::interval order by ts desc limit 50000`,
+          [String(days)],
+        );
+        header = ['When', 'Level', 'Where', 'Message', 'Person'];
+        lines = r.rows.map(({ doc }) => [new Date(doc.ts).toISOString(), doc.level, doc.source, doc.message, doc.agentName].map(esc).join(','));
+      } else {
+        const entries = await auditFor(pool, me, { visible: (await getVisibility(pool)).changeLog, limit: 500, archive: true });
+        // auditFor caps one page; walk back until the window or the cap is reached.
+        let all = entries;
+        const cutoff = Date.now() - days * 86_400_000;
+        while (all.length < 50000 && all.length && all[all.length - 1].ts > cutoff) {
+          const more = await auditFor(pool, me, { visible: true, before: all[all.length - 1].ts, limit: 500, archive: true });
+          if (!more.length) break;
+          all = all.concat(more);
+        }
+        header = ['When', 'Who', 'What', 'About', 'Detail'];
+        lines = all.filter((e) => e.ts > cutoff).map((e) => [new Date(e.ts).toISOString(), e.actorName, e.action, e.target, e.detail].map(esc).join(','));
+      }
+      const body = [header.map(esc).join(','), ...lines].join('\n');
+      res.writeHead(200, { 'Content-Type': 'text/csv; charset=utf-8', 'Content-Disposition': `attachment; filename="tcc-${kind}-${new Date().toISOString().slice(0, 10)}.csv"`, 'Cache-Control': 'no-store' });
+      res.end(body);
+      logEvent({ level: 'info', source: 'system', message: `${me.name} downloaded the ${kind} log (${lines.length} rows, last ${days} days)`, agentId: me.id, agentName: me.name });
+      return true;
+    }
+
     // An agent's browser asks for a fresh hand-out (after finishing a call, on opening the app).
     if (req.method === 'POST' && p === '/api/assignments/run') {
       await requireMe(req, pool);
@@ -764,10 +844,12 @@ export function createStore(getPool: () => Promise<pg.Pool>, env: StoreEnv, read
           [new Date().setHours(0, 0, 0, 0)],
         )).rows[0];
         const passwordRequests = (await pool.query<{ doc: Notice }>("select doc from notices where kind = 'password_request' and done_at is null order by created_at")).rows.map((r) => r.doc);
-        const activity = (await pool.query<{ doc: AuditEntry }>('select doc from audit_log order by ts desc limit 1000')).rows.map((r) => r.doc);
+        const activity = (await pool.query<{ doc: AuditEntry }>('select doc from audit_log order by ts desc limit $1', [LOG_PAGE])).rows.map((r) => r.doc);
+        const logTotals = (await pool.query<{ live: string; archived: string; events: string; events_archived: string }>('select (select count(*) from audit_log) as live, (select count(*) from audit_archive) as archived, (select count(*) from events) as events, (select count(*) from events_archive) as events_archived')).rows[0];
         send(res, 200, {
           passwordRequests,
           activity,
+          logTotals: { activity: Number(logTotals.live) + Number(logTotals.archived), activityArchived: Number(logTotals.archived), events: Number(logTotals.events) + Number(logTotals.events_archived), eventsArchived: Number(logTotals.events_archived), shown: LOG_PAGE },
           visibility: await getVisibility(pool),
           health: env.systemHealth ? await env.systemHealth() : {},
           people,
@@ -794,6 +876,48 @@ export function createStore(getPool: () => Promise<pg.Pool>, env: StoreEnv, read
       if (req.method === 'GET' && p === '/api/system/counts') {
         const notes = (await pool.query<{ app: string | null; audience: string; n: string }>("select nullif(doc->>'app', '') as app, audience, count(*) as n from notes group by 1, 2")).rows;
         send(res, 200, { notes: notes.map((r) => ({ app: r.app, audience: r.audience, count: Number(r.n) })) });
+        return true;
+      }
+
+      // How well the AI reads calls, by the team's own verdicts, and what it is being taught.
+      if (req.method === 'GET' && p === '/api/system/ai') {
+        if (!env.learning) throw new HttpError(501, 'Feedback needs the database.');
+        send(res, 200, await env.learning.overview({ app: url.searchParams.get('app') || undefined, language: url.searchParams.get('language') || undefined }));
+        return true;
+      }
+      if (req.method === 'POST' && p === '/api/system/ai/learning') {
+        if (!env.learning) throw new HttpError(501, 'Feedback needs the database.');
+        const b = (await readJson(req)) as { enabled?: unknown };
+        await env.learning.setEnabled(b.enabled !== false);
+        logEvent({ level: 'info', source: 'system', message: `${me.name} turned AI learning ${b.enabled !== false ? 'on' : 'off'}`, agentId: me.id, agentName: me.name });
+        send(res, 200, { ok: true });
+        return true;
+      }
+
+      // What TCC asks of one product's API and how that has been going (the super admin's API page).
+      if (req.method === 'GET' && p === '/api/system/api') {
+        const app = (url.searchParams.get('app') ?? '').slice(0, 40);
+        const status = env.sources?.configured ? (await env.sources.status()).find((x) => x.app === app) ?? null : null;
+        send(res, 200, {
+          app,
+          configured: Boolean(status),
+          source: status,
+          everyMinutes: env.sources?.everyMinutes ?? null,
+          callRules: env.sources?.callRules ?? null,
+          calls: outboundStats(app),
+          recent: recentOutbound(app, 50),
+          limits: describeRules(),
+          envNames: { url: `${app.toUpperCase()}_API_URL`, key: `${app.toUpperCase()}_API_KEY` },
+        });
+        return true;
+      }
+
+      if (req.method === 'POST' && p === '/api/system/api/ping') {
+        const b = (await readJson(req)) as { app?: unknown };
+        if (!env.sources?.configured) throw new HttpError(501, 'No product is connected for customer sync.');
+        const out = await env.sources.ping(String(b.app ?? '') as FullCustomer['app']);
+        logEvent({ level: out.ok ? 'info' : 'warn', source: 'sync', message: `${me.name} tested the ${String(b.app)} API: ${out.message}`, agentId: me.id, agentName: me.name });
+        send(res, 200, out);
         return true;
       }
 

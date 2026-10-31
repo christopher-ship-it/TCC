@@ -84,6 +84,8 @@ export function reducer(state: State, action: Action): State {
       });
       return { ...state, users };
     }
+    case 'SET_ANALYSIS_FEEDBACK':
+      return { ...state, users: state.users.map((u) => (u.id === action.userId ? { ...u, callHistory: u.callHistory.map((c) => (c.id === action.entryId ? { ...c, analysisFeedback: action.feedback } : c)) } : u)) };
     case 'ATTACH_RECORDING': {
       const hit = attachRecording(state.users, action.file, recordingUrlFor(action.file), action.callId, Date.now(), action.entryId);
       if (!hit) return state;

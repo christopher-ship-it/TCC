@@ -40,6 +40,7 @@ interface SystemData {
   visibility: { changeLog: boolean };
   passwordRequests: { id: string; title: string; body: string; fromName: string; subjectId: string; subjectName: string; ts: number }[];
   activity: AuditEntry[];
+  logTotals?: { activity: number; activityArchived: number; events: number; eventsArchived: number; shown: number };
   totals: { customers: number; calls: number; callsToday: number };
   /** Customer sync from each product's own database (server/appSync.ts). */
   sources?: SourceStatus[];
@@ -425,6 +426,8 @@ export default function System() {
             <Card>
               <div className="flex items-center gap-2 px-4 pt-3 pb-2">
                 <span className="mr-auto text-base font-semibold">Everything people did, newest first</span>
+                <span className="muted" style={{ fontSize: 12.5 }}>Latest {data?.logTotals?.shown ?? 100} of {(data?.logTotals?.activity ?? data?.activity.length ?? 0).toLocaleString('en-IN')}{data?.logTotals?.activityArchived ? ` (${data.logTotals.activityArchived.toLocaleString('en-IN')} archived)` : ''}</span>
+                <a className="btn btn--sm" href="/api/logs/export?kind=activity&days=730" download>Download all (CSV)</a>
                 <Input aria-label="Search activity" placeholder="Search person or action" value={search} onChange={(e) => setSearch(e.target.value)} style={{ maxWidth: 260 }} />
               </div>
               {activity.length === 0 ? <p className="muted px-4 pb-4">Nothing here.</p> : (
@@ -456,6 +459,8 @@ export default function System() {
             <Card>
               <div className="flex flex-wrap items-center gap-2 px-4 pt-3 pb-2">
                 <span className="mr-auto text-base font-semibold">Events</span>
+                <span className="muted" style={{ fontSize: 12.5 }}>Latest {data?.logTotals?.shown ?? 100} of {(data?.logTotals?.events ?? data?.health?.events.length ?? 0).toLocaleString('en-IN')}{data?.logTotals?.eventsArchived ? ` (${data.logTotals.eventsArchived.toLocaleString('en-IN')} archived)` : ''}</span>
+                <a className="btn btn--sm" href="/api/logs/export?kind=events&days=365" download>Download all (CSV)</a>
                 <Input aria-label="Search events" placeholder="Search text or person" value={search} onChange={(e) => setSearch(e.target.value)} style={{ maxWidth: 220 }} />
                 <select aria-label="Where" className="h-8 rounded-md border border-input bg-card px-2 text-sm" value={source} onChange={(e) => setSource(e.target.value)}>
                   {sources.map((s) => <option key={s} value={s}>{s === 'all' ? 'All sources' : s}</option>)}

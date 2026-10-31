@@ -4,7 +4,7 @@ import { AlertTriangle, CheckCircle2, Loader2, Lock, MessageSquareWarning, Rotat
 import { useStore } from '../store/StoreContext';
 import { APPS } from '../data/seed';
 import { outcomeLabel } from '../brand';
-import { telephonyQualitySummary } from '../data/types';
+import { telephonyQualitySummary, type CallAnalysis, type CallLogEntry, type CustomerUser } from '../data/types';
 import { can } from '../lib/access';
 import { isConnected } from '../lib/metrics';
 import { whyNotAnswered } from '../lib/whyNotAnswered';
@@ -17,6 +17,9 @@ import { serverRecording } from '../lib/recordingLookup';
 import { useCallSession } from '../components/telephony/callSessionContext';
 import { formatDuration } from '../telephony';
 import { OutcomeBadge, SentimentBadge } from '../components/calls/badges';
+import { AiFeedbackFields } from '../components/calls/AiFeedback';
+import { emptyDraft, feedbackBody, feedbackKey, type FeedbackDraft } from '../lib/aiFeedback';
+import { sendFeedback } from '../lib/aiFeedbackClient';
 import { ConversationTimeline, Legend, TalkSplit, type SpeakingSpan } from '../ui/charts';
 import { RecordingPlayer } from '../ui/RecordingPlayer';
 import { Badge, Button, Callout, Card, Empty, Meter, PageHead } from '../ui/primitives';
@@ -212,6 +215,12 @@ export default function CallDetail() {
               </Card>
             )}
 
+            {a && a.source === 'gemini' && (
+              <Card title="Was the AI right?" sub="Your verdict teaches it how this team reads calls.">
+                <AiFeedbackCard call={call} analysis={a} user={user} />
+              </Card>
+            )}
+
             {a && (a.keyPoints.length > 0 || a.objections.length > 0) && (
               <Card title="What came up">
                 <div className="stack" style={{ gap: 14 }}>
@@ -252,6 +261,30 @@ export default function CallDetail() {
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+/** One call's AI verdict: shows what was said before, and sends a new one. */
+function AiFeedbackCard({ call, analysis, user }: { call: CallLogEntry; analysis: CallAnalysis; user: CustomerUser }) {
+  const { dispatch } = useStore();
+  const saved = call.analysisFeedback;
+  const [draft, setDraft] = useState<FeedbackDraft>(() => (saved ? { verdict: saved.verdict, outcome: saved.outcome ?? '', sentiment: saved.sentiment ?? '', note: saved.note ?? '' } : emptyDraft()));
+  const [sent, setSent] = useState<'idle' | 'saving' | 'saved' | 'local'>(saved ? 'saved' : 'idle');
+  async function save() {
+    if (!draft.verdict) return;
+    setSent('saving');
+    dispatch({ type: 'SET_ANALYSIS_FEEDBACK', userId: user.id, entryId: call.id, feedback: { verdict: draft.verdict, outcome: draft.outcome || undefined, sentiment: draft.sentiment || undefined, note: draft.note.trim() || undefined, ts: Date.now() } });
+    const ok = await sendFeedback(feedbackBody({ key: feedbackKey(call), app: user.app, language: user.language, analysis, draft }));
+    setSent(ok ? 'saved' : 'local');
+  }
+  return (
+    <div className="stack" style={{ gap: 10 }}>
+      <AiFeedbackFields value={draft} onChange={(d) => { setDraft(d); setSent('idle'); }} aiOutcome={analysis.outcome} />
+      <div className="row" style={{ gap: 10, alignItems: 'center' }}>
+        <Button variant="primary" size="sm" disabled={!draft.verdict || sent === 'saving' || sent === 'saved'} onClick={() => void save()}>{sent === 'saving' ? 'Saving…' : sent === 'saved' ? 'Thanks, saved' : 'Send'}</Button>
+        {sent === 'local' && <span className="muted" style={{ fontSize: 12.5 }}>Kept on this call. It could not be sent to the team’s server just now.</span>}
+      </div>
     </div>
   );
 }

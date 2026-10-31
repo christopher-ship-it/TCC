@@ -1,6 +1,6 @@
 import { createContext, useContext, type Dispatch } from 'react';
 import type { Seed } from '../data/seed';
-import type { AgentAccount, AuditAction, AuditEntry, CallAnalysis, CallStatus, CallTelephony, CustomerUser, AppId, EscalationRecord, Language, Lead, Outcome, Priority, Rating } from '../data/types';
+import type { AgentAccount, AuditAction, AuditEntry, CallAnalysis, CallLogEntry, CallStatus, CallTelephony, CustomerUser, AppId, EscalationRecord, Language, Lead, Outcome, Priority, Rating } from '../data/types';
 
 export interface State {
   agents: AgentAccount[];
@@ -18,7 +18,9 @@ export interface State {
 export type Action =
   | { type: 'LOGIN'; agentId: string }
   | { type: 'LOGOUT' }
-  | { type: 'LOG_CALL'; userId: string; status: CallStatus; outcome?: Outcome; comment: string; agentId: string; telephony?: CallTelephony; analysis?: CallAnalysis; source?: string; followUpTs?: number; lead?: Lead; rating?: Rating; priority?: Priority }
+  | { type: 'LOG_CALL'; userId: string; status: CallStatus; outcome?: Outcome; comment: string; agentId: string; telephony?: CallTelephony; analysis?: CallAnalysis; source?: string; followUpTs?: number; lead?: Lead; rating?: Rating; priority?: Priority; analysisFeedback?: CallLogEntry['analysisFeedback'] }
+  /** Remembers the agent's verdict on the AI's reading of one call, on the call itself. */
+  | { type: 'SET_ANALYSIS_FEEDBACK'; userId: string; entryId: string; feedback: NonNullable<CallLogEntry['analysisFeedback']> }
   | { type: 'ATTACH_RECORDING'; file: string; callId?: string; entryId?: string }
   | { type: 'SET_ANALYSIS'; userId: string; entryId: string; analysis?: CallAnalysis; error?: string }
   | { type: 'RAISE_TICKET'; userId: string; subject: string }

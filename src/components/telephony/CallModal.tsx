@@ -20,6 +20,9 @@ import { analyzeCall, AnalysisUnavailable } from '../../lib/transcription';
 import { outcomeLabel } from '../../brand';
 import { AUTO_FOLLOWUP_DAYS, RATING_DAYS, addDays, dayFromInput, inputFromDay, startOfDay } from '../../lib/followUps';
 import { useCallSession } from './callSessionContext';
+import { AiFeedbackFields } from '../calls/AiFeedback';
+import { emptyDraft, feedbackBody, feedbackKey, implicitDraft, type FeedbackDraft } from '../../lib/aiFeedback';
+import { sendFeedback } from '../../lib/aiFeedbackClient';
 import { notesCall, notesForProduct, type Note } from '../../lib/notes';
 import { APPS } from '../../data/seed';
 
@@ -134,6 +137,7 @@ function WrapUp({ user }: { user: CustomerUser }) {
   const [ticket, setTicket] = useState<boolean | null>(null);
   const [source, setSource] = useState<string>(user.source ?? '');
   const [followDate, setFollowDate] = useState('');
+  const [aiDraft, setAiDraft] = useState<FeedbackDraft>(emptyDraft());
   const filled = useRef(false);
 
   // Find the recording (TeleCMI finalises it a little after hangup), then analyse it. Give up after ~2 minutes.
@@ -219,6 +223,7 @@ function WrapUp({ user }: { user: CustomerUser }) {
       userId: user.id,
       status,
       outcome: answered && outcome ? outcome : undefined,
+      analysisFeedback: aiDraft.verdict ? { verdict: aiDraft.verdict, outcome: aiDraft.outcome || undefined, sentiment: aiDraft.sentiment || undefined, note: aiDraft.note.trim() || undefined, ts: Date.now() } : undefined,
       comment: note.trim() || analysis?.summary || (telephony.durationSec > 0 ? `Talked ${formatDuration(telephony.durationSec)}` : STATUS_LABEL[status]),
       agentId: agent.id,
       telephony,
@@ -231,6 +236,19 @@ function WrapUp({ user }: { user: CustomerUser }) {
     });
     if (type && type !== user.customerType) dispatch({ type: 'SET_CUSTOMER_TYPE', userId: user.id, customerType: type });
     if (ticketOn) dispatch({ type: 'RAISE_TICKET', userId: user.id, subject: `[${team}] ${analysis?.summary?.slice(0, 120) || note.trim() || 'Raised from a call'}` });
+    // The agent's verdict on the AI's reading of this call, filed under the carrier's call id; and when they gave none, how the
+    // result they picked compares with the AI's. TCC learns from both.
+    if (analysis && analysis.source === 'gemini') {
+      const key = feedbackKey({ id: '', telephony });
+      if (key) {
+        const body = (draft: FeedbackDraft, kind: 'manual' | 'implicit') => feedbackBody({ key, app: user.app, language: user.language, analysis, draft, kind });
+        if (aiDraft.verdict) void sendFeedback(body({ ...aiDraft, outcome: aiDraft.outcome || (aiDraft.verdict !== 'good' && outcome && outcome !== analysis.outcome ? outcome : '') }, 'manual'));
+        else {
+          const imp = implicitDraft(analysis.outcome, outcome || undefined);
+          if (imp) void sendFeedback(body(imp, 'implicit'));
+        }
+      }
+    }
     toast(`Call completed — ${user.name}`);
     setPhase('done');
     setTimeout(() => session.completeWrapUp(), 1100);
@@ -264,6 +282,7 @@ function WrapUp({ user }: { user: CustomerUser }) {
           <div className="mb-1 flex items-center gap-1.5 text-xs text-muted-foreground"><Sparkles className="size-3.5" />Call summary</div>
           <p className="leading-relaxed">{analysis.summary}</p>
           {analysis.recommendation && <p className="mt-2 text-muted-foreground">Next step: {analysis.recommendation}</p>}
+          {analysis.source === 'gemini' && <div className="mt-3 border-t border-border pt-3"><AiFeedbackFields value={aiDraft} onChange={setAiDraft} aiOutcome={analysis.outcome} compact /></div>}
         </div>
       )}
       {connected && !analysis && !reading && <p className="text-sm text-muted-foreground">The analysis isn’t available for this call, so fill in what they said below.</p>}

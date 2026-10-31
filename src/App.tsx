@@ -23,6 +23,8 @@ import Overview from './pages/owner/Overview';
 import Home from './pages/Overview';
 import Geography from './pages/owner/Geography';
 import System from './pages/admin/System';
+import ApiDocs from './pages/admin/ApiDocs';
+import AiAccuracy from './pages/admin/AiAccuracy';
 import type { Role } from './data/types';
 import { isActive } from './lib/access';
 import { homeFor } from './lib/routes';
@@ -86,6 +88,8 @@ function Routed() {
         <Route path="/overview" element={<Only roles={['admin']}><Home /></Only>} />
         <Route path="/overview/business" element={<Only roles={['admin']}><Overview /></Only>} />
         <Route path="/system" element={<SuperOnly><System /></SuperOnly>} />
+        <Route path="/system/api" element={<SuperOnly><ApiDocs /></SuperOnly>} />
+        <Route path="/system/ai" element={<SuperOnly><AiAccuracy /></SuperOnly>} />
         <Route path="/geography" element={<Only roles={['admin']}><Geography /></Only>} />
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />

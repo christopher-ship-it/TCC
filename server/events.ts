@@ -1,6 +1,6 @@
 // What the super admin's System page reads: every API request (kept in memory, newest 500, plus per-endpoint
 // counts since the server started) and notable events — sign-ins, failures, errors from the server and from
-// people's browsers — kept in the `events` table for 30 days.
+// people's browsers — kept in the `events` table for 14 days, then moved to `events_archive` (server/retention.ts).
 
 import type pg from 'pg';
 
@@ -69,7 +69,6 @@ export const recentRequests = () => requests.slice();
 export const endpointStats = () => [...endpoints.values()].sort((a, b) => b.count - a.count);
 
 let pool: (() => Promise<pg.Pool>) | null = null;
-let lastPrune = 0;
 
 /** Events go to the database once one is connected; until then (or without one) they stay in memory. */
 export function connectEventStore(getPool: () => Promise<pg.Pool>) {
@@ -85,10 +84,6 @@ export function logEvent(e: Omit<ServerEvent, 'ts'> & { ts?: number }) {
   void pool()
     .then(async (p) => {
       await p.query('insert into events (ts, level, source, message, agent_id, doc) values (to_timestamp($1 / 1000.0), $2, $3, $4, $5, $6)', [ev.ts, ev.level, ev.source, ev.message, ev.agentId ?? null, JSON.stringify(ev)]);
-      if (Date.now() - lastPrune > 6 * 3600_000) {
-        lastPrune = Date.now();
-        await p.query("delete from events where ts < now() - interval '30 days'");
-      }
     })
     .catch(() => {});
 }
