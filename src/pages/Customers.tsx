@@ -2,7 +2,7 @@
 // transcripts and how the conversation has gone over time.
 
 import { useMemo, useState } from 'react';
-import { useNavigate, useSearchParams } from 'react-router-dom';
+import { useNavigate } from 'react-router-dom';
 import { UserPlus } from 'lucide-react';
 import { Card } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
@@ -10,9 +10,13 @@ import { Badge } from '@/components/ui/badge';
 import { useStore } from '../store/StoreContext';
 import { APPS } from '../data/seed';
 import { AddCustomerDialog } from '../components/customers/AddCustomerDialog';
-import { LeadBadge } from '../components/calls/badges';
-import type { Lead } from '../data/types';
-import { Chip, Empty, Input, PageHead, Button } from '../ui/primitives';
+import { LeadBadge, PriorityBadge } from '../components/calls/badges';
+import { PRIORITIES, QUEUES, RATINGS } from '../data/types';
+import { Empty, PageHead, Button } from '../ui/primitives';
+import { ChipFilter, FilterBar, SearchFilter, SelectFilter, useFilters } from '../ui/filters';
+import { CUSTOMER_LANGUAGES } from '../lib/languages';
+import { queueOf } from '../lib/queue';
+import { textMatch } from '../lib/filters';
 import { isConnected } from '../lib/metrics';
 import { useToast } from '../ui/toastContext';
 import { Pager, usePaged } from '../ui/Pager';
@@ -23,28 +27,36 @@ export default function Customers() {
   const me = currentAgent!;
   const navigate = useNavigate();
   const toast = useToast();
-  const [q, setQ] = useState('');
-  const [mine, setMine] = useState(me.role === 'agent');
   const [adding, setAdding] = useState(false);
-  // ?lead=positive lets other pages link straight to the positive customers.
-  const [params, setParams] = useSearchParams();
-  const leadParam = params.get('lead');
-  const lead: Lead | 'any' = leadParam === 'positive' || leadParam === 'negative' ? leadParam : 'any';
-  const setLead = (l: Lead | 'any') => setParams((p) => { if (l === 'any') p.delete('lead'); else p.set('lead', l); return p; }, { replace: true });
+  // Every filter lives in the address, so ?lead=positive (or any other) can be linked to straight from other pages.
+  const { values: f, set, reset, active } = useFilters(['q', 'mine', 'lead', 'prod', 'lang', 'state', 'list', 'prio', 'rating', 'type', 'called'] as const, { mine: me.role === 'agent' ? '1' : '0' });
+  const mine = f.mine === '1';
   const apps = me.role === 'admin' ? APPS.map((a) => a.id) : me.apps;
 
-  const rows = useMemo(() => {
-    const t = q.trim().toLowerCase();
-    const digits = t.replace(/\D/g, '');
-    return state.users
-      .filter((u) => apps.includes(u.app) && !u.deleted)
-      .filter((u) => !mine || u.ownerAgentId === me.id || u.callHistory.some((c) => c.agentName === me.name))
-      .filter((u) => lead === 'any' || u.lead === lead)
-      .filter((u) => !t || u.name.toLowerCase().includes(t) || u.business.toLowerCase().includes(t) || (digits.length >= 3 && u.phone.replace(/\D/g, '').includes(digits)))
-      .sort((a, b) => (b.callHistory[0]?.atTs ?? 0) - (a.callHistory[0]?.atTs ?? 0) || a.name.localeCompare(b.name));
-  }, [state.users, apps, mine, me.id, me.name, q, lead]);
+  const base = useMemo(
+    () => state.users.filter((u) => apps.includes(u.app) && !u.deleted && (!mine || u.ownerAgentId === me.id || u.callHistory.some((c) => c.agentName === me.name))),
+    [state.users, apps, mine, me.id, me.name],
+  );
+  const rows = useMemo(
+    () =>
+      base
+        .filter((u) => !f.lead || u.lead === f.lead)
+        .filter((u) => !f.prod || u.app === f.prod)
+        .filter((u) => !f.lang || u.language === f.lang)
+        .filter((u) => !f.state || u.effectiveState === f.state)
+        .filter((u) => !f.list || (queueOf(u, Date.now()) ?? 'none') === f.list)
+        .filter((u) => !f.prio || (u.priority ?? 'none') === f.prio)
+        .filter((u) => !f.rating || (u.rating ?? 'none') === f.rating)
+        .filter((u) => !f.type || (u.customerType ?? 'none') === f.type)
+        .filter((u) => !f.called || (f.called === 'never' ? u.callHistory.length === 0 : u.callHistory.length > 0))
+        .filter((u) => textMatch(f.q, u.name, u.business, u.phone, u.city))
+        .sort((a, b) => (b.callHistory[0]?.atTs ?? 0) - (a.callHistory[0]?.atTs ?? 0) || a.name.localeCompare(b.name)),
+    [base, f],
+  );
+  const types = useMemo(() => [...new Set(base.map((u) => u.customerType).filter((t): t is string => !!t))].sort(), [base]);
+  const states = useMemo(() => [...new Set(base.map((u) => u.effectiveState))].sort(), [base]);
 
-  const { items: pageRows, pager } = usePaged(rows, `${q}|${mine}|${lead}|${apps.join()}`);
+  const { items: pageRows, pager } = usePaged(rows, Object.values(f).join('|') + apps.join());
 
   const ownerName = (id: string | null) => (id ? state.agents.find((a) => a.id === id)?.name ?? '—' : 'Anyone');
 
@@ -55,20 +67,24 @@ export default function Customers() {
         desc="Click a customer for their details, every call, recordings and analysis."
         actions={<Button variant="primary" icon={<UserPlus size={16} />} onClick={() => setAdding(true)}>Add customer</Button>}
       />
-      <div className="row" style={{ gap: 8 }}>
-        <Chip pressed={mine} onClick={() => setMine(true)}>Mine</Chip>
-        <Chip pressed={!mine} onClick={() => setMine(false)}>All</Chip>
-        <span className="muted" aria-hidden style={{ margin: '0 4px' }}>·</span>
-        <Chip pressed={lead === 'any'} onClick={() => setLead('any')}>Any result</Chip>
-        <Chip pressed={lead === 'positive'} onClick={() => setLead('positive')}>Positive</Chip>
-        <Chip pressed={lead === 'negative'} onClick={() => setLead('negative')}>Negative</Chip>
-        <Input aria-label="Find a customer" placeholder="Name or mobile number" value={q} onChange={(e) => setQ(e.target.value)} style={{ maxWidth: 280, marginLeft: 'auto' }} />
-      </div>
+      <FilterBar active={active} onReset={reset} shown={rows.length} total={base.length} noun="customers">
+        <ChipFilter label="Whose" value={f.mine || '0'} onChange={(v) => set('mine', v)} options={[{ value: '1', label: 'Mine' }, { value: '0', label: 'All' }]} />
+        <SearchFilter value={f.q} onChange={(v) => set('q', v)} placeholder="Name, business or mobile" label="Find a customer" />
+        <ChipFilter label="Result" value={f.lead} onChange={(v) => set('lead', v)} options={[{ value: '', label: 'Any result' }, { value: 'positive', label: 'Positive' }, { value: 'negative', label: 'Negative' }]} />
+        {apps.length > 1 && <SelectFilter label="Product" value={f.prod} onChange={(v) => set('prod', v)} options={APPS.filter((a) => apps.includes(a.id)).map((a) => ({ value: a.id, label: a.name }))} />}
+        <SelectFilter label="Language" value={f.lang} onChange={(v) => set('lang', v)} options={CUSTOMER_LANGUAGES.map((l) => ({ value: l, label: l }))} />
+        <SelectFilter label="State" value={f.state} onChange={(v) => set('state', v)} options={states.map((x) => ({ value: x, label: x }))} />
+        <SelectFilter label="Call list" value={f.list} onChange={(v) => set('list', v)} options={[...QUEUES.map((q) => ({ value: q.key, label: q.label })), { value: 'none', label: 'In no list' }]} />
+        <SelectFilter label="Priority" value={f.prio} onChange={(v) => set('prio', v)} options={[...PRIORITIES.map((p) => ({ value: p, label: p })), { value: 'none', label: 'No priority' }]} />
+        <SelectFilter label="Grade" value={f.rating} onChange={(v) => set('rating', v)} options={[...RATINGS.map((r) => ({ value: r, label: r })), { value: 'none', label: 'Not graded' }]} />
+        {types.length > 0 && <SelectFilter label="Type" value={f.type} onChange={(v) => set('type', v)} options={[...types.map((t) => ({ value: t, label: t })), { value: 'none', label: 'No type' }]} />}
+        <ChipFilter label="Called" value={f.called} onChange={(v) => set('called', v)} options={[{ value: '', label: 'Any' }, { value: 'never', label: 'Never called' }, { value: 'yes', label: 'Called' }]} />
+      </FilterBar>
 
       {rows.length === 0 ? (
         <Card>
           <Empty title={state.users.length === 0 ? 'No customers yet' : 'Nobody matches'} action={<Button variant="primary" icon={<UserPlus size={16} />} onClick={() => setAdding(true)}>Add customer</Button>}>
-            {state.users.length === 0 ? 'Add a customer with their mobile number, then call them.' : lead !== 'any' ? `Nobody is marked ${lead}${mine ? ' among yours — try “All”' : ''}.` : mine ? 'Try “All”.' : undefined}
+            {state.users.length === 0 ? 'Add a customer with their mobile number, then call them.' : 'Try clearing a filter.'}
           </Empty>
         </Card>
       ) : (
@@ -79,7 +95,9 @@ export default function Customers() {
                 <TableHead>Customer</TableHead>
                 {apps.length > 1 && <TableHead>Product</TableHead>}
                 <TableHead>Type</TableHead>
+                <TableHead>Language</TableHead>
                 <TableHead>Positive / negative</TableHead>
+                <TableHead>Priority</TableHead>
                 <TableHead>Agent</TableHead>
                 <TableHead className="text-right">Calls</TableHead>
                 <TableHead>Last call</TableHead>
@@ -95,7 +113,9 @@ export default function Customers() {
                   </TableCell>
                   {apps.length > 1 && <TableCell>{APPS.find((a) => a.id === u.app)?.name}</TableCell>}
                   <TableCell>{u.customerType ? <Badge variant="outline">{u.customerType}</Badge> : <span className="muted">—</span>}</TableCell>
-                  <TableCell>{u.lead ? <LeadBadge lead={u.lead} /> : <span className="muted">—</span>}</TableCell>
+                  <TableCell className="text-muted-foreground">{u.language}</TableCell>
+                  <TableCell>{u.lead ? <><LeadBadge lead={u.lead} />{u.rating && <span className="muted" style={{ fontSize: 12.5, marginLeft: 6 }}>{u.rating}</span>}</> : <span className="muted">—</span>}</TableCell>
+                  <TableCell>{u.priority ? <PriorityBadge priority={u.priority} /> : <span className="muted">—</span>}</TableCell>
                   <TableCell className="text-muted-foreground">{ownerName(u.ownerAgentId)}</TableCell>
                   <TableCell className="text-right tabular-nums">{u.callHistory.length}<span className="muted"> · {u.callHistory.filter(isConnected).length} connected</span></TableCell>
                   <TableCell className="text-muted-foreground">{u.callHistory[0]?.atLabel ?? 'Never called'}</TableCell>

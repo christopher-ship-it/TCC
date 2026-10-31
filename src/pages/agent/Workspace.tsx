@@ -7,8 +7,11 @@ import { APPS } from '../../data/seed';
 import { BRAND, outcomeLabel } from '../../brand';
 
 const F = BRAND.fields;
-import { CALL_STATUS_LIST, NEGATIVE_OUTCOMES, OUTCOME_LIST, POSITIVE_OUTCOMES, QUEUES, type AppId, type CallStatus, type Outcome, type QueueKey } from '../../data/types';
+import { CALL_STATUS_LIST, NEGATIVE_OUTCOMES, OUTCOME_LIST, POSITIVE_OUTCOMES, PRIORITIES, QUEUES, type AppId, type CallStatus, type Outcome, type QueueKey } from '../../data/types';
 import { outOfReach, queueCounts, tasksForQueue, waitingForYou } from '../../lib/queue';
+import { FilterBar, SearchFilter, SelectFilter, useFilters } from '../../ui/filters';
+import { textMatch } from '../../lib/filters';
+import { CUSTOMER_LANGUAGES } from '../../lib/languages';
 import { queueNote } from '../../lib/queueNotes';
 import { whyInQueue } from '../../lib/whyInQueue';
 import { can, LANGUAGE_SCRIPT } from '../../lib/access';
@@ -97,7 +100,19 @@ export default function Workspace() {
   const [typeFilter, setTypeFilter] = useState<string>('All');
   const types = appId ? customerTypesFor(appId) : [];
   const queueTasks = useMemo(() => (appId && selectedQueue ? tasksForQueue(agent, state.users, appId, selectedQueue).filter((u) => !skipped.has(u.id)) : []), [agent, state.users, appId, selectedQueue, skipped]);
-  const list = useMemo(() => (typeFilter === 'All' ? queueTasks : queueTasks.filter((u) => u.customerType === typeFilter)), [queueTasks, typeFilter]);
+  const { values: wf, set: setWf, reset: resetWf, active: wfActive } = useFilters(['wq', 'wprio', 'wlang', 'wcity', 'wcalled'] as const);
+  const byType = useMemo(() => (typeFilter === 'All' ? queueTasks : queueTasks.filter((u) => u.customerType === typeFilter)), [queueTasks, typeFilter]);
+  const list = useMemo(
+    () =>
+      byType
+        .filter((u) => !wf.wprio || (u.priority ?? 'none') === wf.wprio)
+        .filter((u) => !wf.wlang || u.language === wf.wlang)
+        .filter((u) => !wf.wcity || u.city === wf.wcity)
+        .filter((u) => !wf.wcalled || (wf.wcalled === 'never' ? u.callHistory.length === 0 : u.callHistory.length > 0))
+        .filter((u) => textMatch(wf.wq, u.name, u.business, u.phone, u.city)),
+    [byType, wf],
+  );
+  const cities = useMemo(() => [...new Set(queueTasks.map((u) => u.city))].sort(), [queueTasks]);
   // Only worked out when this person has nothing to call: why the product's other customers aren't theirs.
   const waiting = useMemo(() => (appId ? waitingForYou(agent, state.users, appId) : 0), [agent, state.users, appId]);
   const unreachable = useMemo(() => (appId && queueTasks.length === 0 ? outOfReach(agent, state.users, appId) : null), [agent, state.users, appId, queueTasks.length]);
@@ -321,9 +336,18 @@ export default function Workspace() {
         </Callout>
       )}
 
+      <FilterBar active={wfActive} onReset={resetWf} shown={list.length} total={queueTasks.length} noun="customers">
+        <SearchFilter value={wf.wq} onChange={(v) => setWf('wq', v)} placeholder="Name, business or mobile" label="Find in this list" />
+        <SelectFilter label="Priority" value={wf.wprio} onChange={(v) => setWf('wprio', v)} options={[...PRIORITIES.map((p) => ({ value: p, label: p })), { value: 'none', label: 'No priority' }]} />
+        <SelectFilter label="Language" value={wf.wlang} onChange={(v) => setWf('wlang', v)} options={CUSTOMER_LANGUAGES.map((l) => ({ value: l, label: l }))} />
+        <SelectFilter label="City" value={wf.wcity} onChange={(v) => setWf('wcity', v)} options={cities.map((c) => ({ value: c, label: c }))} />
+        <SelectFilter label="Called" value={wf.wcalled} onChange={(v) => setWf('wcalled', v)} all="Called: any" options={[{ value: 'never', label: 'Never called' }, { value: 'yes', label: 'Called before' }]} />
+      </FilterBar>
+
       {!user ? (
         <UiCard>
-          <Empty icon={<Inbox size={24} />} title={unreachable && unreachable.total > 0 ? 'Nothing for you to call here' : 'All caught up'}>
+          <Empty icon={<Inbox size={24} />} title={byType.length > 0 && wfActive > 0 ? 'No one matches your filters' : unreachable && unreachable.total > 0 ? 'Nothing for you to call here' : 'All caught up'}>
+            {byType.length > 0 && wfActive > 0 && <>{byType.length} {byType.length === 1 ? 'customer is' : 'customers are'} in this list, but none match. <button type="button" className="btn btn--link" onClick={resetWf}>Clear filters</button><br /></>}
             Nothing left in {QUEUES.find((q) => q.key === selectedQueue)?.label ?? 'this queue'} for {app.name}{typeFilter !== 'All' ? ` as ${typeFilter}` : ''} in your languages and states.
             {waiting > 0 && <> {waiting} more {waiting === 1 ? 'customer is' : 'customers are'} lined up for you and will show here within a minute.</>}
             {skipped.size > 0 && <> You skipped {skipped.size}. <button type="button" className="btn btn--link" onClick={() => setSkipped(new Set())}>Bring them back</button></>}

@@ -3,7 +3,10 @@ import { Link } from 'react-router-dom';
 import { Shuffle } from 'lucide-react';
 import { useStore } from '../../store/StoreContext';
 import { useScope } from '../../shell/scope';
-import { STATE_DEFS } from '../../data/seed';
+import { APPS, STATE_DEFS } from '../../data/seed';
+import { CUSTOMER_LANGUAGES } from '../../lib/languages';
+import { textMatch } from '../../lib/filters';
+import { FilterBar, SearchFilter, SelectFilter, useFilters } from '../../ui/filters';
 import { isActive, LANGUAGE_SCRIPT } from '../../lib/access';
 import { assignmentMode, isReachable, reachableCount } from '../../lib/queue';
 import { Avatar, Badge, Button, Callout, Card, PageHead, Stat } from '../../ui/primitives';
@@ -14,8 +17,16 @@ export default function Allocation() {
   const { state, dispatch, currentAgent } = useStore();
   const { apps } = useScope();
   const toast = useToast();
-  const agents = state.agents.filter((a) => a.role === 'agent' && isActive(a) && a.apps.some((x) => apps.includes(x)));
-  const waiting = useMemo(() => state.users.filter((u) => u.queue && apps.includes(u.app)), [state.users, apps]);
+  const { values: f, set, reset, active } = useFilters(['aq', 'aprod', 'alang', 'astate'] as const);
+  const allAgents = state.agents.filter((a) => a.role === 'agent' && isActive(a) && a.apps.some((x) => apps.includes(x)));
+  const agents = allAgents
+    .filter((a) => !f.aprod || a.apps.includes(f.aprod as never))
+    .filter((a) => !f.alang || a.languages.includes(f.alang as never))
+    .filter((a) => textMatch(f.aq, a.name));
+  const waiting = useMemo(
+    () => state.users.filter((u) => u.queue && apps.includes(u.app) && (!f.aprod || u.app === f.aprod) && (!f.alang || u.language === f.alang) && (!f.astate || u.effectiveState === f.astate)),
+    [state.users, apps, f.aprod, f.alang, f.astate],
+  );
 
   const rows = useMemo(
     () =>
@@ -53,6 +64,12 @@ export default function Allocation() {
           )
         }
       />
+      <FilterBar active={active} onReset={reset} shown={agents.length} total={allAgents.length} noun="agents">
+        <SearchFilter value={f.aq} onChange={(v) => set('aq', v)} placeholder="Agent name" label="Find an agent" />
+        {apps.length > 1 && <SelectFilter label="Product" value={f.aprod} onChange={(v) => set('aprod', v)} options={APPS.filter((x) => apps.includes(x.id)).map((x) => ({ value: x.id, label: x.name }))} />}
+        <SelectFilter label="Language" value={f.alang} onChange={(v) => set('alang', v)} options={CUSTOMER_LANGUAGES.map((l) => ({ value: l, label: l }))} />
+        <SelectFilter label="State" value={f.astate} onChange={(v) => set('astate', v)} options={STATE_DEFS.map((s) => ({ value: s.name, label: s.name }))} />
+      </FilterBar>
       <div className="stats">
         <Stat label="Customers waiting" value={waiting.length.toLocaleString('en-IN')} />
         <Stat label="Nobody can reach" value={uncovered} tone={uncovered ? 'danger' : 'ok'} note={uncovered ? 'Need a language or state added' : 'Everyone is covered'} />

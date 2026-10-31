@@ -7,6 +7,10 @@ import { POSITIVE_OUTCOMES } from '../../data/types';
 import { BarList, ColumnChart, Legend } from '../../ui/charts';
 import { Avatar, Badge, Card, Empty, Meter, PageHead, Segmented, Stat } from '../../ui/primitives';
 import { CallRowItem } from '../../components/calls/CallRowItem';
+import { FilterBar, SearchFilter, SelectFilter, useFilters } from '../../ui/filters';
+import { AGENT_LANGUAGES } from '../../lib/languages';
+import { textMatch } from '../../lib/filters';
+import { APPS } from '../../data/seed';
 import '../agent/agent.css';
 
 type Period = 'today' | '7' | '30';
@@ -21,9 +25,16 @@ export default function TeamPerformance() {
     return period === 'today' ? d.getTime() : d.getTime() - (Number(period) - 1) * DAY;
   }, [period]);
 
-  const rows = useMemo(() => allCalls(state.users, { apps, since }), [state.users, apps, since]);
+  const { values: f, set, reset, active } = useFilters(['tq', 'tlang', 'tprod'] as const);
+  const allRows = useMemo(() => allCalls(state.users, { apps: f.tprod ? [f.tprod as never] : apps, since }), [state.users, apps, since, f.tprod]);
   const daily = useMemo(() => callsByDay(allCalls(state.users, { apps }), 14), [state.users, apps]);
-  const agents = state.agents.filter((a) => a.role === 'agent' && a.apps.some((x) => apps.includes(x)));
+  const everyAgent = state.agents.filter((a) => a.role === 'agent' && a.apps.some((x) => apps.includes(x)));
+  const agents = everyAgent
+    .filter((a) => !f.tlang || a.languages.includes(f.tlang as never))
+    .filter((a) => !f.tprod || a.apps.includes(f.tprod as never))
+    .filter((a) => textMatch(f.tq, a.name));
+  const names = new Set(agents.map((a) => a.name));
+  const rows = useMemo(() => (active ? allRows.filter((r) => names.has(r.call.agentName)) : allRows), [allRows, active, agents.length, f.tq, f.tlang]);
   const scores = agentScores(rows, agents);
   const sentiment = sentimentSummary(rows);
   const connected = rows.filter((r) => isConnected(r.call)).length;
@@ -38,6 +49,12 @@ export default function TeamPerformance() {
   return (
     <div className="page">
       <PageHead title="Team performance" desc="How the calling team is doing, and which calls deserve a listen." actions={<Segmented label="Period" value={period} onChange={setPeriod} options={[{ value: 'today', label: 'Today' }, { value: '7', label: '7 days' }, { value: '30', label: '30 days' }]} />} />
+
+      <FilterBar active={active} onReset={reset} shown={agents.length} total={everyAgent.length} noun="agents">
+        <SearchFilter value={f.tq} onChange={(v) => set('tq', v)} placeholder="Agent name" label="Find an agent" />
+        <SelectFilter label="Language" value={f.tlang} onChange={(v) => set('tlang', v)} options={AGENT_LANGUAGES.map((l) => ({ value: l, label: l }))} />
+        {apps.length > 1 && <SelectFilter label="Product" value={f.tprod} onChange={(v) => set('tprod', v)} options={APPS.filter((x) => apps.includes(x.id)).map((x) => ({ value: x.id, label: x.name }))} />}
+      </FilterBar>
 
       <div className="stats">
         <Stat label="Calls" value={rows.length.toLocaleString('en-IN')} note={`${agents.length} agents`} />

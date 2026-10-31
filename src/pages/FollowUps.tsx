@@ -9,7 +9,10 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { useStore } from '../store/StoreContext';
 import { useScope } from '../shell/scope';
 import { APPS } from '../data/seed';
-import { PRIORITIES, type CustomerUser, type Lead, type Priority } from '../data/types';
+import { PRIORITIES, RATINGS, type CustomerUser, type Lead, type Priority } from '../data/types';
+import { FilterBar, SearchFilter, SelectFilter, useFilters } from '../ui/filters';
+import { CUSTOMER_LANGUAGES } from '../lib/languages';
+import { textMatch } from '../lib/filters';
 import { can } from '../lib/access';
 import { AUTO_FOLLOWUP_DAYS, addDays, chainDay, dayFromInput, inRange, inputFromDay, isFollowUpOf, rangeBounds, scheduledFollowUps, startOfDay, type FollowUpRange, type ScheduledFollowUp } from '../lib/followUps';
 import { LeadBadge, OutcomeBadge, priorityRowStyle } from '../components/calls/badges';
@@ -48,6 +51,7 @@ export default function FollowUps() {
   const navigate = useNavigate();
   const [params, setParams] = useSearchParams();
   const isAgent = me.role === 'agent';
+  const { values: g, set: setG, reset: resetG, active: gActive } = useFilters(['fq', 'fprod', 'flang', 'fprio', 'fkind', 'frate'] as const);
 
   // Filters live in the address, so a filtered view can be bookmarked or sent to someone.
   const rangeParam = params.get('when') as FollowUpRange | null;
@@ -75,8 +79,14 @@ export default function FollowUps() {
     const whoAgent = who === 'me' ? me : who !== 'all' ? state.agents.find((a) => a.id === who) : undefined;
     return scheduledFollowUps(state.users.filter((u) => apps.includes(u.app)))
       .filter((f) => lead === 'any' || f.user.lead === lead)
+      .filter((f) => !g.fprod || f.user.app === g.fprod)
+      .filter((f) => !g.flang || f.user.language === g.flang)
+      .filter((f) => !g.fprio || (f.user.priority ?? 'none') === g.fprio)
+      .filter((f) => !g.frate || (f.user.rating ?? 'none') === g.frate)
+      .filter((f) => !g.fkind || f.kind === g.fkind)
+      .filter((f) => textMatch(g.fq, f.user.name, f.user.business, f.user.phone))
       .filter((f) => !whoAgent || isFollowUpOf(f.user, whoAgent));
-  }, [state.users, state.agents, apps, lead, who, me]);
+  }, [state.users, state.agents, apps, lead, who, me, g]);
 
   const customRange = { from: dayFromInput(from), to: dayFromInput(to) };
   const bounds = rangeBounds(range, now, customRange);
@@ -84,7 +94,7 @@ export default function FollowUps() {
   const count = (r: FollowUpRange) => scoped.filter((f) => inRange(f.dueTs, rangeBounds(r, now, customRange))).length;
 
   // One page of follow-ups at a time, still grouped by day; a day's heading counts all of that day's, not just the page's.
-  const { items: pageItems, pager } = usePaged(shown, `${range}|${from}|${to}|${lead}|${who}|${apps.join()}`);
+  const { items: pageItems, pager } = usePaged(shown, `${range}|${from}|${to}|${lead}|${who}|${Object.values(g).join('|')}|${apps.join()}`);
   const perDay = new Map<number, number>();
   for (const f of shown) perDay.set(f.dueTs, (perDay.get(f.dueTs) ?? 0) + 1);
   const days = useMemo(() => {
@@ -144,6 +154,15 @@ export default function FollowUps() {
         <Chip pressed={lead === 'positive'} onClick={() => set('lead', 'positive')}>Positive</Chip>
         <Chip pressed={lead === 'negative'} onClick={() => set('lead', 'negative')}>Negative</Chip>
       </div>
+
+      <FilterBar active={gActive} onReset={resetG} shown={shown.length} total={scoped.length} noun="follow-ups">
+        <SearchFilter value={g.fq} onChange={(v) => setG('fq', v)} placeholder="Name, business or mobile" label="Find a customer" />
+        {apps.length > 1 && <SelectFilter label="Product" value={g.fprod} onChange={(v) => setG('fprod', v)} options={APPS.filter((a) => apps.includes(a.id)).map((a) => ({ value: a.id, label: a.name }))} />}
+        <SelectFilter label="Language" value={g.flang} onChange={(v) => setG('flang', v)} options={CUSTOMER_LANGUAGES.map((l) => ({ value: l, label: l }))} />
+        <SelectFilter label="Priority" value={g.fprio} onChange={(v) => setG('fprio', v)} options={[...PRIORITIES.map((p) => ({ value: p, label: p })), { value: 'none', label: 'No priority' }]} />
+        <SelectFilter label="Grade" value={g.frate} onChange={(v) => setG('frate', v)} options={[...RATINGS.map((r) => ({ value: r, label: r })), { value: 'none', label: 'Not graded' }]} />
+        <SelectFilter label="Why" value={g.fkind} onChange={(v) => setG('fkind', v)} options={[{ value: 'agent', label: 'Date an agent set' }, { value: 'auto', label: 'No answer, daily call' }, { value: 'weekly', label: 'Weekly (positive)' }]} />
+      </FilterBar>
 
       {days.length === 0 ? (
         <Card>

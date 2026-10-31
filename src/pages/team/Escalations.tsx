@@ -5,6 +5,9 @@ import { useStore } from '../../store/StoreContext';
 import { useScope } from '../../shell/scope';
 import { APPS } from '../../data/seed';
 import { LANGUAGE_SCRIPT } from '../../lib/access';
+import { CUSTOMER_LANGUAGES } from '../../lib/languages';
+import { textMatch } from '../../lib/filters';
+import { FilterBar, SearchFilter, SelectFilter, useFilters } from '../../ui/filters';
 import { Badge, Button, Card, Empty, Field, PageHead, Select, Stat, Textarea } from '../../ui/primitives';
 import { useToast } from '../../ui/toastContext';
 import '../customer.css';
@@ -14,8 +17,17 @@ export default function Escalations() {
   const { apps } = useScope();
   const toast = useToast();
   const pending = state.escalations.filter((e) => e.status === 'pending' && apps.includes(e.app));
+  const { values: f, set, reset, active } = useFilters(['eq', 'etype', 'eurg', 'eprod', 'elang', 'eby'] as const);
+  const shown = pending
+    .filter((e) => !f.etype || e.type === f.etype)
+    .filter((e) => !f.eurg || e.urgency === f.eurg)
+    .filter((e) => !f.eprod || e.app === f.eprod)
+    .filter((e) => !f.elang || e.targetLanguage === f.elang)
+    .filter((e) => !f.eby || e.raisedByAgentId === f.eby)
+    .filter((e) => textMatch(f.eq, e.userName, e.userCity, e.reason, e.note));
+  const raisers = [...new Set(pending.map((e) => e.raisedByAgentId))];
   const [selectedId, setSelectedId] = useState<string | undefined>(pending[0]?.id);
-  const selected = pending.find((e) => e.id === selectedId) ?? pending[0];
+  const selected = shown.find((e) => e.id === selectedId) ?? shown[0];
   const covering = selected?.targetLanguage ? state.agents.filter((a) => a.role === 'agent' && a.apps.includes(selected.app) && a.languages.includes(selected.targetLanguage!) && (a.status ?? 'active') === 'active') : [];
   const [reassign, setReassign] = useState<string>('');
   const [note, setNote] = useState('');
@@ -28,7 +40,7 @@ export default function Escalations() {
     if (approve) dispatch({ type: 'APPROVE_ESCALATION', id: selected.id, reassignAgentId: reassign || selected.suggestedOwnerId || covering[0]?.id, resolutionNote: note, actorId });
     else dispatch({ type: 'DECLINE_ESCALATION', id: selected.id, resolutionNote: note, actorId });
     toast(approve ? `Approved — ${selected.userName}` : `Declined — ${selected.userName} stays with ${name(selected.raisedByAgentId)}`);
-    setSelectedId(pending.find((e) => e.id !== selected.id)?.id);
+    setSelectedId(shown.find((e) => e.id !== selected.id)?.id);
     setNote('');
     setReassign('');
   }
@@ -43,15 +55,28 @@ export default function Escalations() {
         <Stat label="Cleared recently" value={state.clearedEscalations.length} note={avgMinutes !== null ? `${avgMinutes} min to clear on average` : undefined} />
       </div>
 
+      {pending.length > 0 && (
+        <FilterBar active={active} onReset={reset} shown={shown.length} total={pending.length} noun="waiting">
+          <SearchFilter value={f.eq} onChange={(v) => set('eq', v)} placeholder="Customer, city or reason" label="Find an escalation" />
+          <SelectFilter label="Need" value={f.etype} onChange={(v) => set('etype', v)} options={[{ value: 'reroute', label: 'Language reroute' }, { value: 'escalation', label: 'Needs a supervisor' }]} />
+          <SelectFilter label="Urgency" value={f.eurg} onChange={(v) => set('eurg', v)} options={[{ value: 'urgent', label: 'Urgent' }, { value: 'normal', label: 'Normal' }]} />
+          {apps.length > 1 && <SelectFilter label="Product" value={f.eprod} onChange={(v) => set('eprod', v)} options={APPS.filter((a) => apps.includes(a.id)).map((a) => ({ value: a.id, label: a.name }))} />}
+          <SelectFilter label="Language asked for" value={f.elang} onChange={(v) => set('elang', v)} options={CUSTOMER_LANGUAGES.map((l) => ({ value: l, label: l }))} />
+          <SelectFilter label="Raised by" value={f.eby} onChange={(v) => set('eby', v)} options={raisers.map((id) => ({ value: id, label: name(id) }))} />
+        </FilterBar>
+      )}
+
       {pending.length === 0 ? (
         <Card><Empty icon={<CheckCircle2 size={24} />} title="Nothing waiting">When an agent reroutes or escalates a customer, it shows up here.</Empty></Card>
+      ) : shown.length === 0 ? (
+        <Card><Empty title="Nothing matches">Try clearing a filter.</Empty></Card>
       ) : (
         <div className="cust-layout" style={{ gridTemplateColumns: 'minmax(0, 1fr) minmax(320px, 400px)' }}>
           <div className="tbl-wrap">
             <table className="tbl">
               <thead><tr><th>Raised</th><th>Customer</th><th>Need</th><th>From</th></tr></thead>
               <tbody>
-                {pending.map((e) => (
+                {shown.map((e) => (
                   <tr key={e.id} className={`is-clickable${e.id === selected?.id ? ' is-selected' : ''}`} onClick={() => setSelectedId(e.id)}>
                     <td className="mono" style={{ fontSize: 13 }}>{e.raisedAtLabel}</td>
                     <td>

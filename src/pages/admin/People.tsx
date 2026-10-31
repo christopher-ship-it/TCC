@@ -3,9 +3,12 @@ import { useSearchParams } from 'react-router-dom';
 import { UserPlus } from 'lucide-react';
 import { useStore } from '../../store/StoreContext';
 import { APPS } from '../../data/seed';
-import type { AgentAccount, Role } from '../../data/types';
+import { QUEUES, type AgentAccount, type Role } from '../../data/types';
+import { AGENT_LANGUAGES } from '../../lib/languages';
+import { textMatch } from '../../lib/filters';
+import { FilterBar, SearchFilter, SelectFilter, useFilters } from '../../ui/filters';
 import { ROLE_INFO, canManage, isActive, LANGUAGE_SCRIPT } from '../../lib/access';
-import { Avatar, Badge, Button, Chip, Empty, Input, PageHead } from '../../ui/primitives';
+import { Avatar, Badge, Button, Chip, Empty, PageHead } from '../../ui/primitives';
 import { PersonEditor } from './PersonEditor';
 import './admin.css';
 
@@ -18,6 +21,7 @@ export default function People() {
   const [role, setRole] = useState<Role | 'all'>('all');
   const [showSuspended, setShowSuspended] = useState(false);
   const [q, setQ] = useState('');
+  const { values: pf, set: setPf, reset: resetPf, active: pfActive } = useFilters(['pprod', 'plang', 'plist'] as const);
   const editId = params.get('edit');
   const editing = editId === 'new' ? 'new' : state.agents.find((a) => a.id === editId);
 
@@ -32,7 +36,10 @@ export default function People() {
   const people = visible
     .filter((a) => role === 'all' || a.role === role)
     .filter((a) => showSuspended || isActive(a))
-    .filter((a) => !q.trim() || `${a.name} ${a.username} ${a.languages.join(' ')}`.toLowerCase().includes(q.trim().toLowerCase()))
+    .filter((a) => !pf.pprod || a.apps.includes(pf.pprod as never))
+    .filter((a) => !pf.plang || a.languages.includes(pf.plang as never))
+    .filter((a) => !pf.plist || a.queues.includes(pf.plist as never))
+    .filter((a) => textMatch(q, a.name, a.username, a.languages.join(' ')))
     .sort((a, b) => ['admin', 'supervisor', 'agent'].indexOf(a.role) - ['admin', 'supervisor', 'agent'].indexOf(b.role) || a.name.localeCompare(b.name));
 
   const suspended = visible.filter((a) => !isActive(a)).length;
@@ -55,8 +62,13 @@ export default function People() {
             </Chip>
           ))}
         {suspended > 0 && <Chip pressed={showSuspended} onClick={() => setShowSuspended((s) => !s)}>Show suspended ({suspended})</Chip>}
-        <Input aria-label="Find a person" placeholder="Name, username or language" value={q} onChange={(e) => setQ(e.target.value)} style={{ maxWidth: 260, marginLeft: 'auto' }} />
+        <span style={{ marginLeft: 'auto' }}><SearchFilter value={q} onChange={setQ} placeholder="Name, username or language" label="Find a person" /></span>
       </div>
+      <FilterBar active={pfActive} onReset={resetPf} shown={people.length} total={visible.length} noun="people">
+        <SelectFilter label="Product" value={pf.pprod} onChange={(v) => setPf('pprod', v)} options={APPS.map((a) => ({ value: a.id, label: a.name }))} />
+        <SelectFilter label="Language" value={pf.plang} onChange={(v) => setPf('plang', v)} options={AGENT_LANGUAGES.map((l) => ({ value: l, label: l }))} />
+        <SelectFilter label="Call list" value={pf.plist} onChange={(v) => setPf('plist', v)} options={QUEUES.map((x) => ({ value: x.key, label: x.label }))} />
+      </FilterBar>
 
       {people.length === 0 ? (
         <Empty title="Nobody matches" />

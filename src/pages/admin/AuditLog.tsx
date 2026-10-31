@@ -4,7 +4,9 @@ import { useStore } from '../../store/StoreContext';
 import type { AuditAction } from '../../data/types';
 import { canAnywhere } from '../../lib/access';
 import { downloadText } from '../../lib/metrics';
-import { Badge, Button, Empty, Input, PageHead, Select, type Tone } from '../../ui/primitives';
+import { Badge, Button, Empty, PageHead, Select, type Tone } from '../../ui/primitives';
+import { SearchFilter, SelectFilter, useFilters } from '../../ui/filters';
+import { DATE_RANGES, dateWindow, inWindow, type DateRange } from '../../lib/filters';
 import { Pager, usePaged } from '../../ui/Pager';
 
 const ACTIONS: Record<AuditAction, { label: string; tone: Tone }> = {
@@ -39,6 +41,8 @@ export default function AuditLog() {
   const [kind, setKind] = useState<Kind>('all');
   const [who, setWho] = useState('');
   const [q, setQ] = useState('');
+  const { values: af, set: setAf, reset: resetAf, active: afActive } = useFilters(['adate'] as const);
+  const win = dateWindow((af.adate || 'any') as DateRange);
   const team = useMemo(() => new Set(state.agents.filter((a) => a.role === 'agent' || a.id === actor.id).map((a) => a.id)), [state.agents, actor.id]);
   const teamNames = useMemo(() => new Set(state.agents.filter((a) => team.has(a.id)).map((a) => a.name)), [state.agents, team]);
 
@@ -46,9 +50,10 @@ export default function AuditLog() {
     .filter((e) => actor.role === 'admin' || team.has(e.actorId) || (e.target && teamNames.has(e.target)))
     .filter((e) => kind === 'all' || KIND[kind].includes(e.action))
     .filter((e) => !who || e.actorId === who)
+    .filter((e) => inWindow(e.ts, win))
     .filter((e) => !q.trim() || `${e.actorName} ${e.target ?? ''} ${e.detail}`.toLowerCase().includes(q.trim().toLowerCase()));
 
-  const { items: pageRows, pager } = usePaged(rows, `${kind}|${who}|${q}`);
+  const { items: pageRows, pager } = usePaged(rows, `${kind}|${who}|${q}|${af.adate}`);
 
   const actors = [...new Map(state.audit.map((e) => [e.actorId, e.actorName])).entries()];
 
@@ -78,7 +83,10 @@ export default function AuditLog() {
           <option value="">Anyone</option>
           {actors.map(([id, name]) => <option key={id} value={id}>{name}</option>)}
         </Select>
-        <Input aria-label="Search the log" placeholder="Search names and details" value={q} onChange={(e) => setQ(e.target.value)} style={{ maxWidth: 280 }} />
+        <SelectFilter label="When" value={af.adate} onChange={(v) => setAf('adate', v)} all="Any time" options={DATE_RANGES.filter((r) => r.value !== 'any').map((r) => ({ value: r.value, label: r.label }))} />
+        <SearchFilter value={q} onChange={setQ} placeholder="Search names and details" label="Search the log" />
+        {(afActive > 0 || kind !== 'all' || who || q) && <button type="button" className="btn btn--sm btn--ghost" onClick={() => { resetAf(); setKind('all'); setWho(''); setQ(''); }}>Clear filters</button>}
+        <span className="muted" style={{ fontSize: 13, marginLeft: 'auto' }}>{rows.length.toLocaleString('en-IN')} entries</span>
       </div>
       {rows.length === 0 ? (
         <Empty icon={<ClipboardList size={22} />} title="Nothing logged yet">Changes to people, approvals and exports appear here as they happen.</Empty>

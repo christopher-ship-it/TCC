@@ -23,6 +23,7 @@ export default function Notes() {
   const [q, setQ] = useState('');
   const canTeam = me.role !== 'agent';
   const [product, setProduct] = useState('');
+  const [audienceFilter, setAudienceFilter] = useState('');
   const myApps = APPS.filter((a) => a.live && (me.role === 'admin' || me.apps.includes(a.id)));
 
   const load = useCallback(() => {
@@ -32,8 +33,8 @@ export default function Notes() {
 
   const shown = useMemo(() => {
     const t = q.trim().toLowerCase();
-    return (notes ?? []).filter((n) => (!product || !n.app || n.app === product) && (!t || `${n.title} ${n.body} ${n.ownerName}`.toLowerCase().includes(t)));
-  }, [notes, q, product]);
+    return (notes ?? []).filter((n) => (!product || !n.app || n.app === product) && (!audienceFilter || n.audience === audienceFilter) && (!t || `${n.title} ${n.body} ${n.ownerName}`.toLowerCase().includes(t)));
+  }, [notes, q, product, audienceFilter]);
   const team = shown.filter((n) => n.audience === 'agents');
   const mine = shown.filter((n) => n.audience === 'me');
   const canChange = (n: Note) => n.ownerId === me.id || (n.audience === 'agents' && me.role === 'admin');
@@ -76,6 +77,14 @@ export default function Notes() {
       />
       <div className="row" style={{ gap: 8 }}>
         <Input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search notes" aria-label="Search notes" />
+        {canTeam && (
+          <Select aria-label="Whose notes" value={audienceFilter} onChange={(e) => setAudienceFilter(e.target.value)}>
+            <option value="">All notes</option>
+            <option value="agents">For agents</option>
+            <option value="me">Mine</option>
+          </Select>
+        )}
+        {(q || product || audienceFilter) && <Button size="sm" variant="ghost" onClick={() => { setQ(''); setProduct(''); setAudienceFilter(''); }}>Clear filters</Button>}
         {myApps.length > 1 && (
           <Select aria-label="Product" value={product} onChange={(e) => setProduct(e.target.value)}>
             <option value="">All products</option>
