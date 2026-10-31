@@ -21,6 +21,7 @@ import AuditLog from './pages/admin/AuditLog';
 import CustomerImport from './pages/admin/CustomerImport';
 import Overview from './pages/owner/Overview';
 import Home from './pages/Overview';
+import AgentDetail from './pages/team/AgentDetail';
 import Geography from './pages/owner/Geography';
 import System from './pages/admin/System';
 import ApiDocs from './pages/admin/ApiDocs';
@@ -79,6 +80,7 @@ function Routed() {
         <Route path="/customers/:id" element={<CustomerPage />} />
         <Route path="/customers/:id/calls/:entryId" element={<CallDetail />} />
         <Route path="/team" element={<Only roles={['supervisor', 'admin']}><Home /></Only>} />
+        <Route path="/agents/:id" element={<Only roles={['supervisor', 'admin']}><AgentDetail /></Only>} />
         <Route path="/team/performance" element={<Only roles={['supervisor', 'admin']}><TeamPerformance /></Only>} />
         <Route path="/escalations" element={<Only roles={['supervisor', 'admin']}><Escalations /></Only>} />
         <Route path="/allocation" element={<Only roles={['supervisor', 'admin']}><Allocation /></Only>} />

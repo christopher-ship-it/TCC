@@ -26,4 +26,6 @@ export interface PresenceRow {
   sessions: number;
   online: boolean;
   canSignOut: boolean;
+  /** What their softphone is doing right now; null when no call is going. */
+  call?: { state: 'dialing' | 'ringing' | 'incoming' | 'connected'; customerId: string | null; since: number } | null;
 }

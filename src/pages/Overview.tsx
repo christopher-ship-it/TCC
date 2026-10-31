@@ -2,19 +2,16 @@
 // click away — a row opens that agent's detail. (The older Team performance / Geography / Allocation pages are
 // switched off in src/lib/features.ts, not deleted.)
 
-import { useMemo, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { useMemo } from 'react';
+import { Link, useNavigate } from 'react-router-dom';
 import { CheckCircle2, Circle } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Badge } from '@/components/ui/badge';
 import { useStore } from '../store/StoreContext';
 import { useScope } from '../shell/scope';
-import { agentScores, allCalls, callsByDay, DAY, durationLabel, isConnected, outcomeCounts, type AgentScore } from '../lib/metrics';
+import { agentScores, allCalls, callsByDay, DAY, isConnected } from '../lib/metrics';
 import { MetricChart } from '../ui/MetricChart';
-import { BarList } from '../ui/charts';
-import { CallRowItem } from '../components/calls/CallRowItem';
 import { PageHead } from '../ui/primitives';
 import { FilterBar, SearchFilter, SelectFilter, useFilters } from '../ui/filters';
 import { AGENT_LANGUAGES } from '../lib/languages';
@@ -22,6 +19,7 @@ import { textMatch } from '../lib/filters';
 import { APPS } from '../data/seed';
 import { SuperAdminTotals } from './admin/Totals';
 import { SignedInNow } from './admin/SignedInNow';
+import { Pipeline } from './admin/Pipeline';
 
 /** A fresh deployment: what to do first, ticked off as it happens. Gone once someone has made a call. */
 function GettingStarted() {
@@ -60,7 +58,7 @@ function GettingStarted() {
 export default function Overview() {
   const { state, currentAgent } = useStore();
   const { apps } = useScope();
-  const [open, setOpen] = useState<AgentScore | null>(null);
+  const navigate = useNavigate();
   const { values: of, set: setOf, reset: resetOf, active: ofActive } = useFilters(['oq', 'olang', 'oprod', 'ocalling', 'orole'] as const);
 
   const startOfToday = useMemo(() => new Date().setHours(0, 0, 0, 0), []);
@@ -82,9 +80,10 @@ export default function Overview() {
 
   return (
     <div className="page">
-      <PageHead title="Overview" desc="What the calling team did today. Click an agent for the detail." />
+      <PageHead title="Overview" desc="What the calling team did today. Click an agent to see what they hold, what they have done and whether they are on a call." />
       <GettingStarted />
       {currentAgent?.role === 'admin' && <SuperAdminTotals />}
+      {currentAgent?.role !== 'agent' && <Pipeline />}
       {currentAgent?.role !== 'agent' && <SignedInNow />}
       {currentAgent?.role === 'admin' && <h2 className="text-base font-semibold" style={{ marginTop: 8 }}>Today</h2>}
 
@@ -133,7 +132,7 @@ export default function Overview() {
               const n = callsToday(s.agent.name);
               const pct = s.agent.dailyTarget ? Math.min(100, Math.round((n / s.agent.dailyTarget) * 100)) : 0;
               return (
-                <TableRow key={s.agent.id} className="cursor-pointer" onClick={() => setOpen(s)}>
+                <TableRow key={s.agent.id} className="cursor-pointer" onClick={() => navigate(`/agents/${encodeURIComponent(s.agent.id)}`)}>
                   <TableCell className="font-medium">{s.agent.name}{s.agent.trainee && <Badge className="ml-2" variant="outline">Trainee</Badge>}</TableCell>
                   <TableCell className="text-muted-foreground">{s.agent.languages.join(', ')}</TableCell>
                   <TableCell className="text-right tabular-nums">{n}</TableCell>
@@ -148,43 +147,6 @@ export default function Overview() {
         </Table>
       </Card>
 
-      <Dialog open={!!open} onOpenChange={(o) => !o && setOpen(null)}>
-        <DialogContent className="max-h-[90vh] max-w-2xl overflow-y-auto">
-          {open && (
-            <>
-              <DialogHeader>
-                <DialogTitle>{open.agent.name}</DialogTitle>
-                <DialogDescription>Last 7 days · {open.agent.languages.join(', ')}</DialogDescription>
-              </DialogHeader>
-              <div className="grid grid-cols-3 gap-3">
-                {[
-                  ['Calls', open.calls],
-                  ['Connected', open.calls ? `${Math.round((open.connected / open.calls) * 100)}%` : '—'],
-                  ['Positive', open.positive],
-                  ['Converted', open.converted],
-                  ['Talk time', durationLabel(open.talkSec)],
-                  ['Sentiment', open.avgSentiment ?? '—'],
-                ].map(([l, v]) => (
-                  <div key={l} className="rounded-lg border border-border p-3">
-                    <div className="text-xs text-muted-foreground">{l}</div>
-                    <div className="text-xl font-semibold tabular-nums">{v}</div>
-                  </div>
-                ))}
-              </div>
-              <div>
-                <div className="mb-2 text-sm font-medium">Outcomes</div>
-                <BarList ariaLabel="Outcomes" data={outcomeCounts(week.filter((r) => r.call.agentName === open.agent.name)).slice(0, 6)} />
-              </div>
-              <div>
-                <div className="mb-1 flex items-center justify-between text-sm font-medium">Recent calls <Link to="/calls" className="text-primary">All calls</Link></div>
-                <ul className="plain-list">
-                  {week.filter((r) => r.call.agentName === open.agent.name).slice(0, 5).map((r) => <CallRowItem key={r.call.id} row={r} />)}
-                </ul>
-              </div>
-            </>
-          )}
-        </DialogContent>
-      </Dialog>
     </div>
   );
 }

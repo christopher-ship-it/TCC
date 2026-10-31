@@ -1,12 +1,14 @@
 // Who is signed in right now, for the people who run the team. Admins can sign someone out from here (their own agents
 // and supervisors); the super admin anyone. The server decides who may (src/lib/signedIn.ts).
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { useStore } from '../../store/StoreContext';
 import { APPS } from '../../data/seed';
 import { notesCall } from '../../lib/notes';
+import { usePresence } from '../../lib/usePresence';
 import { openLoad } from '../../lib/assignment';
 import { textMatch } from '../../lib/filters';
 import type { PresenceRow } from '../../lib/signedIn';
@@ -28,29 +30,9 @@ const KEYS = ['on_q', 'on_prod', 'on_role', 'on_state'] as const;
 export function SignedInNow() {
   const { state, backend } = useStore();
   const toast = useToast();
-  const [people, setPeople] = useState<PresenceRow[] | null>(null);
-  const [now, setNow] = useState(Date.now());
+  const { people, now, error: loadError, reload: load } = usePresence();
   const [confirming, setConfirming] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
   const { values: f, set, reset, active } = useFilters(KEYS, { on_state: 'online' });
-
-  const load = useCallback(async () => {
-    try {
-      const r = await notesCall<{ people: PresenceRow[]; now: number }>('GET', '/api/presence');
-      setPeople(r.people);
-      setNow(r.now);
-      setError(null);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'Could not load who is signed in.');
-    }
-  }, []);
-
-  useEffect(() => {
-    if (backend !== 'server') return;
-    void load();
-    const id = setInterval(() => document.visibilityState === 'visible' && void load(), 20_000);
-    return () => clearInterval(id);
-  }, [backend, load]);
 
   const held = useMemo(() => openLoad(state.users, Date.now()), [state.users]);
 
@@ -91,7 +73,7 @@ export function SignedInNow() {
           <SelectFilter label="Role" value={f.on_role} onChange={(v) => set('on_role', v)} options={[{ value: 'agent', label: 'Agents' }, { value: 'supervisor', label: 'Supervisors' }, { value: 'admin', label: 'Admins' }]} />
           <SelectFilter label="Product" value={f.on_prod} onChange={(v) => set('on_prod', v)} options={APPS.map((a) => ({ value: a.id, label: a.name }))} />
         </FilterBar>
-        {error && <p className="muted" role="alert">{error}</p>}
+        {loadError && <p className="muted" role="alert">{loadError}</p>}
         {people && rows.length === 0 ? (
           <Empty title={f.on_state === 'online' && !active ? 'Nobody is signed in' : 'Nobody matches'}>{active ? 'Try clearing a filter.' : 'People show here while their browser is open.'}</Empty>
         ) : (
@@ -110,8 +92,8 @@ export function SignedInNow() {
               {rows.map((p) => (
                 <TableRow key={p.id}>
                   <TableCell>
-                    <span className="font-medium">{p.name}</span>{' '}
-                    <Badge tone={p.online ? 'ok' : 'neutral'} dot>{p.online ? 'Online' : 'Offline'}</Badge>
+                    {p.role === 'agent' ? <Link to={`/agents/${encodeURIComponent(p.id)}`} className="font-medium text-primary">{p.name}</Link> : <span className="font-medium">{p.name}</span>}{' '}
+                    <Badge tone={p.online ? 'ok' : 'neutral'} dot>{p.online ? 'Online' : 'Offline'}</Badge>{p.call && <>{' '}<Badge tone="accent" dot>On a call</Badge></>}
                     <div className="muted" style={{ fontSize: 12.5 }}>{p.role}{p.status === 'suspended' ? ' · suspended' : ''}</div>
                   </TableCell>
                   <TableCell className="text-muted-foreground">{p.apps.map((a) => APPS.find((x) => x.id === a)?.name ?? a).join(', ') || '—'}</TableCell>

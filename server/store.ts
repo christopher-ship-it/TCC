@@ -275,6 +275,9 @@ const browserReports = new Map<string, number[]>();
 type ReadJson = (req: IncomingMessage, max?: number) => Promise<unknown>;
 type Send = (res: ServerResponse, status: number, body: unknown) => void;
 
+type LiveCall = { state: 'dialing' | 'ringing' | 'incoming' | 'connected'; customerId: string | null; since: number; reportedAt: number };
+const LIVE_CALL_STATES: string[] = ['dialing', 'ringing', 'incoming', 'connected'];
+
 export function createStore(getPool: () => Promise<pg.Pool>, env: StoreEnv, readJson: ReadJson, send: Send) {
   async function newSession(req: IncomingMessage, res: ServerResponse, pool: pg.Pool, agentId: string) {
     const token = crypto.randomBytes(32).toString('base64url');
@@ -294,6 +297,9 @@ export function createStore(getPool: () => Promise<pg.Pool>, env: StoreEnv, read
     requestAgent.set(req, me);
     return me;
   }
+
+  /** Each agent's call right now, from their browser. Lives in memory: a restart simply shows nobody on a call until the next report. */
+  const liveCalls = new Map<string, LiveCall>();
 
   async function requireMe(req: IncomingMessage, pool: pg.Pool): Promise<AgentAccount> {
     const me = await whoAmI(req, pool);
@@ -688,6 +694,19 @@ export function createStore(getPool: () => Promise<pg.Pool>, env: StoreEnv, read
       return true;
     }
 
+    // The softphone says what its call is doing (every 20 s while one is going, and when it changes), so the people who
+    // run the team can see who is on a call. A report older than 90 s is dropped: a closed tab never says "idle".
+    if (req.method === 'POST' && p === '/api/presence/call') {
+      const me = await requireMe(req, pool);
+      const b = (await readJson(req)) as { state?: unknown; customerId?: unknown };
+      const callState = typeof b.state === 'string' && LIVE_CALL_STATES.includes(b.state as LiveCall['state']) ? (b.state as LiveCall['state']) : null;
+      const prev = liveCalls.get(me.id);
+      if (!callState) liveCalls.delete(me.id);
+      else liveCalls.set(me.id, { state: callState, customerId: typeof b.customerId === 'string' ? b.customerId : null, since: prev?.state === callState ? prev.since : Date.now(), reportedAt: Date.now() });
+      send(res, 200, { ok: true });
+      return true;
+    }
+
     // Who is signed in right now, for the people who run the team (admins and supervisors, for their own products).
     if (req.method === 'GET' && p === '/api/presence') {
       const me = await requireMe(req, pool);
@@ -704,7 +723,9 @@ export function createStore(getPool: () => Promise<pg.Pool>, env: StoreEnv, read
         .map((r) => {
           const lastSeen = r.last_seen ? Date.parse(r.last_seen) : null;
           const sessions = Number(r.sessions);
-          return { id: r.doc.id, name: r.doc.name, role: r.doc.role, apps: r.doc.apps, languages: r.doc.languages, status: r.doc.status, lastSeen, sessions, online: isOnline(lastSeen, sessions, now), canSignOut: canSignOut(me, r.doc) };
+          const live = liveCalls.get(r.doc.id);
+          const call = live && now - live.reportedAt < 90_000 ? { state: live.state, customerId: live.customerId, since: live.since } : null;
+          return { id: r.doc.id, name: r.doc.name, role: r.doc.role, apps: r.doc.apps, languages: r.doc.languages, status: r.doc.status, lastSeen, sessions, online: isOnline(lastSeen, sessions, now), canSignOut: canSignOut(me, r.doc), call };
         });
       send(res, 200, { people, now });
       return true;

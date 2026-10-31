@@ -10,6 +10,7 @@ import { hasRealRecording } from '../../lib/attachRecording';
 import { DEFAULT_COUNTRY_CODE, LIVE_DIAL_BLOCKED, callMeta, isRealNumber, dialNumberFor, suggestStatus, telephonyProvider, toCallTelephony } from '../../lib/telephony';
 import { lookupCaller, resolveCaller } from '../../lib/inbound';
 import { report, serverStoreEnabled } from '../../store/ServerStoreProvider';
+import { notesCall } from '../../lib/notes';
 import { announcePresence } from '../../lib/presence';
 import { can } from '../../lib/access';
 import { APPS } from '../../data/seed';
@@ -215,6 +216,17 @@ function Session({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (connection !== 'ready') setPresenceError(null);
   }, [connection]);
+  // Tell the server what the call is doing, so the team's overview can show who is on a call (and with whom).
+  const liveState = call?.state ?? null;
+  const liveCustomer = call?.meta.customerId ?? null;
+  useEffect(() => {
+    if (!serverStoreEnabled) return;
+    const tell = () => void notesCall('POST', '/api/presence/call', { state: liveState, customerId: liveCustomer }).catch(() => undefined);
+    tell();
+    if (!liveState) return;
+    const id = setInterval(tell, 20_000);
+    return () => clearInterval(id);
+  }, [liveState, liveCustomer]);
   // Closing or reloading the tab drops the line (the password is not kept), so stop TeleCMI ringing this agent.
   useEffect(() => {
     const off = () => void announcePresence('offline');
