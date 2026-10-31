@@ -9,10 +9,10 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { useStore } from '../store/StoreContext';
 import { useScope } from '../shell/scope';
 import { APPS } from '../data/seed';
-import type { CustomerUser, Lead } from '../data/types';
+import { PRIORITIES, type CustomerUser, type Lead, type Priority } from '../data/types';
 import { can } from '../lib/access';
 import { AUTO_FOLLOWUP_DAYS, addDays, chainDay, dayFromInput, inRange, inputFromDay, isFollowUpOf, rangeBounds, scheduledFollowUps, startOfDay, type FollowUpRange, type ScheduledFollowUp } from '../lib/followUps';
-import { LeadBadge, OutcomeBadge } from '../components/calls/badges';
+import { LeadBadge, OutcomeBadge, priorityRowStyle } from '../components/calls/badges';
 import { Button, Card, Chip, Empty, Input, PageHead, Select } from '../ui/primitives';
 import { Pager, usePaged } from '../ui/Pager';
 import { CustomerName } from '../components/customers/CustomerDetails';
@@ -42,7 +42,7 @@ function why(f: ScheduledFollowUp): string {
 }
 
 export default function FollowUps() {
-  const { state, currentAgent } = useStore();
+  const { state, dispatch, currentAgent } = useStore();
   const me = currentAgent!;
   const { apps } = useScope();
   const navigate = useNavigate();
@@ -159,6 +159,7 @@ export default function FollowUps() {
                 <TableRow data-head>
                   <TableHead>Customer</TableHead>
                   {multiApp && <TableHead>Product</TableHead>}
+                  <TableHead>Priority</TableHead>
                   <TableHead>Positive / negative</TableHead>
                   <TableHead>Why</TableHead>
                   <TableHead>Last call</TableHead>
@@ -171,13 +172,19 @@ export default function FollowUps() {
                   const u = f.user;
                   const last = u.callHistory[0];
                   return (
-                    <TableRow key={u.id} className="cursor-pointer" onClick={() => navigate(`/customers/${u.id}`)}>
+                    <TableRow key={u.id} className="cursor-pointer" style={priorityRowStyle(u.priority)} onClick={() => navigate(`/customers/${u.id}`)}>
                       <TableCell>
                         <CustomerName user={u} />
                         <div className="mono muted" style={{ fontSize: 12 }}>{u.phone}</div>
                       </TableCell>
                       {multiApp && <TableCell>{APPS.find((a) => a.id === u.app)?.name}</TableCell>}
-                      <TableCell>{u.lead ? <LeadBadge lead={u.lead} /> : <span className="muted">—</span>}</TableCell>
+                      <TableCell onClick={(e) => e.stopPropagation()}>
+                        <Select aria-label={`Priority for ${u.name}`} value={u.priority ?? ''} onChange={(e) => dispatch({ type: 'SET_PRIORITY', userId: u.id, priority: (e.target.value || null) as Priority | null })} style={{ minWidth: 104 }}>
+                          <option value="">No priority</option>
+                          {PRIORITIES.map((p) => <option key={p} value={p}>{p}</option>)}
+                        </Select>
+                      </TableCell>
+                      <TableCell>{u.lead ? <><LeadBadge lead={u.lead} />{u.rating && <span className="muted" style={{ fontSize: 12.5, marginLeft: 6 }}>{u.rating}</span>}</> : <span className="muted">—</span>}</TableCell>
                       <TableCell className="text-muted-foreground">{why(f)}</TableCell>
                       <TableCell style={{ maxWidth: 320 }}>
                         {last ? (

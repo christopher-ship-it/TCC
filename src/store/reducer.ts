@@ -22,10 +22,10 @@ function withAudit(state: State, entry: ReturnType<typeof auditEntry>): State {
 /** What a call's outcome does to the customer: which queue they land in, whether they convert or exit. */
 function applyOutcome(next: CustomerUser, outcome: Outcome, now: number): CustomerUser {
   if (NEGATIVE_OUTCOMES.includes(outcome)) {
-    return { ...next, queue: null, stageTag: 'Exited — negative', followUp: undefined, callback: undefined };
+    return { ...next, queue: null, stageTag: 'Exited — negative', followUp: undefined, callback: undefined, priority: null };
   }
   if (outcome === 'Ready to subscribe') {
-    return { ...next, queue: null, paying: true, plan: 'Paid', stageTag: 'Converted', followUp: undefined, callback: undefined, mrr: next.mrr ?? 999 };
+    return { ...next, queue: null, paying: true, plan: 'Paid', stageTag: 'Converted', followUp: undefined, callback: undefined, priority: null, mrr: next.mrr ?? 999 };
   }
   if (outcome === 'Payment issue') {
     return { ...next, queue: 'payments', stageTag: 'Overdue', paymentDue: next.paymentDue ?? { amount: 999, dueLabel: fmtDay(now - DAY_MS), status: 'overdue' } };
@@ -63,6 +63,10 @@ export function reducer(state: State, action: Action): State {
         next.autoFollowUp = plan.autoFollowUp;
         if (action.source) next.source = action.source;
         if (action.lead) next.lead = action.lead;
+        // A rating only means something on a positive call; a negative one wipes it.
+        if (action.lead === 'negative') next.rating = null;
+        else if (action.rating) next.rating = action.rating;
+        if (action.priority) next.priority = action.priority;
         if (plan.callback) callHistory[0] = { ...entry, followUpTs: plan.callback.dueTs };
         if (plan.ended) {
           next.attempt = u.attempt + 1;
@@ -225,6 +229,8 @@ export function reducer(state: State, action: Action): State {
     }
     case 'SET_CUSTOMER_TYPE':
       return { ...state, users: state.users.map((u) => (u.id === action.userId ? { ...u, customerType: action.customerType } : u)) };
+    case 'SET_PRIORITY':
+      return { ...state, users: state.users.map((u) => (u.id === action.userId ? { ...u, priority: action.priority } : u)) };
     case 'SET_LEAD':
       return { ...state, users: state.users.map((u) => (u.id === action.userId ? { ...u, lead: action.lead } : u)) };
     case 'MARK_PAID': {

@@ -1,9 +1,15 @@
 // Calling people back. An agent can set a date on any call. When the first try ends unanswered (no answer / not
 // reachable) and nobody set one, TCC calls again every day for 14 days — until they answer or the 14 days run out.
-import type { AgentAccount, CustomerUser } from '../data/types.ts';
+import type { AgentAccount, CustomerUser, Priority, Rating } from '../data/types.ts';
 
 export const AUTO_FOLLOWUP_DAYS = 14;
 const DAY = 86_400_000;
+
+/** Days until the next call after a positive one, by how positive it was. */
+export const RATING_DAYS: Record<Rating, number> = { Good: 7, Average: 5, Okay: 3 };
+
+/** Highest priority first; a follow-up nobody ranked sits between Medium and Low. */
+export const priorityRank = (p: Priority | null | undefined): number => (p === 'High' ? 0 : p === 'Medium' ? 1 : p === 'Low' ? 3 : 2);
 
 export const startOfDay = (ts: number): number => {
   const d = new Date(ts);
@@ -88,7 +94,7 @@ export function scheduledFollowUps(users: CustomerUser[]): ScheduledFollowUp[] {
       if (due !== undefined) out.push({ user: u, dueTs: startOfDay(due), kind: 'weekly' });
     }
   }
-  return out.sort((a, b) => a.dueTs - b.dueTs || a.user.name.localeCompare(b.user.name));
+  return out.sort((a, b) => a.dueTs - b.dueTs || priorityRank(a.user.priority) - priorityRank(b.user.priority) || a.user.name.localeCompare(b.user.name));
 }
 
 export type FollowUpRange = 'overdue' | 'today' | 'tomorrow' | 'week' | 'upcoming' | 'custom';

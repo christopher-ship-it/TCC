@@ -122,6 +122,14 @@ export const POSITIVE_OUTCOMES: Outcome[] = ['Interested', 'Very interested', 'R
  * find the customers worth calling again. It does not move anyone between queues. */
 export type Lead = 'positive' | 'negative';
 
+/** How positive a positive call was. Decides how soon the customer is called again (RATING_DAYS in src/lib/followUps.ts). */
+export type Rating = 'Good' | 'Average' | 'Okay';
+export const RATINGS: Rating[] = ['Good', 'Average', 'Okay'];
+
+/** How urgently a follow-up should be called. Set by hand; High shows first and in colour. */
+export type Priority = 'High' | 'Medium' | 'Low';
+export const PRIORITIES: Priority[] = ['High', 'Medium', 'Low'];
+
 /** How a customer says they came to know about the app (asked on answered calls). */
 export const LEAD_SOURCES = ['Instagram', 'Facebook', 'Telecalling', 'Google/YouTube', 'Referral', 'Other'] as const;
 
@@ -181,6 +189,10 @@ export interface CallLogEntry {
   followUpTs?: number;
   /** Positive or negative, as the agent marked it after this call (Lead). */
   lead?: Lead;
+  /** How positive, for a call marked positive. */
+  rating?: Rating;
+  /** The priority the agent gave the follow-up after this call. */
+  priority?: Priority;
   telephony?: CallTelephony;
   /** Post-call analysis: transcript, summary, sentiment, objections, next step (src/lib/analysis). */
   analysis?: CallAnalysis;
@@ -305,6 +317,10 @@ export interface CustomerUser {
   source?: string;
   /** Positive or negative, from the last call an agent marked (or changed on the customer page). `null` = cleared. */
   lead?: Lead | null;
+  /** How positive the customer was on the last positive call. Decides the follow-up date; `null` = cleared. */
+  rating?: Rating | null;
+  /** How urgently to call them back, set by hand. Shown in colour on the follow-up lists; cleared when the chain ends. */
+  priority?: Priority | null;
   /** The next call to make: a day the agent chose, or the next of the automatic daily calls. Overrides the queue until then. */
   callback?: { dueTs: number; auto: boolean };
   /** First call unanswered: TCC calls again every day for 14 days (src/lib/followUps.ts). Gone once they answer or the days run out. */
@@ -349,7 +365,7 @@ export interface SourceLink {
 // data — generated for now, destined to come from the existing app database.
 export type CustomerOverlay = Pick<
   CustomerUser,
-  'queue' | 'attempt' | 'callHistory' | 'tickets' | 'paymentDue' | 'followUp' | 'paying' | 'plan' | 'planNote' | 'mrr' | 'stageTag' | 'ownerAgentId' | 'hasActiveEscalation' | 'language' | 'customerType' | 'source' | 'lead' | 'callback' | 'autoFollowUp'
+  'queue' | 'attempt' | 'callHistory' | 'tickets' | 'paymentDue' | 'followUp' | 'paying' | 'plan' | 'planNote' | 'mrr' | 'stageTag' | 'ownerAgentId' | 'hasActiveEscalation' | 'language' | 'customerType' | 'source' | 'lead' | 'rating' | 'priority' | 'callback' | 'autoFollowUp'
 >;
 
 export function overlayFromUser(u: CustomerUser): CustomerOverlay {
@@ -371,6 +387,8 @@ export function overlayFromUser(u: CustomerUser): CustomerOverlay {
     customerType: u.customerType,
     source: u.source,
     lead: u.lead,
+    rating: u.rating,
+    priority: u.priority,
     callback: u.callback,
     autoFollowUp: u.autoFollowUp,
   };

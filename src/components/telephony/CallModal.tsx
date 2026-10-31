@@ -7,19 +7,18 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { Check, Grid3x3, Loader2, Mic, MicOff, Pause, Phone as PhoneIcon, PhoneOff, Play, Sparkles, ThumbsDown, ThumbsUp, Ticket } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { Badge } from '@/components/ui/badge';
 import { cn } from '@/lib/utils';
 import { formatDuration, useElapsedSeconds, useTelephony } from '../../telephony';
 import { useStore } from '../../store/StoreContext';
 import { useToast } from '../../ui/toastContext';
 import { customerTypesFor } from '../../data/products';
-import { CALL_STATUS_LIST, LEAD_SOURCES, NEGATIVE_OUTCOMES, OUTCOME_LIST, POSITIVE_OUTCOMES, type CallAnalysis, type CallStatus, type CustomerUser, type Lead, type Outcome } from '../../data/types';
+import { CALL_STATUS_LIST, LEAD_SOURCES, NEGATIVE_OUTCOMES, OUTCOME_LIST, POSITIVE_OUTCOMES, PRIORITIES, RATINGS, type CallAnalysis, type CallStatus, type CustomerUser, type Lead, type Outcome, type Priority, type Rating } from '../../data/types';
 import { suggestStatus, toCallTelephony } from '../../lib/telephony';
 import { hasRealRecording } from '../../lib/attachRecording';
 import { serverRecording } from '../../lib/recordingLookup';
 import { analyzeCall, AnalysisUnavailable } from '../../lib/transcription';
 import { outcomeLabel } from '../../brand';
-import { AUTO_FOLLOWUP_DAYS, dayFromInput, inputFromDay, startOfDay } from '../../lib/followUps';
+import { AUTO_FOLLOWUP_DAYS, RATING_DAYS, addDays, dayFromInput, inputFromDay, startOfDay } from '../../lib/followUps';
 import { useCallSession } from './callSessionContext';
 import { notesCall, notesForProduct, type Note } from '../../lib/notes';
 import { APPS } from '../../data/seed';
@@ -92,6 +91,20 @@ function LiveCall({ user }: { user: CustomerUser }) {
   );
 }
 
+/** One numbered step of the call checklist. A ticked circle means it is done. */
+function Step({ n, title, done, note, children }: { n: number; title: string; done: boolean; note?: string; children: ReactNode }) {
+  return (
+    <section className="flex flex-col gap-2" aria-label={`Step ${n}: ${title}`}>
+      <div className="flex items-center gap-2 text-sm font-medium">
+        <span className={cn('flex size-5 shrink-0 items-center justify-center rounded-full border text-[11px] tabular-nums', done ? 'border-foreground bg-foreground text-background' : 'border-input text-muted-foreground')}>{done ? <Check className="size-3" /> : n}</span>
+        {title}
+      </div>
+      {note && <p className="-mt-1 pl-7 text-[13px] text-muted-foreground">{note}</p>}
+      {children}
+    </section>
+  );
+}
+
 type Phase = 'review' | 'done';
 
 /** The call is over: wait for the analysis, then let the agent confirm and complete. */
@@ -114,6 +127,10 @@ function WrapUp({ user }: { user: CustomerUser }) {
   const [type, setType] = useState<string>(user.customerType ?? '');
   const [outcome, setOutcome] = useState<Outcome | ''>('');
   const [lead, setLead] = useState<Lead | ''>('');
+  const [rating, setRating] = useState<Rating | ''>('');
+  const [priority, setPriority] = useState<Priority>(user.priority ?? 'Medium');
+  const leadTouched = useRef(false);
+  const dateTouched = useRef(false);
   const [ticket, setTicket] = useState<boolean | null>(null);
   const [source, setSource] = useState<string>(user.source ?? '');
   const [followDate, setFollowDate] = useState('');
@@ -174,6 +191,25 @@ function WrapUp({ user }: { user: CustomerUser }) {
   const followTs = dayFromInput(followDate);
   const today = inputFromDay(Date.now());
   const inDays = (n: number) => inputFromDay(startOfDay(Date.now()) + n * 86_400_000 + 3_600_000);
+  const converted = outcome === 'Ready to subscribe';
+  // A positive call is graded Good, Average or Okay, which sets how soon they are called again. Converted customers need no follow-up.
+  const needRating = answered && lead === 'positive' && !converted;
+
+  // What they said suggests positive or negative until the agent picks one themselves.
+  useEffect(() => {
+    if (leadTouched.current || !outcome) return;
+    if (POSITIVE_OUTCOMES.includes(outcome)) setLead('positive');
+    else if (NEGATIVE_OUTCOMES.includes(outcome)) setLead('negative');
+  }, [outcome]);
+  useEffect(() => {
+    if (!needRating) setRating('');
+  }, [needRating]);
+  // The grade sets the date (Good 7 days, Average 5, Okay 3) until the agent picks a date themselves.
+  useEffect(() => {
+    if (rating && !dateTouched.current) setFollowDate(inputFromDay(addDays(Date.now(), RATING_DAYS[rating])));
+  }, [rating]);
+  const hasFollowUp = followTs !== undefined || (!answered && !user.callHistory.some((c) => c.status.startsWith('Answered')));
+  const blocker = needRating && !rating ? 'Choose how positive the call was.' : '';
 
   function complete() {
     const agent = currentAgent!;
@@ -190,6 +226,8 @@ function WrapUp({ user }: { user: CustomerUser }) {
       source: answered ? source || undefined : undefined,
       followUpTs: followTs,
       lead: answered && lead ? lead : undefined,
+      rating: needRating && rating ? rating : undefined,
+      priority: hasFollowUp ? priority : undefined,
     });
     if (type && type !== user.customerType) dispatch({ type: 'SET_CUSTOMER_TYPE', userId: user.id, customerType: type });
     if (ticketOn) dispatch({ type: 'RAISE_TICKET', userId: user.id, subject: `[${team}] ${analysis?.summary?.slice(0, 120) || note.trim() || 'Raised from a call'}` });
@@ -230,90 +268,107 @@ function WrapUp({ user }: { user: CustomerUser }) {
       )}
       {connected && !analysis && !reading && <p className="text-sm text-muted-foreground">The analysis isn’t available for this call, so fill in what they said below.</p>}
 
-      <div className="flex flex-col gap-2">
-        <div className="text-sm font-medium">Did the call connect?</div>
+      <Step n={1} title="Did the call connect?" done>
         <div className="flex flex-wrap gap-2">
           {CALL_STATUS_LIST.filter((s) => s.status === 'Answered — Followup' || s.status === 'Not Reachable' || s.status === 'No Answer').map((s) => (
             <Button key={s.status} size="sm" variant={status === s.status ? 'default' : 'outline'} onClick={() => setStatus(s.status)}>{STATUS_LABEL[s.status]}</Button>
           ))}
         </div>
-      </div>
-
-      <div className="flex flex-col gap-2">
-        <div className="text-sm font-medium">Who is this? <span className="font-normal text-muted-foreground">(optional)</span></div>
-        <div className="flex flex-wrap gap-2">
-          {types.map((t) => (
-            <Button key={t} size="sm" variant={type === t ? 'default' : 'outline'} onClick={() => setType(t)}>{t}</Button>
-          ))}
-        </div>
-      </div>
+      </Step>
 
       {answered && (
-        <div className="flex flex-col gap-2">
-          <div className="text-sm font-medium">How did they hear about the app? <span className="font-normal text-muted-foreground">(optional)</span></div>
-          <div className="flex flex-wrap gap-2">
-            {LEAD_SOURCES.map((s) => (
-              <Button key={s} size="sm" variant={source === s ? 'default' : 'outline'} onClick={() => setSource(s)}>{s}</Button>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {answered && (
-        <div className="flex flex-col gap-2">
-          <div className="flex items-center gap-2 text-sm font-medium">What did they say?{!outcome && <Badge variant="outline">Not captured</Badge>}</div>
+        <Step n={2} title="What did they say?" done={!!outcome} note={!outcome ? 'Can be left blank: the call is read after you close this.' : undefined}>
           <div className="flex flex-wrap gap-2">
             {OUTCOME_LIST.map((o) => (
               <Button key={o.outcome} size="sm" variant={outcome === o.outcome ? 'default' : 'outline'} onClick={() => setOutcome(o.outcome)}>{outcomeLabel(o.outcome)}</Button>
             ))}
           </div>
-          {outcome && POSITIVE_OUTCOMES.includes(outcome) && outcome !== 'Ready to subscribe' && <p className="text-[13px] text-muted-foreground">Goes into the weekly follow-up list. Only a “no” ends it.</p>}
-          {outcome === 'Ready to subscribe' && <p className="text-[13px] text-muted-foreground">Marked as converted and taken out of every queue.</p>}
+          {converted && <p className="text-[13px] text-muted-foreground">Marked as converted and taken out of every queue.</p>}
           {outcome && NEGATIVE_OUTCOMES.includes(outcome) && <p className="text-[13px] text-muted-foreground">Taken out of the queues and the follow-up list.</p>}
-        </div>
+        </Step>
       )}
 
       {answered && (
-        <div className="flex flex-col gap-2">
-          <div className="text-sm font-medium">Positive or negative? <span className="font-normal text-muted-foreground">(optional, your own call)</span></div>
+        <Step n={3} title="Positive or negative?" done={!!lead}>
           <div className="flex flex-wrap gap-2" role="group" aria-label="Positive or negative">
-            <Button size="sm" variant={lead === 'positive' ? 'default' : 'outline'} aria-pressed={lead === 'positive'} onClick={() => setLead(lead === 'positive' ? '' : 'positive')}><ThumbsUp className="size-4" />Positive</Button>
-            <Button size="sm" variant={lead === 'negative' ? 'default' : 'outline'} aria-pressed={lead === 'negative'} onClick={() => setLead(lead === 'negative' ? '' : 'negative')}><ThumbsDown className="size-4" />Negative</Button>
+            <Button size="sm" variant={lead === 'positive' ? 'default' : 'outline'} aria-pressed={lead === 'positive'} onClick={() => { leadTouched.current = true; setLead(lead === 'positive' ? '' : 'positive'); }}><ThumbsUp className="size-4" />Positive</Button>
+            <Button size="sm" variant={lead === 'negative' ? 'default' : 'outline'} aria-pressed={lead === 'negative'} onClick={() => { leadTouched.current = true; setLead(lead === 'negative' ? '' : 'negative'); }}><ThumbsDown className="size-4" />Negative</Button>
           </div>
           {user.lead && !lead && <p className="text-[13px] text-muted-foreground">Marked {user.lead} after an earlier call. Leave both off to keep that.</p>}
-          {lead && <p className="text-[13px] text-muted-foreground">Saved on the customer, so you can filter for {lead} customers on Customers and Follow-ups. It doesn’t change their queue.</p>}
-        </div>
+        </Step>
       )}
 
-      <div className="flex flex-col gap-2">
-        <div className="text-sm font-medium">Call them again on <span className="font-normal text-muted-foreground">(optional)</span></div>
+      {needRating && (
+        <Step n={4} title="How positive?" done={!!rating} note={!rating ? 'Required for a positive call.' : undefined}>
+          <div className="flex flex-wrap gap-2" role="group" aria-label="How positive">
+            {RATINGS.map((r) => (
+              <Button key={r} size="sm" variant={rating === r ? 'default' : 'outline'} aria-pressed={rating === r} onClick={() => setRating(r)}>{r}<span className="ml-1 text-xs opacity-70">· {RATING_DAYS[r]} days</span></Button>
+            ))}
+          </div>
+          <p className="text-[13px] text-muted-foreground">The grade sets when they are called again. You can change the date below.</p>
+        </Step>
+      )}
+
+      <Step n={needRating ? 5 : answered ? 4 : 2} title="When do we call them again?" done={followTs !== undefined}>
         <div className="flex flex-wrap items-center gap-2">
-          <Button size="sm" variant={followDate === today ? 'default' : 'outline'} onClick={() => setFollowDate(today)}>Today</Button>
-          <Button size="sm" variant={followDate === inDays(1) ? 'default' : 'outline'} onClick={() => setFollowDate(inDays(1))}>Tomorrow</Button>
-          <Button size="sm" variant={followDate === inDays(7) ? 'default' : 'outline'} onClick={() => setFollowDate(inDays(7))}>In a week</Button>
-          <input type="date" min={today} value={followDate} onChange={(e) => setFollowDate(e.target.value && e.target.value >= today ? e.target.value : '')} aria-label="Follow-up date" className="h-8 rounded-md border border-input bg-card px-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring" />
-          {followDate && <Button size="sm" variant="ghost" onClick={() => setFollowDate('')}>Clear</Button>}
+          <Button size="sm" variant={followDate === today ? 'default' : 'outline'} onClick={() => { dateTouched.current = true; setFollowDate(today); }}>Today</Button>
+          <Button size="sm" variant={followDate === inDays(1) ? 'default' : 'outline'} onClick={() => { dateTouched.current = true; setFollowDate(inDays(1)); }}>Tomorrow</Button>
+          <Button size="sm" variant={followDate === inDays(7) ? 'default' : 'outline'} onClick={() => { dateTouched.current = true; setFollowDate(inDays(7)); }}>In a week</Button>
+          <input type="date" min={today} value={followDate} onChange={(e) => { dateTouched.current = true; setFollowDate(e.target.value && e.target.value >= today ? e.target.value : ''); }} aria-label="Follow-up date" className="h-8 rounded-md border border-input bg-card px-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring" />
+          {followDate && <Button size="sm" variant="ghost" onClick={() => { dateTouched.current = true; setFollowDate(''); }}>Clear</Button>}
         </div>
-        {!answered && !followDate && !user.callHistory.some((c) => c.status.startsWith('Answered')) && (
+        {!answered && !followDate && hasFollowUp && (
           <p className="text-[13px] text-muted-foreground">No date chosen: they’ll be called again every day for {AUTO_FOLLOWUP_DAYS} days, until they answer.</p>
         )}
         {!answered && followDate && <p className="text-[13px] text-muted-foreground">They’ll wait out of the queue until then.</p>}
-      </div>
+        {hasFollowUp && (
+          <div className="mt-1 flex flex-col gap-2">
+            <div className="text-sm font-medium">Priority</div>
+            <div className="flex flex-wrap gap-2" role="group" aria-label="Follow-up priority">
+              {PRIORITIES.map((p) => (
+                <Button key={p} size="sm" variant={priority === p ? 'default' : 'outline'} aria-pressed={priority === p} className={cn(priority === p && p === 'High' && 'bg-destructive text-white hover:bg-destructive/90')} onClick={() => setPriority(p)}>{p}</Button>
+              ))}
+            </div>
+          </div>
+        )}
+      </Step>
 
-      <button type="button" onClick={() => setTicket(!ticketOn)} aria-pressed={ticketOn} className={cn('flex cursor-pointer items-center gap-3 rounded-lg border p-3 text-left text-sm', ticketOn ? 'border-foreground bg-muted' : 'border-border')}>
-        <Ticket className="size-4 shrink-0" />
-        <span className="flex-1">
-          <b className="font-medium">{ticketOn ? `Ticket goes to the ${team} team` : 'No ticket needed'}</b>
-          <span className="block text-[13px] text-muted-foreground">{suggestTicket && ticket === null ? 'Suggested from the call. Click to change.' : 'Click to ' + (ticketOn ? 'remove it.' : 'raise one.')}</span>
-        </span>
-        <span className={cn('size-5 rounded border', ticketOn ? 'border-foreground bg-foreground text-background' : 'border-input')}>{ticketOn && <Check className="size-4" />}</span>
-      </button>
-
-      <textarea value={note} onChange={(e) => setNote(e.target.value)} placeholder="Note for whoever calls next (optional)" rows={2} className="w-full resize-none rounded-md border border-input bg-card p-2.5 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring" />
+      <details className="rounded-lg border border-border p-3">
+        <summary className="cursor-pointer text-sm font-medium">More details <span className="font-normal text-muted-foreground">(optional)</span></summary>
+        <div className="mt-3 flex flex-col gap-4">
+          <div className="flex flex-col gap-2">
+            <div className="text-sm font-medium">Who is this?</div>
+            <div className="flex flex-wrap gap-2">
+              {types.map((t) => (
+                <Button key={t} size="sm" variant={type === t ? 'default' : 'outline'} onClick={() => setType(t)}>{t}</Button>
+              ))}
+            </div>
+          </div>
+          {answered && (
+            <div className="flex flex-col gap-2">
+              <div className="text-sm font-medium">How did they hear about the app?</div>
+              <div className="flex flex-wrap gap-2">
+                {LEAD_SOURCES.map((s) => (
+                  <Button key={s} size="sm" variant={source === s ? 'default' : 'outline'} onClick={() => setSource(s)}>{s}</Button>
+                ))}
+              </div>
+            </div>
+          )}
+          <button type="button" onClick={() => setTicket(!ticketOn)} aria-pressed={ticketOn} className={cn('flex cursor-pointer items-center gap-3 rounded-lg border p-3 text-left text-sm', ticketOn ? 'border-foreground bg-muted' : 'border-border')}>
+            <Ticket className="size-4 shrink-0" />
+            <span className="flex-1">
+              <b className="font-medium">{ticketOn ? `Ticket goes to the ${team} team` : 'No ticket needed'}</b>
+              <span className="block text-[13px] text-muted-foreground">{suggestTicket && ticket === null ? 'Suggested from the call. Click to change.' : 'Click to ' + (ticketOn ? 'remove it.' : 'raise one.')}</span>
+            </span>
+            <span className={cn('size-5 rounded border', ticketOn ? 'border-foreground bg-foreground text-background' : 'border-input')}>{ticketOn && <Check className="size-4" />}</span>
+          </button>
+          <textarea value={note} onChange={(e) => setNote(e.target.value)} placeholder="Note for whoever calls next" rows={2} className="w-full resize-none rounded-md border border-input bg-card p-2.5 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring" />
+        </div>
+      </details>
 
       <div className="flex items-center justify-between gap-3">
-        <span className="text-[13px] text-muted-foreground">{answered && !outcome ? 'What they said can be left blank — the call is read after you close this.' : ''}</span>
-        <Button size="lg" onClick={complete}><PhoneIcon className="size-4" />Complete call</Button>
+        <span className="text-[13px] text-muted-foreground" role="status">{blocker}</span>
+        <Button size="lg" disabled={!!blocker} onClick={complete}><PhoneIcon className="size-4" />Complete call</Button>
       </div>
     </div>
   );
