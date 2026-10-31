@@ -305,6 +305,10 @@ export interface CustomerUser {
   active: boolean;
   hasActiveEscalation?: boolean;
   ownerAgentId: string | null;
+  /** When the server handed this customer to `ownerAgentId` (src/lib/assignment.ts). Unset on a customer someone was given by hand. */
+  assignedAt?: number;
+  /** Set when a person (not the server) gave the customer to `ownerAgentId`. The server only accepts an owner change that carries a new value here. */
+  handOwnedAt?: number;
   mrr?: number;
   /** Who they are, from the product's own list (src/data/products.ts). Unset until imported or an agent picks it. */
   customerType?: string;

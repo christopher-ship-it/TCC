@@ -68,3 +68,56 @@ test('"Call next" goes new installs, then No answer, then Follow-up', () => {
   assert.equal(nextTask(caller, [users[0]], 'irondrobe')?.queue, 'followup');
   assert.equal(nextTask(caller, [synced('3', { queue: 'new' }), ...users], 'irondrobe')?.queue, 'new');
 });
+
+// --- handed-out lists: an agent sees only the customers the server gave them ---
+import { assignmentMode, waitingForYou } from '../queue.ts';
+
+function withAssignment(fn: () => void) {
+  assignmentMode.on = true;
+  try {
+    fn();
+  } finally {
+    assignmentMode.on = false;
+  }
+}
+
+test('with customers handed out, an agent sees only their own on New installs, No answer and Follow-up', () => {
+  withAssignment(() => {
+    const users = [
+      synced('1', { queue: 'new', ownerAgentId: 'a' }),
+      synced('2', { queue: 'new', ownerAgentId: 'someone-else' }),
+      synced('3', { queue: 'new', ownerAgentId: null }),
+      synced('4', { queue: 'new', callback: { dueTs: today, auto: true }, ownerAgentId: 'a' }),
+      synced('5', { queue: 'followup', callback: { dueTs: today, auto: false }, ownerAgentId: 'someone-else' }),
+    ];
+    assert.deepEqual(ids(tasksForQueue(caller, users, 'irondrobe', 'new', NOW)), ['1']);
+    assert.deepEqual(ids(tasksForQueue(caller, users, 'irondrobe', 'noanswer', NOW)), ['4']);
+    assert.deepEqual(ids(tasksForQueue(caller, users, 'irondrobe', 'followup', NOW)), []);
+  });
+});
+
+test('the other lists stay a shared pool, and so does everything before the server hands customers out', () => {
+  const users = [synced('1', { queue: 'new', ownerAgentId: 'someone-else' }), synced('2', { queue: 'inactive', ownerAgentId: 'someone-else' })];
+  const picker = { ...caller, queues: ['new', 'inactive'] } as unknown as AgentAccount;
+  assert.deepEqual(ids(tasksForQueue(picker, users, 'irondrobe', 'new', NOW)), ['1'], 'sample data: no server, so shared');
+  withAssignment(() => {
+    assert.deepEqual(ids(tasksForQueue(picker, users, 'irondrobe', 'inactive', NOW)), ['2']);
+    assert.deepEqual(ids(tasksForQueue(picker, users, 'irondrobe', 'new', NOW)), []);
+  });
+});
+
+test('a supervisor still sees the whole pool, not just their own', () => {
+  withAssignment(() => {
+    const sup = { ...caller, role: 'supervisor' } as unknown as AgentAccount;
+    assert.deepEqual(ids(tasksForQueue(sup, [synced('1', { queue: 'new', ownerAgentId: 'someone-else' })], 'irondrobe', 'new', NOW)), ['1']);
+  });
+});
+
+test('says how many customers are lined up for an agent but not given yet', () => {
+  withAssignment(() => {
+    const users = [synced('1', { queue: 'new' }), synced('2', { queue: 'new' }), synced('3', { queue: 'new', language: 'Telugu' }), synced('4', { queue: 'new', ownerAgentId: 'a' }), synced('5', { queue: 'tickets' })];
+    assert.equal(waitingForYou(caller, users, 'irondrobe', NOW), 2, 'only unowned ones in her language on her lists');
+    // Customers held by others are not "out of reach": the agent is told nothing is hidden from them.
+    assert.equal(outOfReach(caller, [synced('9', { queue: 'new', ownerAgentId: 'someone-else' })], 'irondrobe', NOW).total, 0);
+  });
+});

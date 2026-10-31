@@ -250,3 +250,31 @@ test('a stale browser cannot bring a deleted customer back; only an explicit res
   assert.deepEqual(mergeCustomer(stored as never, { ...base, name: 'Test' } as never).deleted, deleted);
   assert.equal('deleted' in mergeCustomer(stored as never, { ...base, name: 'Test', deleted: null } as never), false);
 });
+
+// --- who owns a customer ---
+import { keepOwner } from '../store.ts';
+
+test('a save from a browser with an older copy cannot take a customer back or hand them on', () => {
+  const stored = { id: 'c', app: 'irondrobe', phone: '+91', ownerAgentId: 'priya', assignedAt: 1000, callHistory: [] } as never;
+  const stale = { id: 'c', app: 'irondrobe', phone: '+91', ownerAgentId: null, callHistory: [], customerType: 'Shop' } as never;
+  const out = keepOwner(stored, stale, { ...(stale as object) } as never) as unknown as Record<string, unknown>;
+  assert.equal(out.ownerAgentId, 'priya');
+  assert.equal(out.assignedAt, 1000);
+  assert.equal(out.customerType, 'Shop', 'everything else still saves');
+});
+
+test('a person who gives a customer on to someone changes the owner, and the server stops treating it as its own', () => {
+  const stored = { id: 'c', ownerAgentId: 'priya', assignedAt: 1000, callHistory: [] } as never;
+  const given = { id: 'c', ownerAgentId: 'ravi', assignedAt: 1000, handOwnedAt: 5000, callHistory: [] } as never;
+  const out = keepOwner(stored, given, { ...(given as object) } as never) as unknown as Record<string, unknown>;
+  assert.equal(out.ownerAgentId, 'ravi');
+  assert.equal(out.assignedAt, undefined);
+  // The same save sent again does not count as a new hand-over once it is stored.
+  const again = keepOwner({ id: 'c', ownerAgentId: 'ravi', handOwnedAt: 5000, callHistory: [] } as never, given, { ...(given as object) } as never) as unknown as Record<string, unknown>;
+  assert.equal(again.ownerAgentId, 'ravi');
+});
+
+test('a brand-new customer keeps the owner it was added with', () => {
+  const added = { id: 'n', ownerAgentId: 'ravi', callHistory: [] } as never;
+  assert.equal((keepOwner(undefined, added, added) as unknown as Record<string, unknown>).ownerAgentId, 'ravi');
+});

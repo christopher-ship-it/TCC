@@ -8,7 +8,7 @@ import { BRAND, outcomeLabel } from '../../brand';
 
 const F = BRAND.fields;
 import { CALL_STATUS_LIST, NEGATIVE_OUTCOMES, OUTCOME_LIST, POSITIVE_OUTCOMES, QUEUES, type AppId, type CallStatus, type Outcome, type QueueKey } from '../../data/types';
-import { outOfReach, queueCounts, tasksForQueue } from '../../lib/queue';
+import { outOfReach, queueCounts, tasksForQueue, waitingForYou } from '../../lib/queue';
 import { queueNote } from '../../lib/queueNotes';
 import { whyInQueue } from '../../lib/whyInQueue';
 import { can, LANGUAGE_SCRIPT } from '../../lib/access';
@@ -99,6 +99,7 @@ export default function Workspace() {
   const queueTasks = useMemo(() => (appId && selectedQueue ? tasksForQueue(agent, state.users, appId, selectedQueue).filter((u) => !skipped.has(u.id)) : []), [agent, state.users, appId, selectedQueue, skipped]);
   const list = useMemo(() => (typeFilter === 'All' ? queueTasks : queueTasks.filter((u) => u.customerType === typeFilter)), [queueTasks, typeFilter]);
   // Only worked out when this person has nothing to call: why the product's other customers aren't theirs.
+  const waiting = useMemo(() => (appId ? waitingForYou(agent, state.users, appId) : 0), [agent, state.users, appId]);
   const unreachable = useMemo(() => (appId && queueTasks.length === 0 ? outOfReach(agent, state.users, appId) : null), [agent, state.users, appId, queueTasks.length]);
   const focusId = params.get('focus');
   // The customer on a live or unlogged call stays on screen even after leaving the queue.
@@ -255,7 +256,7 @@ export default function Workspace() {
       <div className="ws-head">
         <div style={{ minWidth: 0 }}>
           <h1>Call queue</h1>
-          <p className="muted">{app.name} · {queueTasks.length} waiting{selectedQueue ? ` in ${QUEUES.find((q) => q.key === selectedQueue)?.label.toLowerCase()}` : ''}</p>
+          <p className="muted">{app.name} · {queueTasks.length} waiting{selectedQueue ? ` in ${QUEUES.find((q) => q.key === selectedQueue)?.label.toLowerCase()}` : ''}{waiting > 0 ? ` · ${waiting} more will arrive as you finish` : ''}</p>
         </div>
         <div className="ws-head__actions">
           {myApps.length > 1 && (
@@ -324,6 +325,7 @@ export default function Workspace() {
         <UiCard>
           <Empty icon={<Inbox size={24} />} title={unreachable && unreachable.total > 0 ? 'Nothing for you to call here' : 'All caught up'}>
             Nothing left in {QUEUES.find((q) => q.key === selectedQueue)?.label ?? 'this queue'} for {app.name}{typeFilter !== 'All' ? ` as ${typeFilter}` : ''} in your languages and states.
+            {waiting > 0 && <> {waiting} more {waiting === 1 ? 'customer is' : 'customers are'} lined up for you and will show here within a minute.</>}
             {skipped.size > 0 && <> You skipped {skipped.size}. <button type="button" className="btn btn--link" onClick={() => setSkipped(new Set())}>Bring them back</button></>}
             {unreachable && unreachable.total > 0 && (
               <div className="mt-3" style={{ textAlign: 'left' }}>

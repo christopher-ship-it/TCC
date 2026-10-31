@@ -124,6 +124,9 @@ export function ServerStoreProvider({ children }: { children: React.ReactNode })
     ...(unsavedCleared.current ? { cleared: unsavedCleared.current } : {}),
   });
 
+  /** Asks the server to hand customers out now (set once `pull` exists). Fills an agent's list the moment they have room. */
+  const refill = useRef<() => void>(() => {});
+
   const save = useCallback(async () => {
     if (saving.current || !countPending()) return;
     saving.current = true;
@@ -135,6 +138,7 @@ export function ServerStoreProvider({ children }: { children: React.ReactNode })
         for (const item of sent as { id: string }[]) if (unsaved.current[kind].get(item.id) === item) unsaved.current[kind].delete(item.id);
       }
       unsavedAudit.current = unsavedAudit.current.filter((e) => !batch.audit.includes(e));
+      if (batch.customers.length) refill.current();
       if (unsavedCleared.current === batch.cleared) unsavedCleared.current = null;
       setSyncError(null);
     } catch (e) {
@@ -193,6 +197,12 @@ export function ServerStoreProvider({ children }: { children: React.ReactNode })
     });
   }, [commit, signedOut]);
 
+  refill.current = () => {
+    void api('/api/assignments/run', {})
+      .then(() => pull())
+      .catch(() => {});
+  };
+
   // Who is signed in (a session cookie survives reloads), and whether anyone exists yet.
   useEffect(() => {
     let live = true;
@@ -202,7 +212,10 @@ export function ServerStoreProvider({ children }: { children: React.ReactNode })
         setSetupNeeded(r.setupNeeded);
         setCodeRequired(r.setupCodeRequired);
         setSetupAllowed(!!r.setupAllowed);
-        if (r.agent) await pull();
+        if (r.agent) {
+          await pull();
+          refill.current();
+        }
       })
       .catch((e: Error) => setSyncError(e.message))
       .finally(() => live && setReady(true));

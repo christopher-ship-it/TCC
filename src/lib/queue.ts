@@ -1,6 +1,20 @@
 import { QUEUES, type AgentAccount, type AppId, type CustomerUser, type QueueKey } from '../data/types.ts';
 import { NO_ANSWER_ENDED_TAG, callbackIsDue, isConnected, priorityRank, startOfDay } from './followUps.ts';
 
+/**
+ * Whether the three daily lists (New installs, No answer, Follow-up) are handed out by the server, one customer to one
+ * agent (src/lib/assignment.ts). On the shared database that is always so; the sample data in a browser has no server
+ * to hand them out, so there everyone who reaches a customer sees them.
+ */
+export const assignmentMode = { on: (import.meta as { env?: Record<string, string | undefined> }).env?.VITE_STORE === 'server' };
+
+/** The lists that are handed out; the same three the server serves (src/lib/assignment.ts). */
+const HANDED_OUT: QueueKey[] = ['new', 'noanswer', 'followup'];
+
+/** An agent sees a handed-out list only for customers the server gave to them. Everyone else sees the shared pool. */
+const handedOutTo = (agent: AgentAccount, u: CustomerUser, q: QueueKey): boolean =>
+  !assignmentMode.on || agent.role !== 'agent' || !HANDED_OUT.includes(q) || u.manual === true || u.adHoc === true || u.ownerAgentId === agent.id;
+
 export function isReachable(agent: AgentAccount, user: CustomerUser): boolean {
   if (!agent.apps.includes(user.app)) return false;
   // A customer added by hand belongs to whoever it was given to, whatever their states; unowned, anyone who speaks
@@ -32,14 +46,14 @@ export function queueOf(u: CustomerUser, now: number): QueueKey | null {
 
 export function tasksForQueue(agent: AgentAccount, users: CustomerUser[], appId: AppId | null, queueKey: QueueKey, now = Date.now()): CustomerUser[] {
   if (!agent.queues.includes(queueKey)) return [];
-  const list = users.filter((u) => (appId ? u.app === appId : agent.apps.includes(u.app)) && queueOf(u, now) === queueKey && isReachable(agent, u));
+  const list = users.filter((u) => (appId ? u.app === appId : agent.apps.includes(u.app)) && queueOf(u, now) === queueKey && isReachable(agent, u) && handedOutTo(agent, u, queueKey));
   return sortQueue(queueKey, list, now);
 }
 
 /** Yesterday's sign-ups first (the team's first call), then today's, then older ones newest first. */
 const newRank = (days: number) => (days === 1 ? 0 : days === 0 ? 1 : days + 1);
 
-function sortQueue(queueKey: QueueKey, list: CustomerUser[], now: number): CustomerUser[] {
+export function sortQueue(queueKey: QueueKey, list: CustomerUser[], now: number): CustomerUser[] {
   const arr = list.slice();
   const byPriority = (a: CustomerUser, b: CustomerUser) => priorityRank(a.priority) - priorityRank(b.priority);
   switch (queueKey) {
@@ -126,10 +140,24 @@ export function outOfReach(agent: AgentAccount, users: CustomerUser[], appId: Ap
     if (u.app !== appId || u.manual || u.adHoc) continue;
     const q = queueOf(u, now);
     if (!q || isReachable(agent, u) && agent.queues.includes(q)) continue;
+    // Handed out by the server: with someone else, or waiting for room on this agent's list. Not out of reach.
+    if (assignmentMode.on && HANDED_OUT.includes(q) && agent.queues.includes(q) && agent.languages.includes(u.language)) continue;
     out.total++;
     if (!agent.queues.includes(q)) out.lists[q] = (out.lists[q] ?? 0) + 1;
     else if (!agent.states.includes(u.effectiveState)) out.states++;
     else out.languages++;
   }
   return out;
+}
+
+/** Customers due on the handed-out lists that nobody holds yet and this agent can be given: they arrive as the agent finishes. */
+export function waitingForYou(agent: AgentAccount, users: CustomerUser[], appId: AppId | null, now = Date.now()): number {
+  if (!assignmentMode.on || agent.role !== 'agent') return 0;
+  let n = 0;
+  for (const u of users) {
+    if (u.ownerAgentId || u.manual || u.adHoc || (appId ? u.app !== appId : !agent.apps.includes(u.app))) continue;
+    const q = queueOf(u, now);
+    if (q && HANDED_OUT.includes(q) && agent.apps.includes(u.app) && agent.queues.includes(q) && agent.languages.includes(u.language)) n++;
+  }
+  return n;
 }

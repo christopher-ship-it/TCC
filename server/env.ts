@@ -29,6 +29,8 @@ export interface ServerEnv {
   sources: SourceConfig[];
   /** Minutes between change checks against those products (TCC_SOURCE_SYNC_MINUTES, default 10). */
   sourceSyncMinutes: number;
+  /** How many open customers an agent holds at once (TCC_ASSIGN_CAPACITY, default 5). */
+  assignCapacity: number;
 }
 
 const pick = (v: string | undefined) => (v && v.trim() ? v.trim() : undefined);
@@ -47,6 +49,7 @@ export function readServerEnv(vars: Record<string, string | undefined>, root: st
     webhookSecret: pick(vars.TCC_WEBHOOK_SECRET),
     sources: sourcesFromEnv(vars),
     sourceSyncMinutes: Number(pick(vars.TCC_SOURCE_SYNC_MINUTES)) || 10,
+    assignCapacity: Math.min(50, Math.max(1, Math.round(Number(pick(vars.TCC_ASSIGN_CAPACITY)) || 5))),
     publicHosts: (vars.TCC_PUBLIC_HOSTS ?? '').split(',').map((h) => h.trim().toLowerCase()).filter(Boolean),
   };
 }

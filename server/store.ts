@@ -20,6 +20,7 @@ import type pg from 'pg';
 import { logEvent } from './events.ts';
 import { findRecordedCall } from './webhook.ts';
 import type { SourceSync } from './appSync.ts';
+import type { Assigner } from './assign.ts';
 import { keepSourceFields } from '../src/lib/appSync.ts';
 import type { CustomerUser as FullCustomer } from '../src/data/types.ts';
 // The records as stored. The full shapes live in src/data/types.ts (the browser's); the server only relies on these fields.
@@ -176,6 +177,25 @@ export function mergeCustomer(stored: CustomerUser | undefined, incoming: Custom
   return { ...incoming, callHistory };
 }
 
+/**
+ * Who calls a customer is the server's to decide (server/assign.ts), or a person's who deliberately gives them on (that
+ * stamps `handOwnedAt`). Any other save carries a possibly older copy of the owner and must not undo it.
+ */
+export function keepOwner(stored: CustomerUser | undefined, incoming: CustomerUser, merged: CustomerUser): CustomerUser {
+  if (!stored || merged.deleted) return merged;
+  const out = { ...merged };
+  if (typeof incoming.handOwnedAt === 'number' && incoming.handOwnedAt !== stored.handOwnedAt) {
+    delete out.assignedAt; // a person gave them on: no longer the server's to take back
+    return out;
+  }
+  out.ownerAgentId = stored.ownerAgentId ?? null;
+  for (const k of ['assignedAt', 'handOwnedAt'] as const) {
+    if (stored[k] === undefined) delete out[k];
+    else out[k] = stored[k];
+  }
+  return out;
+}
+
 /** A tiny brake on password guessing: 10 failures per username per 15 minutes. */
 const failures = new Map<string, number[]>();
 function tooManyFailures(key: string): boolean {
@@ -194,6 +214,8 @@ export interface StoreEnv {
   check?: (what: string) => Promise<{ ok: boolean; message: string; ms: number }>;
   /** Customers synced from each product's own database (server/appSync.ts). */
   sources?: SourceSync;
+  /** Hands customers out to agents (server/assign.ts). */
+  assigner?: Assigner;
 }
 
 export interface Notice {
@@ -448,7 +470,7 @@ export function createStore(getPool: () => Promise<pg.Pool>, env: StoreEnv, read
           for (const c of customers) {
             const prev = stored.get(c.id);
             if (prev && me.role === 'agent' && prev.app !== c.app && !me.apps.includes(prev.app)) throw new HttpError(409, `${prev.phone} is already a customer of another product.`);
-            const merged = mergeCustomer(stored.get(c.id), c);
+            const merged = keepOwner(prev, c, mergeCustomer(prev, c));
             if (!prev) changes.push(`added customer ${c.name ?? c.phone} (${c.phone}, ${c.app})`);
             else {
               const known = new Set(prev.callHistory.map((x) => x.id));
@@ -641,6 +663,13 @@ export function createStore(getPool: () => Promise<pg.Pool>, env: StoreEnv, read
       const direction = url.searchParams.get('direction') ?? undefined;
       if (!/\d{6,}/.test(remote) || !Number.isFinite(startedAt)) return send(res, 400, { error: 'remote and startedAt are required.' }), true;
       send(res, 200, { file: (await findRecordedCall(pool, { remote, startedAt, direction })) ?? null });
+      return true;
+    }
+
+    // An agent's browser asks for a fresh hand-out (after finishing a call, on opening the app).
+    if (req.method === 'POST' && p === '/api/assignments/run') {
+      await requireMe(req, pool);
+      send(res, 200, { summary: (await env.assigner?.run()) ?? null });
       return true;
     }
 

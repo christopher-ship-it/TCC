@@ -5,7 +5,7 @@ import { useStore } from '../../store/StoreContext';
 import { useScope } from '../../shell/scope';
 import { STATE_DEFS } from '../../data/seed';
 import { isActive, LANGUAGE_SCRIPT } from '../../lib/access';
-import { isReachable, reachableCount } from '../../lib/queue';
+import { assignmentMode, isReachable, reachableCount } from '../../lib/queue';
 import { Avatar, Badge, Button, Callout, Card, PageHead, Stat } from '../../ui/primitives';
 import { useToast } from '../../ui/toastContext';
 
@@ -36,6 +36,9 @@ export default function Allocation() {
         title="Allocation"
         desc="Customers are served to agents who work their queue, speak their language and hold their state. This shows where nobody does."
         actions={
+          assignmentMode.on ? (
+            <span className="muted" style={{ fontSize: 13 }}>Customers are handed out automatically: 5 at a time to each agent who is signed in.</span>
+          ) : (
           <Button
             variant="primary"
             icon={<Shuffle size={15} />}
@@ -47,6 +50,7 @@ export default function Allocation() {
           >
             Give unowned customers an owner
           </Button>
+          )
         }
       />
       <div className="stats">

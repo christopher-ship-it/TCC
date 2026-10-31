@@ -185,9 +185,9 @@ export function reducer(state: State, action: Action): State {
         if (u.id !== esc.userId) return u;
         const stillPending = escalations.some((e) => e.userId === u.id && e.status === 'pending');
         if (esc.type === 'reroute' && esc.targetLanguage) {
-          return { ...u, language: esc.targetLanguage, ownerAgentId: action.reassignAgentId ?? u.ownerAgentId, hasActiveEscalation: stillPending };
+          return { ...u, language: esc.targetLanguage, ownerAgentId: action.reassignAgentId ?? u.ownerAgentId, ...(action.reassignAgentId ? { handOwnedAt: Date.now() } : {}), hasActiveEscalation: stillPending };
         }
-        return { ...u, ownerAgentId: action.reassignAgentId ?? u.ownerAgentId, hasActiveEscalation: stillPending };
+        return { ...u, ownerAgentId: action.reassignAgentId ?? u.ownerAgentId, ...(action.reassignAgentId ? { handOwnedAt: Date.now() } : {}), hasActiveEscalation: stillPending };
       });
       const clearedEscalations = [
         { id: `cleared-${Date.now()}`, atLabel: fmtDayTime(Date.now()).split(' · ')[1], name: esc.userName, action: esc.type === 'reroute' ? `Reroute → ${esc.targetLanguage}` : `Escalation → ${esc.reason}`, result: 'Approved · reassigned', minutes: Math.round((Date.now() - esc.raisedTs) / 60000) || 5 },
@@ -224,7 +224,7 @@ export function reducer(state: State, action: Action): State {
     case 'REASSIGN_OWNER': {
       const user = state.users.find((u) => u.id === action.userId);
       const owner = state.agents.find((a) => a.id === action.agentId);
-      const users = state.users.map((u) => (u.id === action.userId ? { ...u, ownerAgentId: action.agentId } : u));
+      const users = state.users.map((u) => (u.id === action.userId ? { ...u, ownerAgentId: action.agentId, handOwnedAt: Date.now() } : u));
       return withAudit({ ...state, users }, auditEntry(state.agents, action.actorId, 'owner_reassigned', user?.name, `Now owned by ${owner?.name ?? 'nobody'}`));
     }
     case 'SET_CUSTOMER_TYPE':

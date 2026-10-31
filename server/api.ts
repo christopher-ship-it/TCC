@@ -8,6 +8,7 @@
 //   GET  /api/recording-lookup    → ?remote&startedAt&direction → { file } from those stored names (signed-in agents)
 //   POST /api/analyze             → { file, customer?, business?, app?, levels? } → CallAnalysis
 //   POST /api/telephony/status    → { id, password, status: online|offline } → the agent's TeleCMI availability
+//   POST /api/assignments/run     → hands out customers now (signed-in agents); who holds how many
 //   POST /api/sources/lookup      → { phone } → { customer } an incoming caller found in a product's own database
 //   POST /api/system/sources/sync → { app, full? } run a product's customer sync now (super admin; server/appSync.ts)
 //   /api/auth/*, /api/data, /api/people → sign-in and the shared records (server/store.ts), when a database is set
@@ -21,6 +22,7 @@ import { parseCdrWebhook, saveRecordedCall, webhookAuthorised } from './webhook.
 import { PresenceError, setAgentStatus } from './presence.ts';
 import { createStore, HttpError, requestAgent } from './store.ts';
 import { createSourceSync, SourceError } from './appSync.ts';
+import { createAssigner } from './assign.ts';
 import { analysisQueue, onAnalysisEvent } from './analyze.ts';
 import { endpointStats, logEvent, recentEvents, recentRequests, recordRequest, startedAt, connectEventStore } from './events.ts';
 
@@ -138,7 +140,8 @@ export function createApi(env: ServerEnv) {
   };
 
   const sources = db.configured && env.sources.length ? createSourceSync(() => db.ready(), env.sources, { everyMinutes: env.sourceSyncMinutes }) : undefined;
-  const store = createStore(() => db.ready(), { setupCode: env.setupCode, systemHealth, check, sources }, readJson, send);
+  const assigner = db.configured ? createAssigner(() => db.ready(), { capacity: env.assignCapacity }) : undefined;
+  const store = createStore(() => db.ready(), { setupCode: env.setupCode, systemHealth, check, sources, assigner }, readJson, send);
   async function api(req: IncomingMessage, res: ServerResponse, next: Next) {
     const url = new URL(req.url ?? '/', 'http://local');
     if (!url.pathname.startsWith('/api/')) return next();
@@ -226,7 +229,7 @@ export function createApi(env: ServerEnv) {
         return send(res, 200, { ok: true });
       }
 
-      if (/^\/api\/(auth\/|data$|recording-lookup$|people|notices|notes|password-requests$|events$|system|sources\/lookup$)/.test(url.pathname)) {
+      if (/^\/api\/(auth\/|data$|recording-lookup$|people|notices|notes|password-requests$|events$|assignments\/|system|sources\/lookup$)/.test(url.pathname)) {
         if (!db.configured) return send(res, 501, { error: 'No database is connected (DATABASE_URL).', notConfigured: true });
         if (await store(req, res, url)) return;
       }
@@ -251,6 +254,9 @@ export function createApi(env: ServerEnv) {
   }
 
   /** The customer sync runs only on a server that serves requests — never during `vite build`. */
-  api.startBackgroundJobs = () => sources?.start();
+  api.startBackgroundJobs = () => {
+    sources?.start();
+    assigner?.start();
+  };
   return api;
 }
