@@ -9,6 +9,7 @@ import type pg from 'pg';
 import { applySource, phoneTail, pickPerNumber, sameCustomer, sourceDigits, type SourceCustomer, type SourceMeta } from '../src/lib/appSync.ts';
 import type { AppId, CustomerUser } from '../src/data/types.ts';
 import { logEvent } from './events.ts';
+import { endpointOf, recordOutbound } from './outbound.ts';
 
 export interface SourceConfig {
   app: AppId;
@@ -55,18 +56,63 @@ export class SourceError extends Error {
   }
 }
 
-/** One call to a product's API. Errors name the product and the status, never the key. */
-async function call<T>(src: SourceConfig, path: string, init?: { body?: unknown; fetchImpl?: typeof fetch }): Promise<T> {
+/** What went wrong, in words the super admin can act on. Names the product and the endpoint, never the key. */
+export function describeFailure(app: string, endpoint: string, status: number, contentType: string | null, body: { error?: { code?: string; message?: string } } | null): string {
+  if (status === 404 && !body?.error && /html/i.test(contentType ?? '')) {
+    return `${app} API answered 404 for “${endpoint}”: the address returned a web page, not the API. ${app} may have moved or removed its TCC API route, or the saved API address is wrong.`;
+  }
+  if (status === 401) return `${app} API refused the key (401) on “${endpoint}”. The key may be wrong, revoked or typed with different capital letters.`;
+  if (status === 403) return `${app} API says the key is not allowed to read “${endpoint}” (403).`;
+  if (status === 429) return `${app} API is rate limiting TCC (429) on “${endpoint}”.`;
+  if (status >= 500) return `${app} API had an error (${status}) on “${endpoint}”.`;
+  return `${app} API answered ${status}${body?.error?.code ? ` (${body.error.code})` : ''} for “${endpoint}”.`;
+}
+
+/** At most this many calls per second to one product: a catch-up sync must not hammer someone's server. */
+const MIN_GAP_MS = 250;
+const lastCallAt = new Map<string, number>();
+
+/** One call to a product's API. Recorded for the API page; errors name the product and the status, never the key. */
+async function call<T>(src: SourceConfig, path: string, init?: { body?: unknown; fetchImpl?: typeof fetch }, retried = false): Promise<T> {
   const doFetch = init?.fetchImpl ?? fetch;
-  const res = await doFetch(new URL(path, src.url), {
-    method: init?.body === undefined ? 'GET' : 'POST',
-    headers: { Authorization: `Bearer ${src.key}`, Accept: 'application/json', ...(init?.body === undefined ? {} : { 'Content-Type': 'application/json' }) },
-    body: init?.body === undefined ? undefined : JSON.stringify(init.body),
-    signal: AbortSignal.timeout(30_000),
-  });
-  const body = (await res.json().catch(() => null)) as { error?: { code?: string; message?: string } } | null;
-  if (!res.ok) throw new SourceError(res.status, `${src.app} API answered ${res.status}${body?.error?.code ? ` (${body.error.code})` : ''}`);
-  return body as T;
+  const endpoint = endpointOf(path);
+  const method = init?.body === undefined ? 'GET' : 'POST';
+  const wait = (lastCallAt.get(src.app) ?? 0) + MIN_GAP_MS - Date.now();
+  if (wait > 0 && !init?.fetchImpl) await new Promise((r) => setTimeout(r, wait));
+  lastCallAt.set(src.app, Date.now());
+  const t0 = Date.now();
+  let status = 0;
+  try {
+    const res = await doFetch(new URL(path, src.url), {
+      method,
+      headers: { Authorization: `Bearer ${src.key}`, Accept: 'application/json', ...(init?.body === undefined ? {} : { 'Content-Type': 'application/json' }) },
+      body: init?.body === undefined ? undefined : JSON.stringify(init.body),
+      signal: AbortSignal.timeout(30_000),
+    });
+    status = res.status;
+    const body = (await res.json().catch(() => null)) as ({ error?: { code?: string; message?: string } } & Record<string, unknown>) | null;
+    if (!res.ok) {
+      // The product asked us to slow down: wait what it says (at most a minute) and try once more.
+      const retryAfter = Number(res.headers.get('retry-after'));
+      if (status === 429 && !retried && Number.isFinite(retryAfter) && retryAfter > 0 && !init?.fetchImpl) {
+        recordOutbound({ ts: t0, service: src.app, method, endpoint, status, ms: Date.now() - t0, error: `Rate limited, waiting ${Math.min(60, retryAfter)} s` });
+        await new Promise((r) => setTimeout(r, Math.min(60, retryAfter) * 1000));
+        return call<T>(src, path, init, true);
+      }
+      const msg = describeFailure(src.app, endpoint, res.status, res.headers.get('content-type'), body);
+      recordOutbound({ ts: t0, service: src.app, method, endpoint, status, ms: Date.now() - t0, error: msg });
+      throw new SourceError(res.status, msg);
+    }
+    recordOutbound({ ts: t0, service: src.app, method, endpoint, status, ms: Date.now() - t0 });
+    return body as T;
+  } catch (e) {
+    if (!(e instanceof SourceError)) {
+      const msg = `${src.app} API could not be reached for “${endpoint}”: ${e instanceof Error ? e.message : 'unknown error'}.`;
+      recordOutbound({ ts: t0, service: src.app, method, endpoint, status, ms: Date.now() - t0, error: msg });
+      throw new SourceError(status || 502, msg);
+    }
+    throw e;
+  }
 }
 
 const OVERLAP_MS = 60_000;
@@ -83,6 +129,8 @@ export interface SourceSyncOptions {
 export function createSourceSync(getPool: () => Promise<pg.Pool>, sources: SourceConfig[], opts: SourceSyncOptions = {}) {
   const now = opts.now ?? Date.now;
   const running = new Map<AppId, Promise<SyncResult>>();
+  /** Runs that failed one after another, per product, and when the schedule may try again. */
+  const failing = new Map<AppId, { count: number; nextTry: number; message: string }>();
   let timer: ReturnType<typeof setInterval> | null = null;
 
   const settingKey = (app: AppId) => `source_sync:${app}`;
@@ -200,8 +248,21 @@ export function createSourceSync(getPool: () => Promise<pg.Pool>, sources: Sourc
     }
     result.ms = now() - startedAt;
     const changed = result.created + result.updated;
-    if (result.error) logEvent({ level: 'error', source: 'sync', message: `${src.app} sync failed: ${result.error}` });
-    else if (changed || result.full) {
+    if (result.error) {
+      const prev = failing.get(src.app);
+      const count = (prev?.count ?? 0) + 1;
+      // Retry sooner at first, then less and less often (the base interval doubled, at most an hour), so a product that is
+      // down is not asked every 10 minutes forever and the event log is not filled with the same line.
+      const base = Math.max(1, opts.everyMinutes ?? 10) * 60_000;
+      failing.set(src.app, { count, nextTry: now() + Math.min(60 * 60_000, base * 2 ** (count - 1)), message: result.error });
+      if (count <= 2 || count % 6 === 0 || prev?.message !== result.error) logEvent({ level: 'error', source: 'sync', message: `${src.app} sync failed${count > 1 ? ` (${count} times in a row)` : ''}: ${result.error}` });
+    } else if (failing.has(src.app)) {
+      logEvent({ level: 'info', source: 'sync', message: `${src.app} sync is working again after ${failing.get(src.app)!.count} failed run${failing.get(src.app)!.count === 1 ? '' : 's'}` });
+      failing.delete(src.app);
+    }
+    if (result.error) {
+      // already logged above
+    } else if (changed || result.full) {
       logEvent({ level: 'info', source: 'sync', message: `${src.app} ${result.full ? 'full sync' : 'sync'}: ${result.fetched} fetched, ${result.created} new, ${result.updated} updated${result.skipped.otherProduct ? `, ${result.skipped.otherProduct} already another product's` : ''}${result.skipped.noPhone ? `, ${result.skipped.noPhone} without a phone` : ''}` });
     }
     return result;
@@ -226,7 +287,11 @@ export function createSourceSync(getPool: () => Promise<pg.Pool>, sources: Sourc
       if (timer || !sources.length) return;
       const every = Math.max(1, opts.everyMinutes ?? 10) * 60_000;
       const tick = () => {
-        for (const s of sources) void run(s.app).catch(() => {});
+        for (const s of sources) {
+          const f = failing.get(s.app);
+          if (f && now() < f.nextTry) continue; // waiting out a failure
+          void run(s.app).catch(() => {});
+        }
       };
       setTimeout(tick, 20_000).unref?.();
       timer = setInterval(tick, every);
@@ -240,13 +305,30 @@ export function createSourceSync(getPool: () => Promise<pg.Pool>, sources: Sourc
 
     run,
 
+    /** How often the schedule looks for changes, and the rules every call to a product follows (for the API page). */
+    everyMinutes: Math.max(1, opts.everyMinutes ?? 10),
+    callRules: { minGapMs: MIN_GAP_MS, timeoutSec: 30, pageSize: PAGE, retryOn429: 'once, after the time the product asks for (at most 60 s)', backoff: 'after a failed run the next scheduled run waits 2×, 4×, 8× … the usual interval, at most an hour' },
+
+    /** One harmless call (`meta`) to check the address and the key, without syncing anything. */
+    async ping(app: AppId): Promise<{ ok: boolean; status: number; ms: number; message: string }> {
+      const src = sources.find((s) => s.app === app);
+      if (!src) return { ok: false, status: 0, ms: 0, message: `${app} is not connected (set ${app.toUpperCase()}_API_URL and ${app.toUpperCase()}_API_KEY).` };
+      const t0 = Date.now();
+      try {
+        await call<unknown>(src, 'meta', { fetchImpl: opts.fetchImpl });
+        return { ok: true, status: 200, ms: Date.now() - t0, message: `${app} answered: the address and the key work.` };
+      } catch (e) {
+        return { ok: false, status: e instanceof SourceError ? e.status : 0, ms: Date.now() - t0, message: e instanceof Error ? e.message : String(e) };
+      }
+    },
+
     /** For the super admin's System page. */
     async status() {
       const pool = await getPool();
       return Promise.all(
         sources.map(async (s) => {
           const st = await loadState(pool, s.app);
-          return { app: s.app, host: new URL(s.url).host, running: running.has(s.app), since: st.since, lastFullAt: st.lastFullAt, last: st.last };
+          return { app: s.app, host: new URL(s.url).host, path: new URL(s.url).pathname, running: running.has(s.app), since: st.since, lastFullAt: st.lastFullAt, last: st.last, failing: failing.get(s.app) ?? null };
         }),
       );
     },
