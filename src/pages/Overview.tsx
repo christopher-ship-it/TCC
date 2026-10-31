@@ -80,32 +80,16 @@ export default function Overview() {
 
   return (
     <div className="page">
-      <PageHead title="Overview" desc="What the calling team did today. Click an agent to see what they hold, what they have done and whether they are on a call." />
+      <PageHead title="Overview" desc="Today at a glance. Click a number to see who is behind it, or an agent to see their day." />
       <GettingStarted />
-      {currentAgent?.role === 'admin' && <SuperAdminTotals />}
-      {currentAgent?.role !== 'agent' && <Pipeline />}
-      {currentAgent?.role !== 'agent' && <SignedInNow />}
-      {currentAgent?.role === 'admin' && <h2 className="text-base font-semibold" style={{ marginTop: 8 }}>Today</h2>}
-
-      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-        {[
-          ['Calls today', today.length],
-          ['Connected', today.filter((r) => isConnected(r.call)).length],
-          ['Open tickets', openTickets],
-          ['Agents calling', `${activeToday} / ${agents.length}`],
-        ].map(([label, value]) => (
-          <Card key={label}>
-            <CardHeader><CardTitle>{label}</CardTitle></CardHeader>
-            <CardContent><div className="text-[28px] leading-tight font-semibold tabular-nums">{typeof value === 'number' ? value.toLocaleString('en-IN') : value}</div></CardContent>
-          </Card>
-        ))}
-      </div>
-
-      <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
-        <MetricChart title="Calls per day" value={daily.reduce((n, d) => n + d.connected + d.missed, 0).toLocaleString('en-IN')} note="last 14 days" data={daily.map((d) => ({ label: d.label, value: d.connected + d.missed }))} height={150} />
-        <MetricChart title="Connected calls" value={daily.reduce((n, d) => n + d.connected, 0).toLocaleString('en-IN')} note="last 14 days" data={daily.map((d) => ({ label: d.label, value: d.connected }))} height={150} />
-      </div>
-
+      {currentAgent?.role !== 'agent' && (
+        <Pipeline
+          extra={[
+            { label: 'Calls today', value: today.length, note: `${today.filter((r) => isConnected(r.call)).length} connected` },
+            { label: 'Agents calling', value: `${activeToday} / ${agents.length}`, note: `${openTickets} open tickets` },
+          ]}
+        />
+      )}
       <Card>
         <div className="px-4 pt-3 pb-2 text-base font-semibold">Agents</div>
         <div className="px-4 pb-3">
@@ -147,6 +131,18 @@ export default function Overview() {
         </Table>
       </Card>
 
+      {currentAgent?.role !== 'agent' && <SignedInNow />}
+      <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
+        <MetricChart title="Calls per day" value={daily.reduce((n, d) => n + d.connected + d.missed, 0).toLocaleString('en-IN')} note="last 14 days" data={daily.map((d) => ({ label: d.label, value: d.connected + d.missed }))} height={150} />
+        <MetricChart title="Connected calls" value={daily.reduce((n, d) => n + d.connected, 0).toLocaleString('en-IN')} note="last 14 days" data={daily.map((d) => ({ label: d.label, value: d.connected }))} height={150} />
+      </div>
+
+      {currentAgent?.role === 'admin' && (
+        <details className="rounded-lg border border-border bg-card">
+          <summary className="cursor-pointer px-3 py-2 text-sm font-medium">Everything TCC holds</summary>
+          <div className="px-3 pb-3"><SuperAdminTotals /></div>
+        </details>
+      )}
     </div>
   );
 }

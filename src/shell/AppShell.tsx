@@ -49,6 +49,7 @@ function navFor(role: Role, pendingEscalations: number, firstApp: AppId | undefi
   const X = FEATURES.adminExtras;
   const team: NavItem[] = [
     ...(X ? [{ to: '/team/performance', label: 'Team performance', icon: <BarChart3 size={s} /> }] : []),
+    { to: '/installs', label: 'New installs', icon: <Sparkles size={s} /> },
     ...(addFirst ? [customers] : []),
     followUps,
     { to: '/calls', label: 'Calls & recordings', icon: <Phone size={s} /> },

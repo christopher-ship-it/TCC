@@ -143,3 +143,22 @@ export function agentProgress(agent: AgentAccount, users: CustomerUser[], now: n
   const connectedToday = callsToday.filter((x) => x.call.status.startsWith('Answered') || (x.call.telephony?.durationSec ?? 0) > 0).length;
   return { open, callsToday, connectedToday, lined, lastCallAt };
 }
+
+/** Where a customer record came from: the product's own database, or made inside TCC (by hand, by dialling, by import). */
+export const originOf = (u: CustomerUser): 'product' | 'tcc' => (u.sync ? 'product' : 'tcc');
+
+/** A name that looks like someone trying the app out rather than a real shop. Only a hint; the page says so. */
+export const looksLikeTest = (u: CustomerUser): boolean => /\b(test|testing|demo|dummy|sample)\b/i.test(`${u.name} ${u.business}`);
+
+export type InstallPeriod = 'today' | '7' | 'list';
+
+/** The people behind "signed up today" and "New installs", newest first. */
+export function installs(users: CustomerUser[], period: InstallPeriod, now: number): CustomerUser[] {
+  const rows = users.filter((u) => {
+    if (u.deleted) return false;
+    if (period === 'list') return queueOf(u, now) === 'new';
+    if (!hasSignUpDate(u)) return false;
+    return period === 'today' ? u.registeredDaysAgo === 0 : u.registeredDaysAgo <= 6;
+  });
+  return rows.sort((a, b) => (b.sync?.registeredTs ?? 0) - (a.sync?.registeredTs ?? 0) || a.registeredDaysAgo - b.registeredDaysAgo);
+}

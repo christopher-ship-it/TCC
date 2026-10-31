@@ -3,7 +3,7 @@
 // someone who speaks theirs (src/lib/assignment.ts).
 
 import { useMemo } from 'react';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Link } from 'react-router-dom';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { useStore } from '../../store/StoreContext';
 import { useScope } from '../../shell/scope';
@@ -12,7 +12,7 @@ import { queueSnapshot, signUps } from '../../lib/pipeline';
 import { QUEUES } from '../../data/types';
 import { Badge } from '../../ui/primitives';
 
-export function Pipeline() {
+export function Pipeline({ extra = [] }: { extra?: { label: string; value: string | number; note?: string }[] }) {
   const { state } = useStore();
   const { apps } = useScope();
   const { people, now } = usePresence();
@@ -23,36 +23,42 @@ export function Pipeline() {
   const sign = useMemo(() => signUps(users), [users]);
   const snap = useMemo(() => queueSnapshot(users, agents, online, clock), [users, agents, online, clock]);
 
-  const stats: [string, number, string?][] = [
-    ['Signed up today', sign.today, `${sign.yesterday} yesterday · ${sign.last7} in 7 days`],
-    ['In the call lists', snap.total, 'New installs, No answer, Follow-up'],
-    ['With an agent', snap.held, 'handed out, 5 at a time'],
-    ['Waiting', snap.waiting, snap.noAgentOnline ? `${snap.noAgentOnline} with nobody signed in who speaks their language` : 'handed out as agents finish'],
+  const stats: { label: string; value: string | number; note?: string; to?: string }[] = [
+    { label: 'Signed up today', value: sign.today, note: `${sign.yesterday} yesterday · ${sign.last7} in 7 days`, to: '/installs' },
+    { label: 'New installs list', value: snap.lists.find((l) => l.key === 'new')?.total ?? 0, note: 'see who they are', to: '/installs?ip=list' },
+    { label: 'With an agent', value: snap.held, note: `of ${snap.total} in the lists` },
+    { label: 'Waiting', value: snap.waiting, note: snap.noAgentOnline ? `${snap.noAgentOnline}: nobody signed in speaks their language` : 'handed out as agents finish' },
+    ...extra,
   ];
 
   return (
-    <Card>
-      <div className="px-4 pt-3 pb-1 text-base font-semibold">New customers and the call lists</div>
-      <CardContent className="stack" style={{ gap: 14 }}>
-        <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-          {stats.map(([label, value, note]) => (
-            <Card key={label}>
-              <CardHeader><CardTitle>{label}</CardTitle></CardHeader>
-              <CardContent>
-                <div className="text-[28px] leading-tight font-semibold tabular-nums">{value.toLocaleString('en-IN')}</div>
-                {note && <div className="text-xs text-muted-foreground">{note}</div>}
-              </CardContent>
-            </Card>
-          ))}
-        </div>
+    <div className="stack" style={{ gap: 10 }}>
+      <div className="grid grid-cols-2 gap-2 md:grid-cols-3 xl:grid-cols-6">
+        {stats.map((st) => {
+          const body = (
+            <>
+              <div className="text-xs text-muted-foreground">{st.label}</div>
+              <div className="text-2xl leading-tight font-semibold tabular-nums">{typeof st.value === 'number' ? st.value.toLocaleString('en-IN') : st.value}</div>
+              {st.note && <div className="text-xs text-muted-foreground">{st.note}</div>}
+            </>
+          );
+          return st.to ? (
+            <Link key={st.label} to={st.to} className="rounded-lg border border-border bg-card p-3 hover:bg-secondary/50">{body}</Link>
+          ) : (
+            <div key={st.label} className="rounded-lg border border-border bg-card p-3">{body}</div>
+          );
+        })}
+      </div>
 
-        {sign.undated > 0 && (
-          <p className="text-sm text-muted-foreground">
-            {sign.undated.toLocaleString('en-IN')} customers came from the product without a sign-up date, so they can’t be counted as signed up on a day{sign.undatedNew ? ` (${sign.undatedNew} of them at the first step)` : ''}. They never join New installs until the product sends the date.
-          </p>
-        )}
+      {sign.undated > 0 && (
+        <p className="text-sm text-muted-foreground">
+          {sign.undated.toLocaleString('en-IN')} customers came from the product without a sign-up date, so they can’t be counted as signed up on a day{sign.undatedNew ? ` (${sign.undatedNew} at the first step)` : ''}.
+        </p>
+      )}
 
-        <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
+      <details className="rounded-lg border border-border bg-card">
+        <summary className="cursor-pointer px-3 py-2 text-sm font-medium">Call lists and languages</summary>
+        <div className="grid grid-cols-1 gap-3 px-3 pb-3 lg:grid-cols-2">
           <Table>
             <TableHeader><TableRow data-head><TableHead>List</TableHead><TableHead className="text-right">In list</TableHead><TableHead className="text-right">With an agent</TableHead><TableHead className="text-right">Waiting</TableHead></TableRow></TableHeader>
             <TableBody>
@@ -67,7 +73,7 @@ export function Pipeline() {
             </TableBody>
           </Table>
           <Table>
-            <TableHeader><TableRow data-head><TableHead>Language</TableHead><TableHead className="text-right">Signed up today</TableHead><TableHead className="text-right">In lists</TableHead><TableHead className="text-right">Waiting</TableHead><TableHead className="text-right">Agents signed in</TableHead></TableRow></TableHeader>
+            <TableHeader><TableRow data-head><TableHead>Language</TableHead><TableHead className="text-right">Today</TableHead><TableHead className="text-right">In lists</TableHead><TableHead className="text-right">Waiting</TableHead><TableHead className="text-right">Agents on</TableHead></TableRow></TableHeader>
             <TableBody>
               {snap.byLanguage.map((r) => (
                 <TableRow key={r.language}>
@@ -84,7 +90,7 @@ export function Pipeline() {
             </TableBody>
           </Table>
         </div>
-      </CardContent>
-    </Card>
+      </details>
+    </div>
   );
 }

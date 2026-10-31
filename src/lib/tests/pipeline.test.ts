@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { agentProgress, queueSnapshot, signUps } from '../pipeline.ts';
+import { agentProgress, installs, looksLikeTest, originOf, queueSnapshot, signUps } from '../pipeline.ts';
 import type { AgentAccount, CustomerUser, Language } from '../../data/types.ts';
 
 const NOW = new Date(2026, 9, 31, 11, 0).getTime();
@@ -51,4 +51,17 @@ test("an agent's progress: what they hold and whether it has been called, today'
   assert.equal(p.callsToday.length, 1);
   assert.equal(p.connectedToday, 1);
   assert.equal(p.lined, 1, 'only the Tamil customer nobody holds');
+});
+
+test('installs lists who signed up today, and tells product records from ones made in TCC', () => {
+  const fromProduct = customer('p', 'Tamil', { sync: { registeredTs: NOW - 3600_000 } as CustomerUser['sync'] });
+  const madeHere = customer('m', 'Tamil', { manual: true, name: 'Test Shop', business: 'Demo' });
+  const old = customer('o', 'Tamil', { registeredDaysAgo: 3 });
+  const list = installs([old, madeHere, fromProduct], 'today', NOW);
+  assert.deepEqual(list.map((u) => u.id), ['p', 'm']);
+  assert.equal(originOf(fromProduct), 'product');
+  assert.equal(originOf(madeHere), 'tcc');
+  assert.equal(looksLikeTest(madeHere), true);
+  assert.equal(looksLikeTest(fromProduct), false);
+  assert.deepEqual(installs([old, fromProduct], 'list', NOW).map((u) => u.id), ['p', 'o']);
 });
