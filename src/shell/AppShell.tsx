@@ -76,6 +76,7 @@ function CustomerSearch({ apps }: { apps: AppId[] }) {
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      if (typeof e.key !== 'string') return; // browser autofill sends keydown events with no key
       const tag = (e.target as HTMLElement)?.tagName;
       if ((e.key === '/' && !/INPUT|TEXTAREA|SELECT/.test(tag)) || (e.key.toLowerCase() === 'k' && (e.metaKey || e.ctrlKey))) {
         e.preventDefault();

@@ -189,7 +189,7 @@ export default function Workspace() {
   keyState.current = { save, skip, user, status };
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
-      if (dialog) return;
+      if (dialog || typeof e.key !== 'string') return; // browser autofill sends keydown events with no key
       const k = keyState.current;
       if (e.key === 'F1') {
         e.preventDefault();
