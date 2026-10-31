@@ -13,6 +13,8 @@ import { clock, sentimentBand } from '../lib/analysis/model';
 import { speakingBlocks, talkShare } from '../lib/analysis/speakers';
 import { analyzeCall } from '../lib/transcription';
 import { recordingUrlFor } from '../lib/telephony';
+import { serverRecording } from '../lib/recordingLookup';
+import { useCallSession } from '../components/telephony/callSessionContext';
 import { formatDuration } from '../telephony';
 import { OutcomeBadge, SentimentBadge } from '../components/calls/badges';
 import { ConversationTimeline, Legend, TalkSplit, type SpeakingSpan } from '../ui/charts';
@@ -32,6 +34,9 @@ export default function CallDetail() {
     seekRef.current = fn;
   }, []);
   const [working, setWorking] = useState(false);
+  const session = useCallSession();
+  const [checking, setChecking] = useState(false);
+  const [checkNote, setCheckNote] = useState<string | null>(null);
 
   const a = call?.analysis;
   const spans = useMemo<SpeakingSpan[]>(() => {
@@ -60,6 +65,25 @@ export default function CallDetail() {
   const connected = isConnected(call);
   const inbound = t?.direction === 'inbound';
   const missed = !connected ? whyNotAnswered(call) : null;
+
+  /** Ask for the recording right now instead of waiting for the next automatic check. */
+  async function lookForRecording() {
+    if (!user || !call) return;
+    setChecking(true);
+    setCheckNote(null);
+    try {
+      if (session.available) {
+        const r = await session.checkRecording(call.id);
+        setCheckNote(r.found ? null : r.message);
+      } else if (t?.startedAt && t.remote) {
+        const file = await serverRecording({ remote: t.remote, startedAt: t.startedAt, talkSeconds: t.durationSec, direction: t.direction });
+        if (file) dispatch({ type: 'ATTACH_RECORDING', file, entryId: call.id });
+        else setCheckNote('Not available yet — TeleCMI has not announced this recording to the server.');
+      }
+    } finally {
+      setChecking(false);
+    }
+  }
 
   async function runAnalysis() {
     if (!user || !call) return;
@@ -103,7 +127,15 @@ export default function CallDetail() {
               {src ? (
                 <RecordingPlayer src={src} durationHint={t?.durationSec} onTime={setPlayhead} registerSeek={registerSeek} sample={!real} />
               ) : t?.durationSec ? (
-                <Callout icon={<Loader2 size={16} className="spin" />}>Waiting for the call recording to finish the recording — usually under a minute after the call ends.</Callout>
+                <div className="stack" style={{ gap: 10 }}>
+                  <Callout icon={<Loader2 size={16} className="spin" />}>Waiting for TeleCMI to publish the recording — usually a few minutes after the call ends. It is checked again automatically.</Callout>
+                  {checkNote && <span className="muted">{checkNote}</span>}
+                  <div>
+                    <Button icon={checking ? <Loader2 size={15} className="spin" /> : <RotateCcw size={15} />} disabled={checking} onClick={() => void lookForRecording()}>
+                      {checking ? 'Looking…' : 'Look for the recording now'}
+                    </Button>
+                  </div>
+                </div>
               ) : (
                 <span className="muted">There is no recording for this call.</span>
               )}

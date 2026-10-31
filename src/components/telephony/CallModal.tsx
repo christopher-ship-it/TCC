@@ -16,6 +16,7 @@ import { customerTypesFor } from '../../data/products';
 import { CALL_STATUS_LIST, LEAD_SOURCES, NEGATIVE_OUTCOMES, OUTCOME_LIST, POSITIVE_OUTCOMES, type CallAnalysis, type CallStatus, type CustomerUser, type Lead, type Outcome } from '../../data/types';
 import { suggestStatus, toCallTelephony } from '../../lib/telephony';
 import { hasRealRecording } from '../../lib/attachRecording';
+import { serverRecording } from '../../lib/recordingLookup';
 import { analyzeCall, AnalysisUnavailable } from '../../lib/transcription';
 import { outcomeLabel } from '../../brand';
 import { AUTO_FOLLOWUP_DAYS, dayFromInput, inputFromDay, startOfDay } from '../../lib/followUps';
@@ -138,7 +139,8 @@ function WrapUp({ user }: { user: CustomerUser }) {
           break;
         }
         if (r.providerCallId || r.remote) {
-          const file = await controller.findRecording({ remote: r.remote ?? '', startedAt: r.startedAt, talkSeconds: r.talkSeconds, direction: r.direction }).catch(() => undefined);
+          const q = { remote: r.remote ?? '', startedAt: r.startedAt, talkSeconds: r.talkSeconds, direction: r.direction };
+          const file = (await serverRecording(q)) ?? (await controller.findRecording(q).catch(() => undefined));
           if (file) {
             session.attachRecording(file);
             continue;

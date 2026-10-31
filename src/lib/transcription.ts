@@ -37,6 +37,7 @@ export function serverHealth(): Promise<ServerHealth | null> {
 async function viaServer(entry: CallLogEntry, user: CustomerUser): Promise<CallAnalysis> {
   const res = await fetch('/api/analyze', {
     method: 'POST',
+    signal: AbortSignal.timeout(300_000), // a request that hangs becomes an error with a retry button, not an endless spinner
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       file: entry.telephony?.recordingFile,

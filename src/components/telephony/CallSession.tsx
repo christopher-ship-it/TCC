@@ -14,6 +14,7 @@ import { announcePresence } from '../../lib/presence';
 import { can } from '../../lib/access';
 import { APPS } from '../../data/seed';
 import { analyzeCall, AnalysisUnavailable } from '../../lib/transcription';
+import { serverRecording } from '../../lib/recordingLookup';
 import { CallSessionContext, type CallSessionValue } from './callSessionContext';
 import { IncomingCall } from './IncomingCall';
 import { CallModal } from './CallModal';
@@ -109,11 +110,23 @@ function Session({ children }: { children: ReactNode }) {
     return state.users.flatMap((user) => user.callHistory.filter((c) => c.agentName === currentAgent.name && c.atTs >= since).map((call) => ({ user, call })));
   }, [state.users, currentAgent]);
 
-  // Logged calls that still have no recording: ask TeleCMI's call records a few times as the file is finalised.
-  const lookups = useRef(new Map<string, number>());
+  // The recording for a call: first what TeleCMI's webhook told the server (no softphone session needed), then the
+  // softphone's own call records while the line is connected. `note` says why neither had it.
   const connection = snapshot.connection;
+  const findRecordingFor = useCallback(
+    async (q: { remote: string; startedAt: number; talkSeconds: number; direction?: 'inbound' | 'outbound' }): Promise<{ file?: string; note: string }> => {
+      const fromServer = await serverRecording(q);
+      if (fromServer) return { file: fromServer, note: '' };
+      if (connection !== 'ready') return { note: 'TeleCMI has not announced it to the server yet, and the softphone is not connected to look it up' };
+      const file = await controller.findRecording(q);
+      return { file, note: file ? '' : `TeleCMI has not announced it to the server yet; softphone lookup: ${controller.lastLookupNote || 'no reason given'}` };
+    },
+    [connection, controller],
+  );
+
+  // Logged calls that still have no recording are looked up as the file is finalised.
+  const lookups = useRef(new Map<string, number>());
   useEffect(() => {
-    if (connection !== 'ready') return;
     const tick = () => {
       for (const { call } of myCalls) {
         const t = call.telephony;
@@ -121,21 +134,32 @@ function Session({ children }: { children: ReactNode }) {
         const tries = lookups.current.get(call.id) ?? 0;
         if (tries >= LOOKUP_DELAYS_MS.length || Date.now() - call.atTs < LOOKUP_DELAYS_MS[tries]) continue;
         lookups.current.set(call.id, tries + 1);
-        void controller
-          .findRecording({ remote: t.remote, startedAt: t.startedAt, talkSeconds: t.durationSec, direction: t.direction })
-          .then((file) => {
-            if (file) return dispatch({ type: 'ATTACH_RECORDING', file, entryId: call.id });
-            const note = controller.lastLookupNote || 'no reason given';
-            console.warn(`[phone] No recording found for call ${call.id} (lookup ${tries + 1}/${LOOKUP_DELAYS_MS.length}): ${note}`);
-            // The super admin's event log gets the first, a middle and the last attempt — enough to see why, without noise.
-            if (serverStoreEnabled && (tries === 0 || tries === 3 || tries === LOOKUP_DELAYS_MS.length - 1)) report('warn', `Recording not found (lookup ${tries + 1}/${LOOKUP_DELAYS_MS.length}): ${note}`, { callId: call.id, remote: t.remote?.slice(-4), startedAt: t.startedAt });
-          });
+        void findRecordingFor({ remote: t.remote, startedAt: t.startedAt, talkSeconds: t.durationSec, direction: t.direction }).then(({ file, note }) => {
+          if (file) return dispatch({ type: 'ATTACH_RECORDING', file, entryId: call.id });
+          console.warn(`[phone] No recording found for call ${call.id} (lookup ${tries + 1}/${LOOKUP_DELAYS_MS.length}): ${note}`);
+          // The super admin's event log gets the first, a middle and the last attempt — enough to see why, without noise.
+          if (serverStoreEnabled && (tries === 0 || tries === 3 || tries === LOOKUP_DELAYS_MS.length - 1)) report('warn', `Recording not found (lookup ${tries + 1}/${LOOKUP_DELAYS_MS.length}): ${note}`, { callId: call.id, remote: t.remote?.slice(-4), startedAt: t.startedAt });
+        });
       }
     };
     tick();
     const id = setInterval(tick, 15_000);
     return () => clearInterval(id);
-  }, [connection, myCalls, controller, dispatch]);
+  }, [myCalls, findRecordingFor, dispatch]);
+
+  // "Look for it now" on a call page: any call, any age, answered with a reason when it is not there yet.
+  const checkRecording = useCallback(
+    async (entryId: string): Promise<{ found: boolean; message: string }> => {
+      const call = state.users.flatMap((u) => u.callHistory).find((c) => c.id === entryId);
+      const t = call?.telephony;
+      if (!call || t?.provider !== 'telecmi' || !t.startedAt || !t.remote) return { found: false, message: 'This call has nothing to look up.' };
+      const { file, note } = await findRecordingFor({ remote: t.remote, startedAt: t.startedAt, talkSeconds: t.durationSec, direction: t.direction });
+      if (!file) return { found: false, message: `Not available yet — ${note}.` };
+      dispatch({ type: 'ATTACH_RECORDING', file, entryId });
+      return { found: true, message: 'Found the recording.' };
+    },
+    [state.users, findRecordingFor, dispatch],
+  );
 
   // Every recorded call gets analysed (transcript, summary, sentiment) once — automatically, in the background.
   const analysing = useRef(new Set<string>());
@@ -199,8 +223,8 @@ function Session({ children }: { children: ReactNode }) {
   }, []);
 
   const value = useMemo<CallSessionValue>(
-    () => ({ available: true, liveCustomerId: snapshot.call?.meta.customerId ?? null, wrapUp, dial, clearWrapUp, completeWrapUp, attachRecording, presenceError }),
-    [snapshot.call?.meta.customerId, wrapUp, dial, clearWrapUp, completeWrapUp, attachRecording, presenceError],
+    () => ({ available: true, liveCustomerId: snapshot.call?.meta.customerId ?? null, wrapUp, dial, clearWrapUp, completeWrapUp, attachRecording, checkRecording, presenceError }),
+    [snapshot.call?.meta.customerId, wrapUp, dial, clearWrapUp, completeWrapUp, attachRecording, checkRecording, presenceError],
   );
   return (
     <CallSessionContext.Provider value={value}>

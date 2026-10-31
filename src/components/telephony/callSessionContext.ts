@@ -18,6 +18,8 @@ export interface CallSessionValue {
   completeWrapUp: () => void;
   /** The recording for the call waiting to be completed was found. */
   attachRecording: (file: string) => void;
+  /** Look for a logged call's recording now (what TeleCMI announced, then the softphone's call records). */
+  checkRecording: (entryId: string) => Promise<{ found: boolean; message: string }>;
   /** Why the connected line is not marked available for incoming calls, when it isn't. */
   presenceError: string | null;
 }
@@ -30,6 +32,7 @@ export const CallSessionContext = createContext<CallSessionValue>({
   clearWrapUp: () => undefined,
   completeWrapUp: () => undefined,
   attachRecording: () => undefined,
+  checkRecording: async () => ({ found: false, message: 'Calling is not set up in this build.' }),
   presenceError: null,
 });
 
