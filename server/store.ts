@@ -27,6 +27,7 @@ import { canSignOut, isOnline, type PresenceRow } from '../src/lib/signedIn.ts';
 import { outboundStats, recentOutbound } from './outbound.ts';
 import { describeRules } from './rateLimit.ts';
 import { keepSourceFields } from '../src/lib/appSync.ts';
+import { isDemoAgent, sameWorld } from '../src/lib/world.ts';
 import type { CustomerUser as FullCustomer } from '../src/data/types.ts';
 // The records as stored. The full shapes live in src/data/types.ts (the browser's); the server only relies on these fields.
 type AppId = string;
@@ -38,6 +39,8 @@ interface AgentAccount {
   role: 'agent' | 'supervisor' | 'admin';
   status?: 'active' | 'invited' | 'suspended';
   trainee?: boolean;
+  /** A practice account (src/lib/world.ts). */
+  demo?: boolean;
   apps: AppId[];
   capabilities?: Record<string, string[]>;
   queues: string[];
@@ -56,6 +59,7 @@ interface CustomerUser {
   id: string;
   app: AppId;
   phone: string;
+  origin?: 'app' | 'tcc' | 'sample';
   ownerAgentId: string | null;
   callHistory: CallLogEntry[];
   [extra: string]: unknown;
@@ -70,6 +74,7 @@ interface AuditEntry {
   ts: number;
   actorId: string;
   actorName: string;
+  demo?: boolean;
   action: string;
   target?: string;
   detail: string;
@@ -443,19 +448,20 @@ export function createStore(getPool: () => Promise<pg.Pool>, env: StoreEnv, read
       const after = since ? 'updated_at > $1::timestamptz' : 'true';
       const args = since ? [since] : [];
       const seeAll = me.role !== 'agent';
-      const agents = (await pool.query<{ doc: AgentAccount }>(`select doc from agents where ${after}`, args)).rows.map((r) => r.doc).filter((a) => me.superAdmin || !a.superAdmin);
+      const agents = (await pool.query<{ doc: AgentAccount }>(`select doc from agents where ${after}`, args)).rows.map((r) => r.doc).filter((a) => me.superAdmin || !a.superAdmin).filter((a) => !isDemoAgent(me) || isDemoAgent(a));
+      // A demo account is sent demo customers only, and everyone else real ones only (src/lib/world.ts).
       const customers = (
         await pool.query<{ doc: CustomerUser }>(
           `select doc from customers where ${after}${seeAll ? '' : ` and doc->>'app' = any($${args.length + 1}::text[])`}`,
           seeAll ? args : [...args, me.apps],
         )
-      ).rows.map((r) => r.doc);
+      ).rows.map((r) => r.doc).filter((c) => sameWorld(me, c));
       const escalations = (await pool.query<{ doc: EscalationRecord }>(`select doc from escalations where ${after}`, args)).rows.map((r) => r.doc);
       const visibility = await getVisibility(pool);
       // Client admins and agents never see what the super admin (or Tecstellar's setup tool) did, or anything about them;
       // and when the super admin has turned the Change log off for them, they get none. Customer deletions (and their
       // reasons) are the super admin's alone.
-      const audit = await auditFor(pool, me, { visible: visibility.changeLog, since: since ?? undefined, limit: LOG_PAGE });
+      const audit = (await auditFor(pool, me, { visible: visibility.changeLog, since: since ?? undefined, limit: LOG_PAGE })).filter((e) => !!e.demo === isDemoAgent(me));
       const cleared = (await pool.query<{ value: unknown }>(`select value from settings where key = 'clearedEscalations' and ${after}`, args)).rows[0]?.value;
       send(res, 200, { cursor, me, agents, customers, escalations, audit, cleared, visibility, notices: await openNotices(pool, me.id) });
       return true;

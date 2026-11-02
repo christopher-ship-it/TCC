@@ -130,3 +130,16 @@ test('open load counts only customers still on a handed-out list', () => {
   const customers = [customer('a', 'Tamil', { ownerAgentId: 'x' }), customer('b', 'Tamil', { ownerAgentId: 'x', queue: 'new', callback: { dueTs: today + 86_400_000, auto: true } }), customer('c', 'Tamil', { ownerAgentId: 'y', queue: 'tickets' })];
   assert.deepEqual([...openLoad(customers, NOW)], [['x', 1]]);
 });
+
+test('a demo agent is never handed a real customer, however well the language fits', () => {
+  const demo = agent('demo-tamil', ['Tamil'], { demo: true });
+  const plan = planAssignments({ customers: [customer('cust-1', 'Tamil'), customer('cust-2', 'Tamil')], agents: [demo], online: new Set(['demo-tamil']), now: NOW });
+  assert.deepEqual(plan.assign, []);
+});
+
+test('real customers still go to real agents when a demo agent shares the language', () => {
+  const demo = agent('demo-tamil', ['Tamil'], { demo: true });
+  const plan = planAssignments({ customers: [customer('cust-1', 'Tamil')], agents: [demo, ...team], online: new Set([...everyone, 'demo-tamil']), now: NOW });
+  assert.notEqual(who(plan, 'cust-1'), 'demo-tamil');
+  assert.ok(who(plan, 'cust-1'));
+});

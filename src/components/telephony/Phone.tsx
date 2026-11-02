@@ -7,7 +7,7 @@ import { formatDuration, useElapsedSeconds, useTelephonyOptional, type CallResul
 import { isVirtualInput } from '../../telephony/core/microphone';
 import { useAudioDevices } from '../../telephony/react/hooks';
 import type { AgentAccount, CustomerUser } from '../../data/types';
-import { LIVE_DIAL_BLOCKED, TEST_NUMBER, isRealNumber } from '../../lib/telephony';
+import { TEST_NUMBER, dialBlocked, isRealNumber } from '../../lib/telephony';
 import { Button, Field, Input, Select } from '../../ui/primitives';
 import { useCallSession } from './callSessionContext';
 import { announcePresence, forgetLine, rememberLine } from '../../lib/presence';
@@ -176,8 +176,14 @@ export function Phone({ user, agent, onEscalate }: { user: CustomerUser; agent: 
           <div className="phone__name">{user.name}</div>
           <div className="phone__number">{user.phone}</div>
         </div>
-        <div className="phone__note">Browser calling isn’t switched on in this build. Call from your mobile, then log the outcome here.</div>
-        <a className="phone__big phone__big--call" href={`tel:${user.phone.replace(/\s/g, '')}`} aria-label={`Call ${user.name} from this device`}><PhoneIcon size={26} /></a>
+        {agent.demo ? (
+          <div className="phone__warn"><AlertTriangle size={15} />Demo agents can’t place real calls.</div>
+        ) : (
+          <>
+            <div className="phone__note">Browser calling isn’t switched on in this build. Call from your mobile, then log the outcome here.</div>
+            <a className="phone__big phone__big--call" href={`tel:${user.phone.replace(/\s/g, '')}`} aria-label={`Call ${user.name} from this device`}><PhoneIcon size={26} /></a>
+          </>
+        )}
         <Button variant="ghost" icon={<Flag size={15} />} onClick={onEscalate}>Reroute or escalate</Button>
       </div>
     );
@@ -187,8 +193,8 @@ export function Phone({ user, agent, onEscalate }: { user: CustomerUser; agent: 
   const otherCall = call && call.meta.customerId !== user.id;
   const inbound = call?.direction === 'inbound' && !otherCall;
   const callerNumber = call && /^\d{8,15}$/.test(call.remote) ? `+${call.remote}` : (call?.remote ?? '');
-  const redirected = !!TEST_NUMBER && !isRealNumber(user) && !inbound;
-  const blocked = LIVE_DIAL_BLOCKED && !isRealNumber(user);
+  const redirected = !!TEST_NUMBER && (agent.demo || (!isRealNumber(user) && !inbound));
+  const blocked = dialBlocked(user, agent);
   const ended = !call && session.wrapUp?.customerId === user.id ? session.wrapUp.result : null;
   const ringing = call && (call.state === 'dialing' || call.state === 'ringing' || call.state === 'incoming');
   const micLabel = stats?.micLabel;
@@ -253,7 +259,7 @@ export function Phone({ user, agent, onEscalate }: { user: CustomerUser; agent: 
           </div>
 
           {redirected && !call && <div className="phone__note">Test mode — this call rings {TEST_NUMBER}, not {user.name}.</div>}
-          {blocked && <div className="phone__warn"><AlertTriangle size={15} />Live dialling is off: customer numbers are still sample data. Set VITE_TELEPHONY_TEST_NUMBER to ring your own phone.</div>}
+          {blocked && <div className="phone__warn"><AlertTriangle size={15} />{agent.demo ? 'Demo agents can only ring the test number, and none is set (VITE_TELEPHONY_TEST_NUMBER).' : 'Live dialling is off: customer numbers are still sample data. Set VITE_TELEPHONY_TEST_NUMBER to ring your own phone.'}</div>}
           {call?.state === 'connected' && !otherCall && (
             <>
               <div className="phone__levels" aria-label="Audio levels">

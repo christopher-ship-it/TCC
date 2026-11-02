@@ -1,4 +1,5 @@
 import { QUEUES, type AgentAccount, type AppId, type CustomerUser, type QueueKey } from '../data/types.ts';
+import { sameWorld } from './world.ts';
 import { NO_ANSWER_ENDED_TAG, callbackIsDue, isConnected, priorityRank, startOfDay } from './followUps.ts';
 
 /**
@@ -15,7 +16,9 @@ const HANDED_OUT: QueueKey[] = ['new', 'noanswer', 'followup'];
 const handedOutTo = (agent: AgentAccount, u: CustomerUser, q: QueueKey): boolean =>
   !assignmentMode.on || agent.role !== 'agent' || !HANDED_OUT.includes(q) || u.manual === true || u.adHoc === true || u.ownerAgentId === agent.id;
 
-export function isReachable(agent: AgentAccount, user: CustomerUser): boolean {
+export function isReachable(agent: Pick<AgentAccount, 'id' | 'apps' | 'languages' | 'states' | 'demo'>, user: CustomerUser): boolean {
+  // A demo account is only ever served demo customers, and a real one only real customers — whatever else it covers.
+  if (!sameWorld(agent, user)) return false;
   if (!agent.apps.includes(user.app)) return false;
   // A customer added by hand belongs to whoever it was given to, whatever their states; unowned, anyone who speaks
   // the customer's language in that product can take it.
@@ -118,10 +121,10 @@ export function nextTask(agent: AgentAccount, users: CustomerUser[], appId: AppI
 }
 
 /** Customers in queues that someone with this scope could be served (apps × states × languages). */
-export function reachableCount(scope: Pick<AgentAccount, 'apps' | 'languages' | 'states'>, users: CustomerUser[]): number {
+export function reachableCount(scope: Pick<AgentAccount, 'apps' | 'languages' | 'states' | 'demo'>, users: CustomerUser[]): number {
   let n = 0;
   for (const u of users) {
-    if (!u.queue || !scope.apps.includes(u.app) || !scope.states.includes(u.effectiveState)) continue;
+    if (!u.queue || !sameWorld(scope, u) || !scope.apps.includes(u.app) || !scope.states.includes(u.effectiveState)) continue;
     if (u.state !== null && !scope.languages.includes(u.language)) continue;
     n++;
   }

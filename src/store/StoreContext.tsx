@@ -3,6 +3,7 @@ import { firebaseEnabled } from '../firebase/client';
 import { APPS } from '../data/seed';
 import type { AppId } from '../data/types';
 import { inProduct, mayEnter, readProduct, writeProduct } from '../lib/product';
+import { scopeFor } from '../lib/world';
 import { LocalStoreProvider } from './LocalStoreProvider';
 import { FirestoreStoreProvider } from './FirestoreStoreProvider';
 import { ServerStoreProvider, serverStoreEnabled } from './ServerStoreProvider';
@@ -41,7 +42,10 @@ function ProductGate({ children }: { children: React.ReactNode }) {
     [baseDispatch, chooseProduct],
   ) as React.Dispatch<Action>;
 
-  const value = useMemo<StoreValue>(() => ({ ...base, dispatch, currentAgent, account, product, chooseProduct }), [base, dispatch, currentAgent, account, product, chooseProduct]);
+  // Demo accounts see only demo people and customers, everyone else only real ones (src/lib/world.ts). Done here once, for every backend.
+  const state = useMemo(() => ({ ...scopeFor(account, base.state), allAgents: base.state.agents, allUsers: base.state.users }), [account, base.state]);
+
+  const value = useMemo<StoreValue>(() => ({ ...base, state, dispatch, currentAgent, account, product, chooseProduct }), [base, state, dispatch, currentAgent, account, product, chooseProduct]);
   return <StoreContext.Provider value={value}>{children}</StoreContext.Provider>;
 }
 

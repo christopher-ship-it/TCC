@@ -33,16 +33,21 @@ export const LIVE_DIAL_BLOCKED = mode === 'telecmi' && !TEST_NUMBER && import.me
 /** A number a person typed in (dialled directly, or a customer added by hand) is real: it is always dialled as typed. */
 export const isRealNumber = (user: CustomerUser): boolean => !!(user.adHoc || user.manual);
 
-/** The number to actually dial for a customer (the test number, when one is set, for sample customers only). */
-export function dialNumberFor(user: CustomerUser): string {
-  return TEST_NUMBER && !isRealNumber(user) ? TEST_NUMBER : user.phone;
+/** The number to actually dial for a customer (the test number, when one is set, for sample customers only). A demo agent always gets the test number. */
+export function dialNumberFor(user: CustomerUser, agent: Pick<AgentAccount, 'demo'>): string {
+  return TEST_NUMBER && (agent.demo || !isRealNumber(user)) ? TEST_NUMBER : user.phone;
+}
+
+/** A demo agent never rings a customer: their calls go to the test number, or are blocked when none is set. */
+export function dialBlocked(user: CustomerUser, agent: Pick<AgentAccount, 'demo'>): boolean {
+  return agent.demo ? mode === 'telecmi' && !TEST_NUMBER : LIVE_DIAL_BLOCKED && !isRealNumber(user);
 }
 
 export const DEFAULT_COUNTRY_CODE = (import.meta.env.VITE_TELEPHONY_COUNTRY_CODE as string | undefined) || '91';
 
 /** Tags attached to every call; TeleCMI echoes them back in its webhooks so a call can be tied to a customer and agent. */
 export function callMeta(user: CustomerUser, agent: AgentAccount): Meta {
-  return { app: user.app, customerId: user.id, agentId: agent.id, queue: user.queue ?? '', ...(TEST_NUMBER && !isRealNumber(user) ? { testRedirect: 'true' } : {}) };
+  return { app: user.app, customerId: user.id, agentId: agent.id, queue: user.queue ?? '', ...(TEST_NUMBER && (agent.demo || !isRealNumber(user)) ? { testRedirect: 'true' } : {}), ...(agent.demo ? { demo: 'true' } : {}) };
 }
 
 /** What the softphone already knows about "did the call connect?". Provides an intelligent default status

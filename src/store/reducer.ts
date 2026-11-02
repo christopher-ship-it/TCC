@@ -7,6 +7,7 @@ import { isConnected } from '../lib/metrics';
 import { NO_ANSWER_ENDED_TAG, planFollowUp, startOfDay } from '../lib/followUps';
 import { fmtDay, fmtDayTime } from '../lib/dates';
 import { isReachable } from '../lib/queue';
+import { isRealOrigin, originOf } from '../lib/world';
 import { attachRecording, withAnalysis } from '../lib/attachRecording';
 import { buildCallLogEntry } from '../lib/callLog';
 import { recordingUrlFor } from '../lib/telephony';
@@ -191,8 +192,9 @@ export function reducer(state: State, action: Action): State {
         }
         return { ...u, ownerAgentId: action.reassignAgentId ?? u.ownerAgentId, ...(action.reassignAgentId ? { handOwnedAt: Date.now() } : {}), hasActiveEscalation: stillPending };
       });
+      const demo = !!state.agents.find((a) => a.id === action.actorId)?.demo;
       const clearedEscalations = [
-        { id: `cleared-${Date.now()}`, atLabel: fmtDayTime(Date.now()).split(' · ')[1], name: esc.userName, action: esc.type === 'reroute' ? `Reroute → ${esc.targetLanguage}` : `Escalation → ${esc.reason}`, result: 'Approved · reassigned', minutes: Math.round((Date.now() - esc.raisedTs) / 60000) || 5 },
+        { id: `cleared-${Date.now()}`, atLabel: fmtDayTime(Date.now()).split(' · ')[1], name: esc.userName, action: esc.type === 'reroute' ? `Reroute → ${esc.targetLanguage}` : `Escalation → ${esc.reason}`, result: 'Approved · reassigned', minutes: Math.round((Date.now() - esc.raisedTs) / 60000) || 5, ...(demo ? { demo } : {}) },
         ...state.clearedEscalations,
       ];
       return withAudit({ ...state, escalations, users, clearedEscalations }, auditEntry(state.agents, action.actorId, 'escalation_approved', esc.userName, `${clearedEscalations[0].action} · ${action.resolutionNote || 'approved'}`));
@@ -206,8 +208,9 @@ export function reducer(state: State, action: Action): State {
         const stillPending = escalations.some((e) => e.userId === u.id && e.status === 'pending');
         return { ...u, hasActiveEscalation: stillPending };
       });
+      const demo = !!state.agents.find((a) => a.id === action.actorId)?.demo;
       const clearedEscalations = [
-        { id: `cleared-${Date.now()}`, atLabel: fmtDayTime(Date.now()).split(' · ')[1], name: esc.userName, action: esc.type === 'reroute' ? `Reroute → ${esc.targetLanguage}` : `Escalation → ${esc.reason}`, result: 'Declined · kept with agent', minutes: Math.round((Date.now() - esc.raisedTs) / 60000) || 5 },
+        { id: `cleared-${Date.now()}`, atLabel: fmtDayTime(Date.now()).split(' · ')[1], name: esc.userName, action: esc.type === 'reroute' ? `Reroute → ${esc.targetLanguage}` : `Escalation → ${esc.reason}`, result: 'Declined · kept with agent', minutes: Math.round((Date.now() - esc.raisedTs) / 60000) || 5, ...(demo ? { demo } : {}) },
         ...state.clearedEscalations,
       ];
       return withAudit({ ...state, escalations, users, clearedEscalations }, auditEntry(state.agents, action.actorId, 'escalation_declined', esc.userName, `${clearedEscalations[0].action} · ${action.resolutionNote || 'declined'}`));
@@ -221,7 +224,12 @@ export function reducer(state: State, action: Action): State {
       const target = state.agents.find((a) => a.id === action.agentId);
       if (!target) return state;
       const agents = state.agents.map((a) => (a.id === action.agentId ? { ...a, ...action.patch } : a));
-      return withAudit({ ...state, agents }, auditEntry(state.agents, action.actorId, action.auditAction ?? 'access_changed', target.name, action.detail));
+      // Turning someone into a demo account takes the real customers they own back, so a real agent can be served them.
+      const owns = (u: CustomerUser) => u.ownerAgentId === target.id && isRealOrigin(originOf(u));
+      const released = action.patch.demo && !target.demo ? state.users.filter(owns).length : 0;
+      const users = released ? state.users.map((u) => (owns(u) ? { ...u, ownerAgentId: null } : u)) : state.users;
+      const detail = released ? `${action.detail} · ${released} real customer${released === 1 ? '' : 's'} released from them` : action.detail;
+      return withAudit({ ...state, agents, users }, auditEntry(state.agents, action.actorId, action.auditAction ?? 'access_changed', target.name, detail));
     }
     case 'REASSIGN_OWNER': {
       const user = state.users.find((u) => u.id === action.userId);
@@ -255,13 +263,16 @@ export function reducer(state: State, action: Action): State {
       // Keep whatever an agent has already done (call history, tickets, follow-ups, ownership) for
       // any customer id that reappears in the new file; everything else comes in fresh.
       const existingById = new Map(state.users.map((u) => [u.id, u]));
-      const users = action.customers.map((u) => {
+      const imported = action.customers.map((u) => {
         const prev = existingById.get(u.id);
-        return prev ? { ...u, ...overlayFromUser(prev) } : u;
+        const real = { ...u, origin: 'app' as const };
+        return prev ? { ...real, ...overlayFromUser(prev) } : real;
       });
+      // The demo sandbox (generated customers, numbers dialled by demo accounts) stays; only the real list is replaced.
+      const users = [...imported, ...state.users.filter((u) => originOf(u) === 'sample')];
       return withAudit(
         { ...state, users, customerSource: 'imported' },
-        auditEntry(state.agents, action.actorId, 'customers_imported', undefined, `Imported ${users.length} real customers (CSV)`),
+        auditEntry(state.agents, action.actorId, 'customers_imported', undefined, `Imported ${imported.length} real customers (CSV)`),
       );
     }
     case 'CLOSE_FOLLOWUP':

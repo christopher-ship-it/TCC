@@ -17,6 +17,8 @@ import { whyInQueue } from '../../lib/whyInQueue';
 import { can, LANGUAGE_SCRIPT } from '../../lib/access';
 import { DEFAULT_COUNTRY_CODE, suggestStatus, toCallTelephony } from '../../lib/telephony';
 import { adHocCustomer, adHocId, directDialDigits } from '../../lib/directDial';
+import { originForNewCustomer } from '../../lib/world';
+import { OriginBadge } from '../../components/customer/DataSource';
 import { formatDuration, useTelephonyOptional } from '../../telephony';
 import { Phone } from '../../components/telephony/Phone';
 import { useCallSession } from '../../components/telephony/callSessionContext';
@@ -46,7 +48,7 @@ const STATUS_LABEL: Record<CallStatus, string> = {
 
 /** Call a number that isn't in the customer list; the call is logged, recorded and analysed like any other. */
 function DialNumber({ appId, disabled }: { appId: AppId; disabled: boolean }) {
-  const { state, dispatch } = useStore();
+  const { state, dispatch, currentAgent } = useStore();
   const session = useCallSession();
   const [, setParams] = useSearchParams();
   const [raw, setRaw] = useState('');
@@ -58,7 +60,9 @@ function DialNumber({ appId, disabled }: { appId: AppId; disabled: boolean }) {
     e.preventDefault();
     const digits = directDialDigits(raw, DEFAULT_COUNTRY_CODE);
     if (!digits) return setError('That doesn’t look like a phone number.');
-    const user = state.users.find((u) => u.id === adHocId(digits)) ?? adHocCustomer(digits, appId);
+    // A demo account's numbers are demo records, kept apart from the real list.
+    const origin = originForNewCustomer(currentAgent);
+    const user = state.users.find((u) => u.id === adHocId(digits, origin === 'sample')) ?? adHocCustomer(digits, appId, Date.now(), origin);
     if (user.app !== appId) return setError(`That number was already dialled under ${user.app}.`);
     if (!state.users.some((u) => u.id === user.id)) dispatch({ type: 'ADD_CUSTOMER', customer: user });
     const r = session.dial(user);
@@ -411,6 +415,7 @@ export default function Workspace() {
               <div className="mt-3 flex flex-wrap gap-1.5">
                 <UiBadge variant="outline">{LANGUAGE_SCRIPT[user.language]}{user.language !== 'English' ? ` · ${user.language}` : ''}</UiBadge>
                 <UiBadge variant="outline">{F ? (user.plan === 'Paid' ? F.paid : F.free) : `${user.plan} plan`}</UiBadge>
+                <OriginBadge user={user} />
                 {user.hasActiveEscalation && <UiBadge>Escalation pending</UiBadge>}
                 <select
                   aria-label="Customer type"

@@ -67,8 +67,14 @@ export interface Notice {
 /** Why an account action did not happen. */
 export type AccountResult = { ok: true } | { ok: false; message: string };
 
+/** What the signed-in person gets to see (src/lib/world.ts), plus everyone and every customer for the admin screens that manage the split. */
+export interface ScopedState extends State {
+  allAgents: AgentAccount[];
+  allUsers: CustomerUser[];
+}
+
 export interface StoreValue {
-  state: State;
+  state: ScopedState;
   dispatch: Dispatch<Action>;
   currentAgent: AgentAccount | null;
   ready: boolean;
@@ -105,7 +111,7 @@ export interface StoreValue {
 }
 
 /** What a backend provides (src/store/*Provider.tsx); StoreContext.tsx adds the product the session works in. */
-export type BaseStoreValue = Omit<StoreValue, 'product' | 'chooseProduct' | 'account'>;
+export type BaseStoreValue = Omit<StoreValue, 'state' | 'product' | 'chooseProduct' | 'account'> & { state: State };
 export const BaseStoreContext = createContext<BaseStoreValue | null>(null);
 export const StoreContext = createContext<StoreValue | null>(null);
 
@@ -118,5 +124,5 @@ export function useStore(): StoreValue {
 /** One change-log line, attributed to whoever is acting. */
 export function auditEntry(agents: AgentAccount[], actorId: string, action: AuditAction, target: string | undefined, detail: string, now = Date.now()): AuditEntry {
   const actor = agents.find((a) => a.id === actorId);
-  return { id: `audit-${now}-${Math.random().toString(36).slice(2, 7)}`, ts: now, actorId, actorName: actor?.name ?? 'Unknown', action, target, detail };
+  return { id: `audit-${now}-${Math.random().toString(36).slice(2, 7)}`, ts: now, actorId, actorName: actor?.name ?? 'Unknown', ...(actor?.demo ? { demo: true } : {}), action, target, detail };
 }

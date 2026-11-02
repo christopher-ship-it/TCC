@@ -16,6 +16,7 @@ import type { AgentAccount, CustomerUser, Language, QueueKey } from '../data/typ
 import { primaryLanguageOf } from './languages.ts';
 import { startOfDay } from './followUps.ts';
 import { queueOf, sortQueue } from './queue.ts';
+import { sameWorld } from './world.ts';
 
 /** The lists that are handed out, in the order they are served. */
 export const ASSIGN_LISTS: QueueKey[] = ['new', 'noanswer', 'followup'];
@@ -27,7 +28,8 @@ const isAgentActive = (a: AgentAccount) => a.role === 'agent' && (a.status ?? 'a
 
 /** Can this agent be given this customer from this list? Language is the hard rule; states play no part. */
 export function agentCovers(agent: AgentAccount, user: CustomerUser, list: QueueKey): boolean {
-  return isAgentActive(agent) && agent.apps.includes(user.app) && agent.queues.includes(list) && agent.languages.includes(user.language);
+  // A demo agent is never given a real customer (and a real one never a demo customer), however well the language fits.
+  return isAgentActive(agent) && sameWorld(agent, user) && agent.apps.includes(user.app) && agent.queues.includes(list) && agent.languages.includes(user.language);
 }
 
 const isHandedOut = (u: CustomerUser) => !u.manual && !u.adHoc && !u.deleted;

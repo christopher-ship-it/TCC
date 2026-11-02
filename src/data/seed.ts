@@ -681,7 +681,7 @@ export interface Seed {
   agents: AgentAccount[];
   users: CustomerUser[];
   escalations: EscalationRecord[];
-  clearedEscalations: ReturnType<typeof buildClearedEscalations>;
+  clearedEscalations: (ReturnType<typeof buildClearedEscalations>[number] & { demo?: boolean })[];
   audit: AuditEntry[];
   generatedAt: number;
 }
@@ -699,14 +699,16 @@ export function generateSeed(seedNumber = 20260816): Seed {
     const u = users.find((x) => x.id === e.userId);
     if (u) u.hasActiveEscalation = true;
   });
+  // Everything generated here is demo data: the roster are demo accounts and the customers are not real people.
+  // Real people and customers come from the admin's sign-ups and imports, and never mix with these.
   return {
     apps: APPS,
     states: STATE_DEFS,
-    agents: AGENTS,
-    users,
+    agents: AGENTS.map((a) => ({ ...a, demo: true })),
+    users: users.map((u) => ({ ...u, origin: 'sample' as const })),
     escalations,
-    clearedEscalations: buildClearedEscalations(r),
-    audit: buildAudit(),
+    clearedEscalations: buildClearedEscalations(r).map((c) => ({ ...c, demo: true })),
+    audit: buildAudit().map((e) => ({ ...e, demo: true })),
     generatedAt: NOW,
   };
 }

@@ -4,15 +4,31 @@ import type { AgentAccount } from '../data/types';
 import { cleanLegacyCallData } from '../lib/attachRecording';
 import { BaseStoreContext, type Action, type State } from './context';
 import { reducer } from './reducer';
+import { originOf } from '../lib/world';
 
 const STORAGE_KEY = 'tcc-store-v1';
+
+/**
+ * Browsers that saved their data before demo accounts existed hold only the generated roster and customers, so all of
+ * it is demo: flag it, otherwise the new rules would hide every customer from every account.
+ */
+function markLegacyAsDemo(s: State): State {
+  if (s.agents.some((a) => a.demo !== undefined)) return s;
+  return {
+    ...s,
+    agents: s.agents.map((a) => ({ ...a, demo: true })),
+    audit: s.audit.map((e) => ({ ...e, demo: true })),
+    clearedEscalations: s.clearedEscalations.map((c) => ({ ...c, demo: true })),
+    users: s.users.map((u) => (u.origin ? u : { ...u, origin: originOf(u) })),
+  };
+}
 
 function loadInitial(): State {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (raw) {
       const parsed = JSON.parse(raw) as State;
-      if (parsed.users && parsed.agents) return { ...parsed, audit: parsed.audit ?? [], users: cleanLegacyCallData(parsed.users), customerSource: parsed.customerSource ?? 'sample' };
+      if (parsed.users && parsed.agents) return markLegacyAsDemo({ ...parsed, audit: parsed.audit ?? [], users: cleanLegacyCallData(parsed.users), customerSource: parsed.customerSource ?? 'sample' });
     }
   } catch {
     // fall through to fresh seed
