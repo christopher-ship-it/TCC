@@ -1,6 +1,5 @@
 .shell { min-height: 100vh; display: flex; flex-direction: column; }
 
-.shell-demo { background: var(--warn-soft); color: var(--warn-ink); border-bottom: 1px solid var(--warn-line); padding: 7px 18px; font-size: 13px; text-align: center; }
 .shell-header { position: sticky; top: 0; z-index: 40; background: var(--navy); color: #fff; }
 .shell-header__row { display: flex; align-items: center; gap: 16px; min-height: var(--header-h); padding: 0 18px; flex-wrap: wrap; }
 .shell-rule { display: flex; height: 3px; }

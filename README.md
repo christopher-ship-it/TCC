@@ -72,8 +72,8 @@ Two worlds share one database and never mix (`src/lib/world.ts` is the one place
 
 - **Where a customer came from** — every customer is stamped with an `origin`:
   `app` (imported from RealBroks/IronDrobe — real), `tcc` (a number an agent dialled that isn't a customer yet — real),
-  or `sample` (generated demo data, or made by a demo account). Customer pages, the call workspace and
-  **admin › Go-live check** show it; call logs, tickets, follow-ups and owners are always TCC's own, on top of either.
+  or `sample` (generated demo data, or made by a demo account). Customer pages and the call workspace show it, and
+  **admin › Customers** counts each; call logs, tickets, follow-ups and owners are always TCC's own, on top of either.
 - **Demo accounts** — an admin switches **Demo account** on for a person (People & access › Details). A demo account
   only ever sees demo customers; it is never given a real customer (queues, allocation, the CSV owner column and
   *Give unowned customers an owner* all skip it); its calls, tickets and change-log lines stay out of real numbers; and
@@ -108,19 +108,14 @@ TCC integrates with TeleCMI (`piopiyjs`) to provide an in-browser WebRTC softpho
 ### Safe Dialling Modes
 
 Demo customers (`src/data/seed.ts`) have randomly generated phone numbers, so they must never be dialled for real.
-Whether a call goes out, and to which number, is decided **per call** by [`src/lib/dialPolicy.ts`](src/lib/dialPolicy.ts):
-a demo account only ever rings the test number (or is blocked if none is set), and a demo customer is never dialled
-for real by anyone. For real accounts and real customers, three deployment modes apply
-([`src/lib/telephony.ts`](src/lib/telephony.ts)):
+A demo agent therefore only ever rings the test number (or is blocked if none is set). For everyone else, three
+dialling safety modes apply in [`src/lib/telephony.ts`](src/lib/telephony.ts):
 
 | Mode | Configuration in `.env.local` | Behavior |
 | :--- | :--- | :--- |
 | **1. Test Redirect Mode** *(Default in Dev)* | `VITE_TELEPHONY_TEST_NUMBER=8270942966` | Every click-to-call action redirects to this specific mobile phone, regardless of which customer is being viewed. A yellow banner warns the agent: *"Test mode — every call rings 8270942966"*. |
 | **2. Production Live Mode** | `VITE_TELEPHONY_LIVE=true`<br>`# VITE_TELEPHONY_TEST_NUMBER=` (leave unset) | **Production mode.** Dials each customer's real individual number (`user.phone`) directly from your TeleCMI trunk. The yellow banner disappears. |
-| **3. Safety Lock** | Both unset / empty | Calling is disabled for customers. A banner tells the agent live dialling is locked. (A number typed into **Dial a number** is still dialled as typed.) |
-
-Check which mode a deployment is in, and everything else that has to be true before real clients use it, under
-**admin › Go-live check**.
+| **3. Safety Lock** | Both unset / empty | Calling is disabled. A protective banner informs the agent that live dialling is locked to prevent ringing mock numbers. |
 
 ### How to Switch to Production Calling
 

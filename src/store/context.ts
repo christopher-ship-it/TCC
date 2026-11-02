@@ -6,7 +6,7 @@ export interface State {
   /** What the signed-in person may see: a demo account sees demo people and customers, everyone else the real ones (src/lib/world.ts). */
   agents: AgentAccount[];
   users: CustomerUser[];
-  /** Everyone and every customer in both worlds. Only for admin screens that manage or audit the split (People, Customers, Go-live check). */
+  /** Everyone and every customer in both worlds. Only for admin screens that manage or audit the split (People, Customers). */
   allAgents: AgentAccount[];
   allUsers: CustomerUser[];
   escalations: EscalationRecord[];
