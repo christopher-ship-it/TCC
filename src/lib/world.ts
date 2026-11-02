@@ -10,10 +10,12 @@ export const ORIGIN_LABEL: Record<Origin, string> = {
 };
 
 /** Where a customer record came from. Records saved before `origin` existed are classified by how they were made. */
-export function originOf(u: Pick<CustomerUser, 'id' | 'origin' | 'adHoc'>): Origin {
+export function originOf(u: Pick<CustomerUser, 'id' | 'origin' | 'adHoc' | 'manual'>): Origin {
   if (u.origin) return u.origin;
-  if (u.adHoc) return 'tcc';
-  return u.id.startsWith('cust-') ? 'app' : 'sample';
+  // Only the generated ids are demo. Anything else without a stamp is treated as real, so a record of unknown history is never hidden.
+  if (u.id.startsWith('u-') || u.id.startsWith('demo-adhoc-')) return 'sample';
+  if (u.adHoc || u.manual) return 'tcc';
+  return 'app';
 }
 
 export const isDemoAgent = (a: Pick<AgentAccount, 'demo'> | null | undefined): boolean => !!a?.demo;
@@ -22,7 +24,7 @@ export const isDemoAgent = (a: Pick<AgentAccount, 'demo'> | null | undefined): b
 export const isRealOrigin = (o: Origin): boolean => o !== 'sample';
 
 /** True when this person and this customer belong to the same world. */
-export function sameWorld(agent: Pick<AgentAccount, 'demo'> | null | undefined, user: Pick<CustomerUser, 'id' | 'origin' | 'adHoc'>): boolean {
+export function sameWorld(agent: Pick<AgentAccount, 'demo'> | null | undefined, user: Pick<CustomerUser, 'id' | 'origin' | 'adHoc' | 'manual'>): boolean {
   return isDemoAgent(agent) === (originOf(user) === 'sample');
 }
 

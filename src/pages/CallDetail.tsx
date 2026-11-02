@@ -4,15 +4,22 @@ import { AlertTriangle, CheckCircle2, Loader2, Lock, MessageSquareWarning, Rotat
 import { useStore } from '../store/StoreContext';
 import { APPS } from '../data/seed';
 import { outcomeLabel } from '../brand';
-import { telephonyQualitySummary } from '../data/types';
+import { telephonyQualitySummary, type CallAnalysis, type CallLogEntry, type CustomerUser } from '../data/types';
 import { can } from '../lib/access';
+import { isConnected } from '../lib/metrics';
+import { whyNotAnswered } from '../lib/whyNotAnswered';
 import { hasRealRecording } from '../lib/attachRecording';
 import { clock, sentimentBand } from '../lib/analysis/model';
 import { speakingBlocks, talkShare } from '../lib/analysis/speakers';
 import { analyzeCall } from '../lib/transcription';
 import { recordingUrlFor } from '../lib/telephony';
+import { serverRecording } from '../lib/recordingLookup';
+import { useCallSession } from '../components/telephony/callSessionContext';
 import { formatDuration } from '../telephony';
 import { OutcomeBadge, SentimentBadge } from '../components/calls/badges';
+import { AiFeedbackFields } from '../components/calls/AiFeedback';
+import { emptyDraft, feedbackBody, feedbackKey, type FeedbackDraft } from '../lib/aiFeedback';
+import { sendFeedback } from '../lib/aiFeedbackClient';
 import { ConversationTimeline, Legend, TalkSplit, type SpeakingSpan } from '../ui/charts';
 import { RecordingPlayer } from '../ui/RecordingPlayer';
 import { Badge, Button, Callout, Card, Empty, Meter, PageHead } from '../ui/primitives';
@@ -30,6 +37,9 @@ export default function CallDetail() {
     seekRef.current = fn;
   }, []);
   const [working, setWorking] = useState(false);
+  const session = useCallSession();
+  const [checking, setChecking] = useState(false);
+  const [checkNote, setCheckNote] = useState<string | null>(null);
 
   const a = call?.analysis;
   const spans = useMemo<SpeakingSpan[]>(() => {
@@ -55,6 +65,28 @@ export default function CallDetail() {
   const share = a ? talkShare(t?.levels, a.transcript) : null;
   const band = sentimentBand(a?.sentiment);
   const quality = telephonyQualitySummary(t?.quality);
+  const connected = isConnected(call);
+  const inbound = t?.direction === 'inbound';
+  const missed = !connected ? whyNotAnswered(call) : null;
+
+  /** Ask for the recording right now instead of waiting for the next automatic check. */
+  async function lookForRecording() {
+    if (!user || !call) return;
+    setChecking(true);
+    setCheckNote(null);
+    try {
+      if (session.available) {
+        const r = await session.checkRecording(call.id);
+        setCheckNote(r.found ? null : r.message);
+      } else if (t?.startedAt && t.remote) {
+        const file = await serverRecording({ remote: t.remote, startedAt: t.startedAt, talkSeconds: t.durationSec, direction: t.direction });
+        if (file) dispatch({ type: 'ATTACH_RECORDING', file, entryId: call.id });
+        else setCheckNote('Not available yet — TeleCMI has not announced this recording to the server.');
+      }
+    } finally {
+      setChecking(false);
+    }
+  }
 
   async function runAnalysis() {
     if (!user || !call) return;
@@ -75,7 +107,7 @@ export default function CallDetail() {
       <PageHead
         eyebrow={<Link to={`/customers/${user.id}`}>← {user.name}</Link>}
         title={<span className="row" style={{ gap: 10 }}>Call on {call.atLabel} <OutcomeBadge call={call} /></span>}
-        desc={`${user.business} · ${APPS.find((x) => x.id === user.app)?.name} · ${call.agentName}${t?.durationSec ? ` · ${formatDuration(t.durationSec)} talk time` : ' · did not connect'}`}
+        desc={`${inbound ? 'Incoming call' : 'Outgoing call'} · ${APPS.find((x) => x.id === user.app)?.name} · ${call.agentName}${t?.durationSec ? ` · ${formatDuration(t.durationSec)} talk time` : ' · did not connect'}`}
       />
 
       {!hear ? (
@@ -83,23 +115,42 @@ export default function CallDetail() {
       ) : (
         <div className="call-layout">
           <div className="stack" style={{ gap: 16 }}>
-            <Card title="Recording" sub={a && a.transcript.length ? 'Click a transcript line or a stretch of the timeline to jump there' : undefined}>
+            {missed && (
+              <Card title="What happened" sub={call.atLabel}>
+                <div className="kv"><span>Call</span><span>{inbound ? 'Incoming' : 'Outgoing'}</span></div>
+                <div className="kv"><span>Who called whom</span><span>{inbound ? `${user.adHoc ? user.phone : `${user.name} (${user.phone})`} called ${call.agentName}` : `${call.agentName} called ${user.adHoc ? user.phone : `${user.name} (${user.phone})`}`}</span></div>
+                <div className="kv"><span>Result</span><span>{missed.result}</span></div>
+                {t?.ringSec ? <div className="kv"><span>Rang for</span><span className="mono">{t.ringSec}s</span></div> : null}
+                <p style={{ marginTop: 10, lineHeight: 1.55 }}><b style={{ fontWeight: 600 }}>Why:</b> {missed.why}</p>
+                <p style={{ marginTop: 6, color: 'var(--ink-2)' }}>{missed.next}</p>
+              </Card>
+            )}
+
+            {connected && <Card title="Recording" sub={a && a.transcript.length ? 'Click a transcript line or a stretch of the timeline to jump there' : undefined}>
               {src ? (
                 <RecordingPlayer src={src} durationHint={t?.durationSec} onTime={setPlayhead} registerSeek={registerSeek} sample={!real} />
               ) : t?.durationSec ? (
-                <Callout icon={<Loader2 size={16} className="spin" />}>Waiting for the call recording to finish the recording — usually under a minute after the call ends.</Callout>
+                <div className="stack" style={{ gap: 10 }}>
+                  <Callout icon={<Loader2 size={16} className="spin" />}>Waiting for TeleCMI to publish the recording — usually a few minutes after the call ends. It is checked again automatically.</Callout>
+                  {checkNote && <span className="muted">{checkNote}</span>}
+                  <div>
+                    <Button icon={checking ? <Loader2 size={15} className="spin" /> : <RotateCcw size={15} />} disabled={checking} onClick={() => void lookForRecording()}>
+                      {checking ? 'Looking…' : 'Look for the recording now'}
+                    </Button>
+                  </div>
+                </div>
               ) : (
-                <span className="muted">The call didn’t connect, so there is nothing to record.</span>
+                <span className="muted">There is no recording for this call.</span>
               )}
-            </Card>
+            </Card>}
 
-            {spans.length > 0 && (
+            {connected && spans.length > 0 && (
               <Card title="Who spoke when" sub={t?.levels?.length ? 'Measured on the line during the call' : 'Estimated from the transcript'} actions={<Legend items={[{ label: 'Agent', color: 'var(--series-1)' }, { label: 'Customer', color: 'var(--series-2)' }]} />}>
                 <ConversationTimeline spans={spans} duration={duration} playhead={playhead} onSeek={(s) => seekRef.current?.(s)} measured={!!t?.levels?.length} />
               </Card>
             )}
 
-            <Card title="Transcript" sub={a ? `${a.transcript.length} lines${a.languages.length ? ` · ${a.languages.join(', ')}` : ''}${a.source === 'sample' ? ' · sample data' : a.source === 'whisper' ? ' · speakers not separated' : ''}` : undefined}>
+            {connected && <Card title="Transcript" sub={a ? `${a.transcript.length} lines${a.languages.length ? ` · ${a.languages.join(', ')}` : ''}${a.source === 'sample' ? ' · sample data' : a.source === 'whisper' ? ' · speakers not separated' : ''}` : undefined}>
               {!a ? (
                 <span className="muted">{real ? 'Not analysed yet.' : 'No transcript for this call.'}</span>
               ) : a.transcript.length === 0 ? (
@@ -117,7 +168,7 @@ export default function CallDetail() {
                   ))}
                 </div>
               )}
-            </Card>
+            </Card>}
           </div>
 
           <div className="stack" style={{ gap: 16 }}>
@@ -164,6 +215,12 @@ export default function CallDetail() {
               </Card>
             )}
 
+            {a && a.source === 'gemini' && (
+              <Card title="Was the AI right?" sub="Your verdict teaches it how this team reads calls.">
+                <AiFeedbackCard call={call} analysis={a} user={user} />
+              </Card>
+            )}
+
             {a && (a.keyPoints.length > 0 || a.objections.length > 0) && (
               <Card title="What came up">
                 <div className="stack" style={{ gap: 14 }}>
@@ -194,14 +251,40 @@ export default function CallDetail() {
 
             <Card title="Logged by the agent">
               <div className="kv"><span>Status</span><span>{call.status}</span></div>
+              {call.source && <div className="kv"><span>Heard about the app via</span><span>{call.source}</span></div>}
+              {call.followUpTs && <div className="kv"><span>Call again on</span><span>{new Date(call.followUpTs).toLocaleDateString('en-IN', { weekday: 'short', day: 'numeric', month: 'short' })}</span></div>}
               {call.outcome && <div className="kv"><span>Outcome</span><span>{outcomeLabel(call.outcome)}</span></div>}
               {t?.ringSec ? <div className="kv"><span>Rang for</span><span className="mono">{t.ringSec}s</span></div> : null}
-              {quality && <div className="kv"><span>Line</span><span>{quality}</span></div>}
+              {connected && quality && <div className="kv"><span>Line</span><span>{quality}</span></div>}
               {call.comment && <p style={{ marginTop: 10, color: 'var(--ink-2)' }}>“{call.comment}”</p>}
             </Card>
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+/** One call's AI verdict: shows what was said before, and sends a new one. */
+function AiFeedbackCard({ call, analysis, user }: { call: CallLogEntry; analysis: CallAnalysis; user: CustomerUser }) {
+  const { dispatch } = useStore();
+  const saved = call.analysisFeedback;
+  const [draft, setDraft] = useState<FeedbackDraft>(() => (saved ? { verdict: saved.verdict, outcome: saved.outcome ?? '', sentiment: saved.sentiment ?? '', note: saved.note ?? '' } : emptyDraft()));
+  const [sent, setSent] = useState<'idle' | 'saving' | 'saved' | 'local'>(saved ? 'saved' : 'idle');
+  async function save() {
+    if (!draft.verdict) return;
+    setSent('saving');
+    dispatch({ type: 'SET_ANALYSIS_FEEDBACK', userId: user.id, entryId: call.id, feedback: { verdict: draft.verdict, outcome: draft.outcome || undefined, sentiment: draft.sentiment || undefined, note: draft.note.trim() || undefined, ts: Date.now() } });
+    const ok = await sendFeedback(feedbackBody({ key: feedbackKey(call), app: user.app, language: user.language, analysis, draft }));
+    setSent(ok ? 'saved' : 'local');
+  }
+  return (
+    <div className="stack" style={{ gap: 10 }}>
+      <AiFeedbackFields value={draft} onChange={(d) => { setDraft(d); setSent('idle'); }} aiOutcome={analysis.outcome} />
+      <div className="row" style={{ gap: 10, alignItems: 'center' }}>
+        <Button variant="primary" size="sm" disabled={!draft.verdict || sent === 'saving' || sent === 'saved'} onClick={() => void save()}>{sent === 'saving' ? 'Saving…' : sent === 'saved' ? 'Thanks, saved' : 'Send'}</Button>
+        {sent === 'local' && <span className="muted" style={{ fontSize: 12.5 }}>Kept on this call. It could not be sent to the team’s server just now.</span>}
+      </div>
     </div>
   );
 }

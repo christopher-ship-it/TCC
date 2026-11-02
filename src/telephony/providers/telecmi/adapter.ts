@@ -1,7 +1,7 @@
-import type { Credentials, MediaStats, Meta, ProviderEvent, TelephonyProvider } from '../../core/types.ts';
+import type { CallDirection, Credentials, MediaStats, Meta, ProviderEvent, TelephonyProvider } from '../../core/types.ts';
 import { acquireMicrophone, isVirtualInput } from '../../core/microphone.ts';
 import type { RecordingQuery } from '../../core/types.ts';
-import { fetchOutgoingCdr, fetchUserToken, pickRecording } from './cdr.ts';
+import { describeMiss, fetchIncomingCdr, fetchOutgoingCdr, fetchUserToken, pickRecording } from './cdr.ts';
 
 /** Regional signalling hosts from TeleCMI's Browser SDK docs. */
 export const TELECMI_REGIONS = {
@@ -357,8 +357,10 @@ export class TeleCmiProvider implements TelephonyProvider {
   private micChecked = false;
   /** The agent's REST token (from the same login the SDK does) — lets us read their own call records, no App Secret. */
   private userToken: string | null = null;
-  private trace: { remote: string; startedAt: number; answeredAt: number | null } | null = null;
+  private trace: { remote: string; startedAt: number; answeredAt: number | null; direction: CallDirection } | null = null;
   private readonly claimedRecordings = new Set<string>();
+  /** Why the last findRecording() found nothing, in words (for the event log). */
+  lookupNote = '';
   /** Newest merged sample from the poll + the SDK's own sampler; re-emitted with 'ended'. */
   private lastStats: MediaStats | null = null;
   /** Who was loud when, one entry per stats sample after answer — see MediaStats.timeline. */
@@ -399,7 +401,7 @@ export class TeleCmiProvider implements TelephonyProvider {
   }
 
   dial(to: string, meta: Meta): void {
-    this.trace = { remote: to, startedAt: Date.now(), answeredAt: null };
+    this.trace = { remote: to, startedAt: Date.now(), answeredAt: null, direction: 'outbound' };
     // The SDK only accepts tags as one JSON *string* under `extra_param`.
     this.need().call(to, Object.keys(meta).length ? { extra_param: JSON.stringify(meta) } : undefined);
     this.startStatsPolling();
@@ -442,13 +444,27 @@ export class TeleCmiProvider implements TelephonyProvider {
     });
   }
 
-  /** The recording for a call already made: asks the agent's own call records (`out_cdr`) and matches on number + start time. */
+  /** The recording for a finished call: asks the agent's own call records (`out_cdr`, or `in_cdr` for a call they
+   *  took) and matches on the other party's number + start time. */
   async findRecording(q: RecordingQuery): Promise<string | undefined> {
-    if (!this.userToken) return undefined;
-    const entries = await fetchOutgoingCdr(this.userToken, q.startedAt - 5 * 60_000, q.startedAt + 10 * 60_000);
+    this.lookupNote = '';
+    if (!this.userToken) {
+      this.lookupNote = 'no TeleCMI REST token (softphone REST login failed or expired) — call records cannot be read';
+      return undefined;
+    }
+    const kind = q.direction === 'inbound' ? 'in_cdr' : 'out_cdr';
+    const fetchCdr = q.direction === 'inbound' ? fetchIncomingCdr : fetchOutgoingCdr;
+    let entries: Awaited<ReturnType<typeof fetchOutgoingCdr>>;
+    try {
+      entries = await fetchCdr(this.userToken, q.startedAt - 5 * 60_000, q.startedAt + 10 * 60_000);
+    } catch (e) {
+      this.lookupNote = `${kind} request failed: ${e instanceof Error ? e.message : String(e)}`;
+      throw e;
+    }
     const file = pickRecording(entries, q, this.claimedRecordings);
     if (file) this.claimedRecordings.add(file);
-    if (this.config.debug) console.debug('[phone] out_cdr', { returned: entries.length, picked: file ?? null });
+    else this.lookupNote = describeMiss(kind, entries, q, this.claimedRecordings);
+    if (this.config.debug) console.debug(`[phone] ${kind}`, { returned: entries.length, picked: file ?? null, note: this.lookupNote });
     return file;
   }
 
@@ -457,11 +473,11 @@ export class TeleCmiProvider implements TelephonyProvider {
     const trace = this.trace;
     this.trace = null;
     if (!trace || trace.answeredAt === null || !this.userToken) return;
-    const query: RecordingQuery = { remote: trace.remote, startedAt: trace.startedAt, talkSeconds: Math.round((Date.now() - trace.answeredAt) / 1000) };
+    const query: RecordingQuery = { remote: trace.remote, startedAt: trace.startedAt, talkSeconds: Math.round((Date.now() - trace.answeredAt) / 1000), direction: trace.direction };
     const delays = [3000, 5000, 8000, 12000, 20000]; // ≈ 48 s in total
     const attempt = async (i: number): Promise<void> => {
       const file = await this.findRecording(query).catch((e: unknown) => {
-        if (this.config.debug) console.debug('[phone] out_cdr failed', e);
+        if (this.config.debug) console.debug('[phone] call record lookup failed', e);
         return undefined;
       });
       if (file) this.emit({ type: 'recording', file });
@@ -603,7 +619,12 @@ export class TeleCmiProvider implements TelephonyProvider {
       if (this.trace && this.trace.answeredAt === null) this.trace.answeredAt = Date.now();
       return { type: 'answered' };
     });
-    on('inComingCall', (d) => ({ type: 'incoming', from: str(d.from) ?? 'unknown', callId: str(d.call_id), team: str(d.team_name), toNumber: str(d.to_number) }));
+    on('inComingCall', (d) => {
+      const from = str(d.from) ?? 'unknown';
+      // Traced like a dialled call, so its media timeline and recording lookup work the same way.
+      this.trace = { remote: from, startedAt: Date.now(), answeredAt: null, direction: 'inbound' };
+      return { type: 'incoming', from, callId: str(d.call_id), team: str(d.team_name), toNumber: str(d.to_number) };
+    });
     // `hangup` = we ended/cancelled it; `ended` = the far side did (or it failed, with a SIP-style code).
     // Both carry the newest stats sample so the saved call result records the call's final media state.
     on('hangup', (d) => {

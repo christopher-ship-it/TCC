@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { fetchOutgoingCdr, fetchUserToken, parseCdr, pickRecording } from '../providers/telecmi/cdr.ts';
+import { fetchIncomingCdr, fetchOutgoingCdr, fetchUserToken, parseCdr, pickRecording } from '../providers/telecmi/cdr.ts';
 
 const T0 = 1_789_896_093_389; // a real call start from the account's history
 const rec = (filename: string, time: number, to = '918270942966', duration = 30) => ({ cmiuid: 'u-' + filename, filename, record: true, to, time, duration });
@@ -45,6 +45,21 @@ test('login + out_cdr call the documented endpoints with the documented fields (
   assert.equal(list[0].filename, 'f.mp3');
   assert.deepEqual(seen[0], { url: 'https://rest.telecmi.com/v2/user/login', body: { id: '5002_1', password: 'pw' } });
   assert.deepEqual(seen[1], { url: 'https://rest.telecmi.com/v2/user/out_cdr', body: { type: 1, token: 'tok-1', from: T0 - 1, to: T0 + 1, page: 1, limit: 10 } });
+});
+
+test('an incoming call is matched on the caller and looked up in in_cdr', async () => {
+  const inbound = (filename: string, time: number, from: string) => ({ filename, record: true, from, to: '917943507825', time, duration: 30 });
+  const entries = parseCdr({ cdr: [inbound('theirs.mp3', T0 + 1_000, '919876543210'), inbound('someone-else.mp3', T0, '918888888888')] });
+  assert.equal(pickRecording(entries, { remote: '919876543210', startedAt: T0, direction: 'inbound' }), 'theirs.mp3');
+  assert.equal(pickRecording(entries, { remote: '919876543210', startedAt: T0 }), undefined, 'outbound matching looks at the dialled side');
+
+  const urls: string[] = [];
+  const fake = (async (url: string) => {
+    urls.push(url);
+    return new Response(JSON.stringify({ code: 200, cdr: [] }), { status: 200 });
+  }) as unknown as typeof fetch;
+  await fetchIncomingCdr('tok', 0, 1, fake);
+  assert.deepEqual(urls, ['https://rest.telecmi.com/v2/user/in_cdr']);
 });
 
 test('login failures and bad responses degrade quietly', async () => {

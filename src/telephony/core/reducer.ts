@@ -8,6 +8,7 @@ export type Action =
   | { type: 'setMuted'; muted: boolean }
   | { type: 'clearError' }
   | { type: 'clearResult' }
+  | { type: 'tag'; meta: Meta }
   | { type: 'event'; event: ProviderEvent; now: number };
 
 export function initialSnapshot(provider: string): CallSnapshot {
@@ -105,6 +106,7 @@ function reduceEvent(state: CallSnapshot, event: ProviderEvent, now: number): Ca
       return {
         ...state,
         error: null,
+        lastResult: null,
         call: {
           id: event.callId ?? `in-${now}`,
           providerCallId: event.callId ?? null,
@@ -183,6 +185,8 @@ export function reduce(state: CallSnapshot, action: Action): CallSnapshot {
       return state.error ? { ...state, error: null } : state;
     case 'clearResult':
       return state.lastResult ? { ...state, lastResult: null } : state;
+    case 'tag':
+      return state.call ? withCall(state, { meta: { ...state.call.meta, ...action.meta } }) : state;
     case 'event':
       return reduceEvent(state, action.event, action.now);
   }

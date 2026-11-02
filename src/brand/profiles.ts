@@ -10,7 +10,7 @@ export function brandKey(raw: string | null | undefined): BrandKey {
   return raw?.trim().toLowerCase() === 'vanmoh' ? 'vanmoh' : 'tecstellar';
 }
 
-type QueueId = 'new' | 'tickets' | 'payments' | 'followup' | 'errors' | 'inactive';
+type QueueId = 'new' | 'noanswer' | 'followup' | 'unreached' | 'tickets' | 'payments' | 'errors' | 'inactive';
 
 export interface BrandFields {
   app: string;

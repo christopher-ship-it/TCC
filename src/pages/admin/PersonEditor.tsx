@@ -3,8 +3,9 @@ import { Check, ShieldCheck, UserX, UserCheck, X } from 'lucide-react';
 import { useStore } from '../../store/StoreContext';
 import { APPS, STATE_DEFS } from '../../data/seed';
 import { BRAND, WHITE_LABEL } from '../../brand';
+import { AGENT_LANGUAGES, primaryLanguageOf } from '../../lib/languages';
 import { QUEUES, type AgentAccount, type AppId, type Capability, type Language, type QueueKey, type Role } from '../../data/types';
-import { ACCESS_TEMPLATES, ALL_LANGUAGES, CAPABILITIES, LANGUAGE_SCRIPT, ROLE_INFO, canManage, capsFor, describeScope, isActive } from '../../lib/access';
+import { ACCESS_TEMPLATES, CAPABILITIES, LANGUAGE_SCRIPT, ROLE_INFO, canManage, capsFor, describeScope, isActive } from '../../lib/access';
 import { reachableCount } from '../../lib/queue';
 import { originOf } from '../../lib/world';
 import { fmtDayTime } from '../../lib/dates';
@@ -25,6 +26,7 @@ interface Draft {
   capabilities: Partial<Record<AppId, Capability[]>>;
   queues: QueueKey[];
   languages: Language[];
+  primaryLanguage: Language | null;
   states: string[];
   dailyTarget: number;
   clickToDial: boolean;
@@ -37,11 +39,11 @@ const queueLabel = (q: QueueKey) => QUEUES.find((x) => x.key === q)?.label ?? q;
 function toDraft(a?: AgentAccount): Draft {
   if (!a) {
     const t = ACCESS_TEMPLATES[0];
-    return { name: '', username: '', email: '', phone: '', role: t.role, trainee: !!t.trainee, demo: false, apps: [APPS[0].id], capabilities: { [APPS[0].id]: t.caps }, queues: t.queues, languages: ['Tamil'], states: ['Tamil Nadu'], dailyTarget: t.dailyTarget, clickToDial: true, telecmiUserId: '' };
+    return { name: '', username: '', email: '', phone: '', role: t.role, trainee: !!t.trainee, demo: false, apps: [APPS[0].id], capabilities: { [APPS[0].id]: t.caps }, queues: t.queues, languages: ['Tamil'], primaryLanguage: 'Tamil', states: ['Tamil Nadu'], dailyTarget: t.dailyTarget, clickToDial: true, telecmiUserId: '' };
   }
   const caps: Partial<Record<AppId, Capability[]>> = {};
   for (const app of a.apps) caps[app] = capsFor(a, app);
-  return { name: a.name, username: a.username, email: a.email ?? '', phone: a.phone ?? '', role: a.role, trainee: !!a.trainee, demo: !!a.demo, apps: a.apps, capabilities: caps, queues: a.queues, languages: a.languages, states: a.states, dailyTarget: a.dailyTarget, clickToDial: a.clickToDial, telecmiUserId: a.telecmiUserId ?? '' };
+  return { name: a.name, username: a.username, email: a.email ?? '', phone: a.phone ?? '', role: a.role, trainee: !!a.trainee, demo: !!a.demo, apps: a.apps, capabilities: caps, queues: a.queues, languages: a.languages, primaryLanguage: primaryLanguageOf(a), states: a.states, dailyTarget: a.dailyTarget, clickToDial: a.clickToDial, telecmiUserId: a.telecmiUserId ?? '' };
 }
 
 const list = (xs: string[]) => (xs.length ? xs.join(', ') : 'none');
@@ -51,8 +53,8 @@ function diff(before: Draft, after: Draft): string[] {
   const out: string[] = [];
   if (before.name !== after.name) out.push(`Name: ${after.name}`);
   if (before.role !== after.role) out.push(`Role: ${ROLE_INFO[before.role].label} → ${ROLE_INFO[after.role].label}`);
-  if (before.trainee !== after.trainee) out.push(after.trainee ? 'Marked trainee' : 'No longer a trainee');
   if (before.demo !== after.demo) out.push(after.demo ? 'Made a demo account' : 'Made a real account');
+  if (before.trainee !== after.trainee) out.push(after.trainee ? 'Marked trainee' : 'No longer a trainee');
   const addApps = after.apps.filter((x) => !before.apps.includes(x));
   const delApps = before.apps.filter((x) => !after.apps.includes(x));
   if (addApps.length) out.push(`Added to ${list(addApps.map(appName))}`);
@@ -68,6 +70,7 @@ function diff(before: Draft, after: Draft): string[] {
   }
   if (before.queues.join() !== after.queues.join()) out.push(`Queues: ${list(after.queues.map(queueLabel))}`);
   if (before.languages.join() !== after.languages.join()) out.push(`Languages: ${list(after.languages)}`);
+  if (before.primaryLanguage !== after.primaryLanguage) out.push(`Primary language: ${after.primaryLanguage ?? 'none'}`);
   if (before.states.join() !== after.states.join()) out.push(`States: ${after.states.length > 3 ? `${after.states.length} states` : list(after.states)}`);
   if (before.dailyTarget !== after.dailyTarget) out.push(`Daily target: ${after.dailyTarget}`);
   if (before.telecmiUserId !== after.telecmiUserId) out.push(`Phone line: ${after.telecmiUserId || 'none'}`);
@@ -76,7 +79,10 @@ function diff(before: Draft, after: Draft): string[] {
 }
 
 export function PersonEditor({ person, onClose }: { person?: AgentAccount; onClose: () => void }) {
-  const { state, dispatch, currentAgent, createAgent, backend } = useStore();
+  const { state, dispatch, currentAgent, createAgent, backend, setPassword, requestPasswordChange, grantPasswordChange } = useStore();
+  const [password, setPw] = useState('');
+  const [newPw, setNewPw] = useState('');
+  const [pwBusy, setPwBusy] = useState(false);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const toast = useToast();
@@ -105,8 +111,19 @@ export function PersonEditor({ person, onClose }: { person?: AgentAccount; onClo
     username: !/^[a-z0-9._-]{3,}$/.test(d.username.trim()) ? 'Use 3+ lowercase letters, numbers, dots or dashes.' : usernameTaken ? 'Someone already has this username.' : null,
     apps: d.role !== 'admin' && d.apps.length === 0 ? 'Give them at least one app.' : null,
     email: creating && backend === 'firestore' && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(d.email.trim()) ? 'Enter their work email — they sign in with it.' : null,
+    password: creating && backend === 'server' && password.length < 6 ? 'Set a password of at least 6 characters. You give it to them.' : null,
   };
-  const valid = !errors.name && !errors.username && !errors.apps && !errors.email;
+  const valid = !errors.name && !errors.username && !errors.apps && !errors.email && !errors.password;
+
+  async function changePassword() {
+    if (!person || !setPassword || newPw.length < 6) return;
+    setPwBusy(true);
+    const r = await setPassword(person.id, newPw);
+    setPwBusy(false);
+    if (!r.ok) return setSaveError(r.message);
+    toast(`New password set for ${person.name}`);
+    setNewPw('');
+  }
   const activity = useMemo(() => (person ? state.audit.filter((e) => e.target === person.name || e.actorId === person.id).slice(0, 40) : []), [state.audit, person]);
 
   function applyTemplate(id: string) {
@@ -143,7 +160,7 @@ export function PersonEditor({ person, onClose }: { person?: AgentAccount; onClo
   function save() {
     setTried(true);
     if (!valid) {
-      setSection(errors.name || errors.username || errors.email ? 'who' : 'access');
+      setSection(errors.name || errors.username || errors.email || errors.password ? 'who' : 'access');
       return;
     }
     const patch: Partial<AgentAccount> = {
@@ -160,6 +177,7 @@ export function PersonEditor({ person, onClose }: { person?: AgentAccount; onClo
       capabilities: d.role === 'admin' ? undefined : d.capabilities,
       queues: d.role === 'admin' ? [] : d.queues,
       languages: d.languages,
+      primaryLanguage: primaryLanguageOf({ languages: d.languages, primaryLanguage: d.primaryLanguage ?? undefined }) ?? undefined,
       states: d.states,
       dailyTarget: d.dailyTarget,
       clickToDial: d.clickToDial,
@@ -185,6 +203,7 @@ export function PersonEditor({ person, onClose }: { person?: AgentAccount; onClo
           workingQueueLabel: '—',
         },
         actor.id,
+        backend === 'server' ? password : undefined,
       ).then((r) => {
         setSaving(false);
         if (!r.ok) {
@@ -192,7 +211,7 @@ export function PersonEditor({ person, onClose }: { person?: AgentAccount; onClo
           setSection('who');
           return;
         }
-        toast(backend === 'firestore' ? `${patch.name} was emailed a link to choose a password` : `${patch.name} can now sign in as ${patch.username}`);
+        toast(backend === 'firestore' ? `${patch.name} was emailed a link to choose a password` : backend === 'server' ? `${patch.name} can sign in now — username ${patch.username} and the password you set` : `${patch.name} can now sign in as ${patch.username}`);
         onClose();
       });
       return;
@@ -225,7 +244,7 @@ export function PersonEditor({ person, onClose }: { person?: AgentAccount; onClo
     <Sheet
       wide
       title={creating ? 'Add a person' : person!.name}
-      desc={creating ? (backend === 'firestore' ? 'They sign in with their work email and choose their own password.' : 'They sign in with the username you set here.') : `${person!.username} · ${ROLE_INFO[person!.role].label}${person!.createdTs ? ` · added ${fmtDayTime(person!.createdTs).split(' · ')[0]}` : ''}`}
+      desc={creating ? (backend === 'firestore' ? 'They sign in with their work email and choose their own password.' : backend === 'server' ? 'They sign in with the username and password you set here.' : 'They sign in with the username you set here.') : `${person!.username} · ${ROLE_INFO[person!.role].label}${person!.createdTs ? ` · added ${fmtDayTime(person!.createdTs).split(' · ')[0]}` : ''}`}
       leading={!creating ? <Avatar name={person!.name} size="lg" /> : undefined}
       onClose={onClose}
       footer={
@@ -264,10 +283,34 @@ export function PersonEditor({ person, onClose }: { person?: AgentAccount; onClo
                   <Input id="pe-user" value={d.username} invalid={tried && !!errors.username} onChange={(e) => { setUserTouched(true); set('username', e.target.value.toLowerCase()); }} placeholder="kavya.r" />
                 </Field>
                 {saveError && <Callout tone="danger">{saveError}</Callout>}
-                {(creating ? backend === 'firestore' : !!person?.email) && (
-                  <Field label="Work email" htmlFor="pe-email" error={tried && errors.email} hint={creating ? 'Their login. They get an email to choose a password.' : undefined}>
+                {(creating ? backend !== 'local' : !!person?.email) && (
+                  <Field label={backend === 'server' ? 'Email (optional)' : 'Work email'} htmlFor="pe-email" error={tried && errors.email} hint={creating ? (backend === 'server' ? 'They can sign in with this instead of the username.' : 'Their login. They get an email to choose a password.') : undefined}>
                     <Input id="pe-email" type="email" value={d.email} readOnly={!creating} invalid={tried && !!errors.email} onChange={(e) => set('email', e.target.value)} placeholder={BRAND.emailPlaceholder} />
                   </Field>
+                )}
+                {creating && backend === 'server' && (
+                  <Field label="Password" htmlFor="pe-pw" error={tried && errors.password} hint="At least 6 characters. Give it to them with their username.">
+                    <Input id="pe-pw" type="text" value={password} invalid={tried && !!errors.password} onChange={(e) => setPw(e.target.value)} autoComplete="off" />
+                  </Field>
+                )}
+                {!creating && backend === 'server' && editable && actor.superAdmin && (
+                  <Field label="Set a new password" htmlFor="pe-newpw" hint="They’re signed out everywhere and use the new one.">
+                    <div className="row" style={{ gap: 8, flexWrap: 'nowrap' }}>
+                      <Input id="pe-newpw" type="text" value={newPw} onChange={(e) => setNewPw(e.target.value)} autoComplete="off" placeholder="At least 6 characters" />
+                      <Button onClick={() => void changePassword()} disabled={pwBusy || newPw.length < 6}>{pwBusy ? 'Saving…' : 'Set'}</Button>
+                    </div>
+                  </Field>
+                )}
+                {!creating && backend === 'server' && editable && !self && (actor.superAdmin ? grantPasswordChange : requestPasswordChange) && (
+                  actor.superAdmin ? (
+                    <Field label="Or let them choose it" htmlFor="pe-ask" hint="A card appears in their inbox; they choose the new password.">
+                      <Button id="pe-ask" onClick={() => void grantPasswordChange!(person!.id).then((r) => (r.ok ? toast(`${person!.name} will see the card in their inbox`) : setSaveError(r.message)))}>Send them a card</Button>
+                    </Field>
+                  ) : (
+                    <Field label="Password" htmlFor="pe-ask" hint="Only the super admin changes passwords. Send them a request.">
+                      <Button id="pe-ask" onClick={() => void requestPasswordChange!(person!.id).then((r) => (r.ok ? toast('Request sent to the super admin') : setSaveError(r.message)))}>Request a password change</Button>
+                    </Field>
+                  )
                 )}
                 <Field label="Mobile (optional)" htmlFor="pe-phone">
                   <Input id="pe-phone" value={d.phone} onChange={(e) => set('phone', e.target.value)} inputMode="tel" placeholder="+91 98450 12345" />
@@ -353,7 +396,7 @@ export function PersonEditor({ person, onClose }: { person?: AgentAccount; onClo
                       </tbody>
                     </table>
                   </div>
-                  {!WHITE_LABEL && <span className="muted" style={{ fontSize: 13 }}>Influnet and Vehigo appear here when they go live.</span>}
+                  {!WHITE_LABEL && APPS.some((a) => !a.live) && <span className="muted" style={{ fontSize: 13 }}>Influnet and Vehigo appear here when they go live.</span>}
                 </div>
                 <div className="stack" style={{ gap: 8 }}>
                   <span className="section-label">Queues they work</span>
@@ -370,14 +413,22 @@ export function PersonEditor({ person, onClose }: { person?: AgentAccount; onClo
               <div className="stack" style={{ gap: 8 }}>
                 <span className="section-label">Languages they speak</span>
                 <div className="lang-grid">
-                  {ALL_LANGUAGES.map((l) => (
+                  {AGENT_LANGUAGES.map((l) => (
                     <button key={l} type="button" className="lang-card" aria-pressed={d.languages.includes(l)} onClick={() => set('languages', toggleIn(d.languages, l))}>
                       <b>{LANGUAGE_SCRIPT[l]}</b>
                       <span>{l}</span>
                     </button>
                   ))}
                 </div>
-                <span className="muted" style={{ fontSize: 13 }}>Customers are matched by language first. Customers with no state on file count as Tamil Nadu.</span>
+                <span className="muted" style={{ fontSize: 13 }}>Customers are matched by language first. Customers with no state on file count as Tamil Nadu. English is a second language only: customers are never called in it.</span>
+                <span className="section-label" style={{ marginTop: 8 }}>Primary language</span>
+                <div className="row">
+                  {d.languages.filter((l) => l !== 'English').map((l) => (
+                    <Chip key={l} pressed={primaryLanguageOf({ languages: d.languages, primaryLanguage: d.primaryLanguage ?? undefined }) === l} onClick={() => set('primaryLanguage', l)}>{l}</Chip>
+                  ))}
+                  {!d.languages.some((l) => l !== 'English') && <span className="muted" style={{ fontSize: 13 }}>Pick a language above first.</span>}
+                </div>
+                <span className="muted" style={{ fontSize: 13 }}>Customers who speak this language are given to this person first; others share the rest.</span>
               </div>
               <div className="stack" style={{ gap: 8 }}>
                 <div className="row" style={{ justifyContent: 'space-between' }}>

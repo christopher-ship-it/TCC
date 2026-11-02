@@ -15,7 +15,7 @@
 .card__body .list-link { padding-left: 0; padding-right: 0; }
 
 /* ---------------------------------------------------------------- workspace */
-.ws { display: flex; flex-direction: column; min-height: calc(100vh - var(--header-h) - 3px); }
+.ws { display: flex; flex-direction: column; gap: 14px; padding: 20px 24px 24px; max-width: 1400px; margin: 0 auto; width: 100%; min-height: calc(100vh - var(--header-h)); }
 .ws-strip { display: flex; align-items: center; gap: 18px; flex-wrap: wrap; padding: 10px 24px; background: var(--surface); border-bottom: 1px solid var(--line); }
 .ws-strip--live { box-shadow: inset 0 3px 0 var(--ok); }
 .ws-strip--wrap { box-shadow: inset 0 3px 0 var(--warn); background: var(--warn-soft); }
@@ -55,3 +55,18 @@
   .ws-body > .ws-col--phone { grid-column: auto; grid-row: auto; }
   .ws-strip, .ws-queues { padding-left: 16px; padding-right: 16px; }
 }
+
+/* ---------------------------------------------------------------- call queue (Cloudflare-style) */
+.ws-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
+.ws-head h1 { font-size: 24px; }
+.ws-head p { margin-top: 2px; }
+.ws-head__actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.ws-select { height: 44px; padding: 0 12px; border-radius: var(--r-sm); border: 1px solid var(--line-strong); background: var(--surface); font-size: 14px; }
+.ws-dial { display: flex; align-items: center; gap: 6px; position: relative; }
+.ws-dial input { width: 170px; height: 44px; }
+.ws-dial button { height: 44px; }
+.ws-dial__error { position: absolute; top: 100%; left: 0; margin-top: 4px; font-size: 12.5px; color: var(--danger); white-space: nowrap; }
+.ws-body { display: grid; grid-template-columns: minmax(0, 1fr) 380px; gap: 16px; align-items: start; padding: 0; }
+.ws-list { overflow: hidden; }
+.ws-side { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+@media (max-width: 1000px) { .ws-body { grid-template-columns: minmax(0, 1fr); } .ws { padding: 14px 16px 20px; } }

@@ -128,6 +128,28 @@ test('inbound: incoming → answer → connected; decline → rejected', () => {
   assert.equal(b.controller.getSnapshot().lastResult?.disposition, 'rejected');
 });
 
+test('inbound: the caller number is normalised, tags ride into the result, a caller hang-up is a missed call', () => {
+  const { provider, controller } = setup();
+  provider.simulateIncoming('09876543210');
+  assert.equal(controller.getSnapshot().call?.remote, '919876543210');
+  controller.tag({ customerId: 'c-1', direction: 'inbound' });
+  assert.deepEqual(controller.getSnapshot().call?.meta, { customerId: 'c-1', direction: 'inbound' });
+  provider.simulateRemoteHangup();
+  const r = controller.getSnapshot().lastResult;
+  assert.equal(r?.direction, 'inbound');
+  assert.equal(r?.disposition, 'no-answer');
+  assert.equal(r?.meta.customerId, 'c-1');
+
+  // A withheld / non-numeric caller is kept as sent; tagging with no call live is a no-op.
+  provider.simulateIncoming('unknown');
+  assert.equal(controller.getSnapshot().call?.remote, 'unknown');
+  assert.equal(controller.getSnapshot().lastResult, null, 'a new inbound call clears the previous result');
+  controller.hangup();
+  const before = controller.getSnapshot();
+  controller.tag({ customerId: 'x' });
+  assert.equal(controller.getSnapshot(), before);
+});
+
 test('a second inbound call while busy is ignored', () => {
   const { provider, controller } = setup();
   controller.dial('9876543210');

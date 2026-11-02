@@ -5,6 +5,7 @@ import { NEGATIVE_OUTCOMES, POSITIVE_OUTCOMES } from '../data/types';
 import { sentimentBand } from './analysis/model';
 import { talkShare } from './analysis/speakers';
 import { fmtDay } from './dates';
+import { isConnected } from './followUps';
 
 export interface CallRow {
   user: CustomerUser;
@@ -13,15 +14,14 @@ export interface CallRow {
 
 export const DAY = 86400000;
 
-export function isConnected(c: CallLogEntry): boolean {
-  return c.status.startsWith('Answered') || (c.telephony?.durationSec ?? 0) > 0;
-}
+export { isConnected };
 
 /** Every logged call, newest first, optionally limited to some apps / agents / a time window. */
 export function allCalls(users: CustomerUser[], opts: { apps?: AppId[]; agentName?: string; since?: number } = {}): CallRow[] {
   const out: CallRow[] = [];
   for (const user of users) {
     if (opts.apps && !opts.apps.includes(user.app)) continue;
+    if (user.deleted) continue;
     for (const call of user.callHistory) {
       if (opts.agentName && call.agentName !== opts.agentName) continue;
       if (opts.since && call.atTs < opts.since) continue;

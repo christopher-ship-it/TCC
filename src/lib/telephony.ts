@@ -16,6 +16,13 @@ export const telephonyProvider: TelephonyProviderContract | null =
       ? new MockProvider({ stats: { packetsSent: 50, packetsReceived: 50, bytesSent: 4000, bytesReceived: 4000, roundTripSec: 0.04, jitterSec: 0.005, codec: 'audio/opus', network: 'wifi' } })
       : null;
 
+// Demo line only: ring the agent from the browser console — `tccSimulateIncoming('9876543210')`, then
+// `tccSimulateHangup()` to have the caller give up (a missed call).
+if (telephonyProvider instanceof MockProvider && typeof window !== 'undefined') {
+  const mock = telephonyProvider;
+  Object.assign(window, { tccSimulateIncoming: (from: string) => mock.simulateIncoming(from), tccSimulateHangup: () => mock.simulateRemoteHangup() });
+}
+
 // TCC's customer phone numbers are still generated sample data (see README), so a real provider would ring strangers.
 // Until real customer data is wired in, live dialling needs an explicit choice:
 //   VITE_TELEPHONY_TEST_NUMBER=<your number>  → every call is redirected to that number, whoever the customer is
@@ -23,21 +30,24 @@ export const telephonyProvider: TelephonyProviderContract | null =
 export const TEST_NUMBER = (import.meta.env.VITE_TELEPHONY_TEST_NUMBER as string | undefined)?.trim() || null;
 export const LIVE_DIAL_BLOCKED = mode === 'telecmi' && !TEST_NUMBER && import.meta.env.VITE_TELEPHONY_LIVE !== 'true';
 
-/** The number to actually dial for a customer (the test number, when one is set). A number the agent typed in is always dialled as typed. */
+/** A number a person typed in (dialled directly, or a customer added by hand) is real: it is always dialled as typed. */
+export const isRealNumber = (user: CustomerUser): boolean => !!(user.adHoc || user.manual);
+
+/** The number to actually dial for a customer (the test number, when one is set, for sample customers only). A demo agent always gets the test number. */
 export function dialNumberFor(user: CustomerUser, agent: Pick<AgentAccount, 'demo'>): string {
-  return TEST_NUMBER && (agent.demo || !user.adHoc) ? TEST_NUMBER : user.phone;
+  return TEST_NUMBER && (agent.demo || !isRealNumber(user)) ? TEST_NUMBER : user.phone;
 }
 
 /** A demo agent never rings a customer: their calls go to the test number, or are blocked when none is set. */
 export function dialBlocked(user: CustomerUser, agent: Pick<AgentAccount, 'demo'>): boolean {
-  return agent.demo ? mode === 'telecmi' && !TEST_NUMBER : LIVE_DIAL_BLOCKED && !user.adHoc;
+  return agent.demo ? mode === 'telecmi' && !TEST_NUMBER : LIVE_DIAL_BLOCKED && !isRealNumber(user);
 }
 
 export const DEFAULT_COUNTRY_CODE = (import.meta.env.VITE_TELEPHONY_COUNTRY_CODE as string | undefined) || '91';
 
 /** Tags attached to every call; TeleCMI echoes them back in its webhooks so a call can be tied to a customer and agent. */
 export function callMeta(user: CustomerUser, agent: AgentAccount): Meta {
-  return { app: user.app, customerId: user.id, agentId: agent.id, queue: user.queue ?? '', ...(TEST_NUMBER && (agent.demo || !user.adHoc) ? { testRedirect: 'true' } : {}), ...(agent.demo ? { demo: 'true' } : {}) };
+  return { app: user.app, customerId: user.id, agentId: agent.id, queue: user.queue ?? '', ...(TEST_NUMBER && (agent.demo || !isRealNumber(user)) ? { testRedirect: 'true' } : {}), ...(agent.demo ? { demo: 'true' } : {}) };
 }
 
 /** What the softphone already knows about "did the call connect?". Provides an intelligent default status
@@ -87,6 +97,7 @@ export function toCallTelephony(r: CallResult): CallTelephony {
     durationSec: r.talkSeconds,
     ringSec: r.ringSeconds,
     disposition: r.disposition,
+    ...(r.direction === 'inbound' ? { direction: 'inbound' as const } : {}),
     startedAt: r.startedAt,
     remote: r.remote,
     recordingFile,

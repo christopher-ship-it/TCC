@@ -14,6 +14,14 @@ export interface CallSessionValue {
   dial: (user: CustomerUser) => DialOutcome;
   /** Called once the ended call has been logged. */
   clearWrapUp: () => void;
+  /** The call was completed in the call card; the agent moves on to the next customer. */
+  completeWrapUp: () => void;
+  /** The recording for the call waiting to be completed was found. */
+  attachRecording: (file: string) => void;
+  /** Look for a logged call's recording now (what TeleCMI announced, then the softphone's call records). */
+  checkRecording: (entryId: string) => Promise<{ found: boolean; message: string }>;
+  /** Why the connected line is not marked available for incoming calls, when it isn't. */
+  presenceError: string | null;
 }
 
 export const CallSessionContext = createContext<CallSessionValue>({
@@ -22,6 +30,10 @@ export const CallSessionContext = createContext<CallSessionValue>({
   wrapUp: null,
   dial: () => ({ ok: false, message: 'Calling is not set up in this build.' }),
   clearWrapUp: () => undefined,
+  completeWrapUp: () => undefined,
+  attachRecording: () => undefined,
+  checkRecording: async () => ({ found: false, message: 'Calling is not set up in this build.' }),
+  presenceError: null,
 });
 
 export function useCallSession() {

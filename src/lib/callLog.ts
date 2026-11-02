@@ -1,5 +1,5 @@
 import { sampleAnalysis } from '../data/seed';
-import type { CallAnalysis, CallLogEntry, CallStatus, CallTelephony, CustomerUser, Outcome } from '../data/types';
+import type { CallAnalysis, CallLogEntry, CallStatus, CallTelephony, CustomerUser, Lead, Outcome, Priority, Rating } from '../data/types';
 import { fmtDayTime } from './dates';
 import { SIMULATE_CALL_DATA, recordingUrlFor } from './telephony';
 
@@ -7,6 +7,12 @@ export interface LogCallInput {
   status: CallStatus;
   outcome?: Outcome;
   comment: string;
+  source?: string;
+  followUpTs?: number;
+  lead?: Lead;
+  rating?: Rating;
+  priority?: Priority;
+  analysisFeedback?: CallLogEntry['analysisFeedback'];
   telephony?: CallTelephony;
   analysis?: CallAnalysis;
 }
@@ -41,6 +47,12 @@ export function buildCallLogEntry(now: number, agentName: string, user: Customer
     status: input.status,
     outcome: input.outcome,
     comment: input.comment,
+    ...(input.source ? { source: input.source } : {}),
+    ...(input.followUpTs !== undefined ? { followUpTs: input.followUpTs } : {}),
+    ...(input.lead ? { lead: input.lead } : {}),
+    ...(input.rating ? { rating: input.rating } : {}),
+    ...(input.priority ? { priority: input.priority } : {}),
+    ...(input.analysisFeedback ? { analysisFeedback: input.analysisFeedback } : {}),
     telephony,
     analysis,
   };

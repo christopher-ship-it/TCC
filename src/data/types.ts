@@ -1,11 +1,11 @@
-import type { MediaStats } from '../telephony';
-import type { CallAnalysis } from '../lib/analysis/model';
-import type { LevelSample } from '../lib/analysis/speakers';
-import { BRAND } from '../brand';
+import type { MediaStats } from '../telephony/core/types.ts';
+import type { CallAnalysis } from '../lib/analysis/model.ts';
+import type { LevelSample } from '../lib/analysis/speakers.ts';
+import { BRAND } from '../brand/index.ts';
 
 export type { CallAnalysis, LevelSample };
 
-export type QueueKey = 'new' | 'tickets' | 'payments' | 'followup' | 'errors' | 'inactive';
+export type QueueKey = 'new' | 'noanswer' | 'followup' | 'unreached' | 'tickets' | 'payments' | 'errors' | 'inactive';
 
 /** One-line diagnosis of which audio direction failed, from the last WebRTC stats sample. */
 export function telephonyQualitySummary(q: MediaStats | undefined | null): string | null {
@@ -32,12 +32,14 @@ export interface QueueDef {
 }
 
 export const QUEUES: QueueDef[] = ([
-  { key: 'new', order: 1, label: 'New registrations', short: 'New' },
-  { key: 'tickets', order: 2, label: 'Tickets & flags', short: 'Tickets' },
-  { key: 'payments', order: 3, label: 'Payments & dues', short: 'Payments' },
-  { key: 'followup', order: 4, label: 'Positive follow-up', short: 'Follow-up' },
-  { key: 'errors', order: 5, label: 'Errors & drop-offs', short: 'Errors' },
-  { key: 'inactive', order: 6, label: 'Inactive 30+ days', short: 'Inactive' },
+  { key: 'new', order: 1, label: 'New installs', short: 'New' },
+  { key: 'noanswer', order: 2, label: 'No answer & not reachable', short: 'No answer' },
+  { key: 'followup', order: 3, label: 'Positive follow-up', short: 'Follow-up' },
+  { key: 'unreached', order: 4, label: 'Not reached in 14 days', short: 'Unreached' },
+  { key: 'tickets', order: 5, label: 'Tickets & flags', short: 'Tickets' },
+  { key: 'payments', order: 6, label: 'Payments & dues', short: 'Payments' },
+  { key: 'errors', order: 7, label: 'Errors & drop-offs', short: 'Errors' },
+  { key: 'inactive', order: 8, label: 'Inactive 30+ days', short: 'Inactive' },
 ] as QueueDef[]).map((q) => ({ ...q, ...BRAND.queueLabels[q.key] }));
 
 /** Tecstellar's apps, plus each white-label client's own line of business (src/brand). */
@@ -51,7 +53,7 @@ export interface AppDef {
   live: boolean;
 }
 
-export type Language = 'Tamil' | 'Telugu' | 'Kannada' | 'Malayalam' | 'Hindi' | 'Bengali' | 'English';
+export type Language = 'Tamil' | 'Malayalam' | 'Telugu' | 'Kannada' | 'Hindi' | 'Others' | 'English';
 
 export interface StateDef {
   name: string;
@@ -78,11 +80,15 @@ export interface AgentAccount {
   apps: AppId[];
   queues: QueueKey[];
   languages: Language[];
+  /** The language this person is asked for first when customers are handed out. One of `languages`, never English. */
+  primaryLanguage?: Language;
   states: string[];
   dailyTarget: number;
   clickToDial: boolean;
   /** Softphone login (TeleCMI user id, e.g. "101_33338836"). The password is never stored — the agent types it per session. */
   telecmiUserId?: string;
+  /** Tecstellar's own account on a client deployment: sees and repairs everything; client admins never see it. */
+  superAdmin?: boolean;
   /** Suspended people cannot sign in. Missing on older records = active. */
   status?: AccountStatus;
   /**
@@ -119,6 +125,21 @@ export type Outcome =
 export const NEGATIVE_OUTCOMES: Outcome[] = ['Not interested', 'Using competitor'];
 export const POSITIVE_OUTCOMES: Outcome[] = ['Interested', 'Very interested', 'Ready to subscribe', 'Created first listing'];
 
+/** The agent's own read of a call, set by hand: separate from "What did they say?" and from the call analysis. Used to
+ * find the customers worth calling again. It does not move anyone between queues. */
+export type Lead = 'positive' | 'negative';
+
+/** How positive a positive call was. Decides how soon the customer is called again (RATING_DAYS in src/lib/followUps.ts). */
+export type Rating = 'Good' | 'Average' | 'Okay';
+export const RATINGS: Rating[] = ['Good', 'Average', 'Okay'];
+
+/** How urgently a follow-up should be called. Set by hand; High shows first and in colour. */
+export type Priority = 'High' | 'Medium' | 'Low';
+export const PRIORITIES: Priority[] = ['High', 'Medium', 'Low'];
+
+/** How a customer says they came to know about the app (asked on answered calls). */
+export const LEAD_SOURCES = ['Instagram', 'Facebook', 'Telecalling', 'Google/YouTube', 'Referral', 'Other'] as const;
+
 export const CALL_STATUS_LIST: { status: CallStatus; key: string }[] = [
   { status: 'Answered — DG', key: '1' },
   { status: 'Answered — DNG', key: '2' },
@@ -145,6 +166,8 @@ export interface CallTelephony {
   durationSec: number;
   ringSec: number;
   disposition: string;
+  /** 'inbound' for a call the agent took; absent (outbound) on calls the agent placed and on older entries. */
+  direction?: 'inbound' | 'outbound';
   /** When the call started (epoch ms) and the number dialled — what a recording lookup is matched on. */
   startedAt?: number;
   remote?: string;
@@ -167,6 +190,18 @@ export interface CallLogEntry {
   outcome?: Outcome;
   comment: string;
   auto?: boolean;
+  /** Answered calls: how they came to know about the app (LEAD_SOURCES). */
+  source?: string;
+  /** The day the agent (or the automatic chain) said to call them again, start of day. */
+  followUpTs?: number;
+  /** Positive or negative, as the agent marked it after this call (Lead). */
+  lead?: Lead;
+  /** What the agent said about the AI's reading of this call (src/lib/aiFeedback.ts). */
+  analysisFeedback?: { verdict: 'good' | 'partly' | 'wrong'; outcome?: string; sentiment?: 'positive' | 'neutral' | 'negative'; note?: string; ts: number };
+  /** How positive, for a call marked positive. */
+  rating?: Rating;
+  /** The priority the agent gave the follow-up after this call. */
+  priority?: Priority;
   telephony?: CallTelephony;
   /** Post-call analysis: transcript, summary, sentiment, objections, next step (src/lib/analysis). */
   analysis?: CallAnalysis;
@@ -187,7 +222,8 @@ export type AuditAction =
   | 'queues_distributed'
   | 'payment_marked_paid'
   | 'data_exported'
-  | 'customers_imported';
+  | 'customers_imported'
+  | 'customer_deleted';
 
 /** One line of the change log: who did what to whom. Everything an admin needs to answer "who changed this?". */
 export interface AuditEntry {
@@ -219,6 +255,8 @@ export interface PaymentDue {
 export interface FollowUpChain {
   weekNumber: number;
   nextDueLabel: string;
+  /** Start of the day of the next weekly call. Missing on chains made before 2026-10-21. */
+  nextDueTs?: number;
   markedPositiveLabel: string;
   state: 'due-today' | 'pending' | 'overdue';
   overdueDays?: number;
@@ -267,6 +305,8 @@ export interface CustomerUser {
   city: string;
   state: string | null;
   effectiveState: string;
+  /** The state exactly as the product sent it, even one TCC has no agents for (src/lib/geo.ts draws it on the map). */
+  stateName?: string;
   language: Language;
   registeredAtLabel: string;
   registeredDaysAgo: number;
@@ -288,9 +328,65 @@ export interface CustomerUser {
   active: boolean;
   hasActiveEscalation?: boolean;
   ownerAgentId: string | null;
+  /** When the server handed this customer to `ownerAgentId` (src/lib/assignment.ts). Unset on a customer someone was given by hand. */
+  assignedAt?: number;
+  /** Set when a person (not the server) gave the customer to `ownerAgentId`. The server only accepts an owner change that carries a new value here. */
+  handOwnedAt?: number;
   mrr?: number;
+  /** Who they are, from the product's own list (src/data/products.ts). Unset until imported or an agent picks it. */
+  customerType?: string;
   /** Made on the spot by dialling a number that isn't a customer yet (Workspace › Dial a number). */
   adHoc?: boolean;
+  /** Added by hand by an agent (Add customer). Stays in the owner's queue only, whatever their languages and states. */
+  manual?: boolean;
+  /** Free-text note from whoever added the customer. */
+  note?: string;
+  /** Set when someone removed the customer (a test record, a duplicate). Kept, hidden from every list, and shown on the page with who and why. `null` = brought back. */
+  /** How they came to know about the app, from the last answered call that asked. */
+  source?: string;
+  /** Positive or negative, from the last call an agent marked (or changed on the customer page). `null` = cleared. */
+  lead?: Lead | null;
+  /** How positive the customer was on the last positive call. Decides the follow-up date; `null` = cleared. */
+  rating?: Rating | null;
+  /** How urgently to call them back, set by hand. Shown in colour on the follow-up lists; cleared when the chain ends. */
+  priority?: Priority | null;
+  /** The next call to make: a day the agent chose, or the next of the automatic daily calls. Overrides the queue until then. */
+  callback?: { dueTs: number; auto: boolean };
+  /** First call unanswered: TCC calls again every day for 14 days (src/lib/followUps.ts). Gone once they answer or the days run out. */
+  autoFollowUp?: { startedTs: number; attempts: number };
+  deleted?: { byId: string; byName: string; reason: string; ts: number; atLabel: string } | null;
+  /** Set when the customer comes from the product's own database (src/lib/appSync.ts): what TCC last took from it. */
+  sync?: SourceLink;
+  /** Details an agent typed in because the product had none (name, shop, city). Kept until the product sends its own. */
+  filledIn?: { fields: DetailField[]; byName: string; ts: number };
+}
+
+/** The customer details an agent may fill in when the product's database has them empty. */
+export type DetailField = 'name' | 'business' | 'city';
+
+/** A customer as the product's own database last described them (the TCC Data API, docs/client-api-guide). */
+export interface SourceLink {
+  /** The product's own customer id. */
+  sourceId: string;
+  /** When TCC last changed this customer from the product's data (epoch ms). */
+  syncedAt: number;
+  accountStatus: 'active' | 'blocked' | 'deleted';
+  /** Furthest setup step reached: machine name and the product's label for it. */
+  stage: string | null;
+  stageLabel: string | null;
+  onboardingCompleted: boolean | null;
+  lastError: { code: string; message: string; at: string } | null;
+  registeredTs: number | null;
+  lastActiveTs: number | null;
+  platform: string | null;
+  email: string | null;
+  planName: string | null;
+  renewsTs: number | null;
+  /** Details the product's database had empty at the last sync, so an agent may fill them in. Unset on older syncs. */
+  missing?: DetailField[];
+  /** The plan as last taken from the product. TCC's own plan fields follow it only when this changes, so an agent's
+   * "mark paid" is not undone by the next sync. */
+  plan: { plan: 'Free' | 'Paid'; paying: boolean; planNote?: string };
 }
 
 // The subset of CustomerUser that TCC itself owns and writes live to
@@ -298,7 +394,7 @@ export interface CustomerUser {
 // data — generated for now, destined to come from the existing app database.
 export type CustomerOverlay = Pick<
   CustomerUser,
-  'queue' | 'attempt' | 'callHistory' | 'tickets' | 'paymentDue' | 'followUp' | 'paying' | 'plan' | 'planNote' | 'mrr' | 'stageTag' | 'ownerAgentId' | 'hasActiveEscalation' | 'language'
+  'queue' | 'attempt' | 'callHistory' | 'tickets' | 'paymentDue' | 'followUp' | 'paying' | 'plan' | 'planNote' | 'mrr' | 'stageTag' | 'ownerAgentId' | 'hasActiveEscalation' | 'language' | 'customerType' | 'source' | 'lead' | 'rating' | 'priority' | 'callback' | 'autoFollowUp'
 >;
 
 export function overlayFromUser(u: CustomerUser): CustomerOverlay {
@@ -317,5 +413,12 @@ export function overlayFromUser(u: CustomerUser): CustomerOverlay {
     ownerAgentId: u.ownerAgentId,
     hasActiveEscalation: u.hasActiveEscalation,
     language: u.language,
+    customerType: u.customerType,
+    source: u.source,
+    lead: u.lead,
+    rating: u.rating,
+    priority: u.priority,
+    callback: u.callback,
+    autoFollowUp: u.autoFollowUp,
   };
 }

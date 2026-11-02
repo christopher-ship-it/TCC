@@ -156,12 +156,18 @@ export class PhoneController {
     }
   }
 
+  /** Why the last findRecording() came back empty, when the provider can say. */
+  lastLookupNote = '';
+
   /** Ask the provider for the recording of a finished call. Resolves to a file name, or undefined when unknown / unsupported. */
   async findRecording(query: RecordingQuery): Promise<string | undefined> {
+    this.lastLookupNote = '';
     try {
       return await this.provider.findRecording?.(query);
     } catch {
       return undefined;
+    } finally {
+      this.lastLookupNote = (this.provider as { lookupNote?: string }).lookupNote ?? '';
     }
   }
 
@@ -192,12 +198,19 @@ export class PhoneController {
     this.dispatch({ type: 'clearResult' });
   }
 
+  /** Add tags to the call in progress — e.g. the customer an inbound caller turned out to be. They ride into its CallResult. */
+  tag(meta: Meta): void {
+    this.dispatch({ type: 'tag', meta });
+  }
+
   private onProviderEvent(event: ProviderEvent): void {
     // Providers only sometimes know the call id at event time; ask for it while a call is live.
     if ((event.type === 'trying' || event.type === 'ringing' || event.type === 'answered') && !event.callId) {
       const callId = this.provider.getCallId();
       if (callId) event = { ...event, callId };
     }
+    // Callers arrive in whatever form the carrier sends (+91…, 0…, bare digits); store them like dialled numbers.
+    if (event.type === 'incoming') event = { ...event, from: normalizePhone(event.from, { defaultCountryCode: this.countryCode }) ?? event.from };
     if (event.type === 'recording') {
       const duringCall = this.state.call !== null;
       for (const l of [...this.recordingListeners]) {

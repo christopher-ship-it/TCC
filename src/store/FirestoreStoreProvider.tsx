@@ -22,11 +22,11 @@ import type { AgentAccount, AuditAction, AuditEntry, CustomerOverlay, CustomerUs
 import { NEGATIVE_OUTCOMES } from '../data/types';
 import { fmtDay, fmtDayTime } from '../lib/dates';
 import { isReachable } from '../lib/queue';
-import { isRealOrigin, originOf, scopeFor } from '../lib/world';
+import { isRealOrigin, originOf } from '../lib/world';
 import { attachRecording, withAnalysis } from '../lib/attachRecording';
 import { buildCallLogEntry } from '../lib/callLog';
 import { recordingUrlFor } from '../lib/telephony';
-import { auditEntry, StoreContext, type AccountResult, type Action, type State } from './context';
+import { auditEntry, BaseStoreContext, type AccountResult, type Action, type State } from './context';
 
 const DAY_MS = 86400000;
 
@@ -219,9 +219,11 @@ export function FirestoreStoreProvider({ children }: { children: React.ReactNode
         const now = Date.now();
         const entry = buildCallLogEntry(now, agent?.name ?? 'You', user, action);
         const callHistory = [entry, ...user.callHistory];
+        if (action.lead) writeOverlay(user.id, { lead: action.lead });
 
         if (!action.outcome) {
-          writeOverlay(user.id, { callHistory, attempt: user.attempt + 1 });
+          // A call they made to us is not one of our attempts at reaching them.
+          writeOverlay(user.id, action.telephony?.direction === 'inbound' ? { callHistory } : { callHistory, attempt: user.attempt + 1 });
           return;
         }
         if (NEGATIVE_OUTCOMES.includes(action.outcome)) {
@@ -339,6 +341,12 @@ export function FirestoreStoreProvider({ children }: { children: React.ReactNode
         writeAudit(action.actorId, 'owner_reassigned', user?.name, `Now owned by ${owner?.name ?? 'nobody'}`);
         return;
       }
+      case 'SET_CUSTOMER_TYPE':
+        writeOverlay(action.userId, { customerType: action.customerType });
+        return;
+      case 'SET_LEAD':
+        writeOverlay(action.userId, { lead: action.lead });
+        return;
       case 'MARK_PAID': {
         const user = usersRef.current.find((u) => u.id === action.userId);
         if (!user) return;
@@ -349,6 +357,9 @@ export function FirestoreStoreProvider({ children }: { children: React.ReactNode
       }
       case 'LOG_EXPORT':
         writeAudit(action.actorId, 'data_exported', undefined, action.detail);
+        return;
+      case 'UPDATE_CUSTOMER':
+        await setDoc(customerMasterDoc(action.userId), stripUndefined(action.patch), { merge: true });
         return;
       case 'ADD_CUSTOMER': {
         const { id, ...rest } = action.customer;
@@ -463,9 +474,11 @@ export function FirestoreStoreProvider({ children }: { children: React.ReactNode
   const ready = authUser === null || (authUser !== undefined && currentAgentId !== undefined && (currentAgentId === null || agents !== null));
 
   const state: State = {
-    ...scopeFor(currentAgent, { agents: agents ?? [], users, escalations, clearedEscalations, audit }),
-    allAgents: agents ?? [],
-    allUsers: users,
+    agents: agents ?? [],
+    users,
+    escalations,
+    clearedEscalations,
+    audit,
     apps: sampleSeed.apps,
     states: sampleSeed.states,
     currentAgentId: currentAgentId ?? null,
@@ -478,5 +491,5 @@ export function FirestoreStoreProvider({ children }: { children: React.ReactNode
     [agents, users, escalations, clearedEscalations, audit, currentAgentId, currentAgent, customerSource, ready, accessProblem],
   );
 
-  return <StoreContext.Provider value={value}>{children}</StoreContext.Provider>;
+  return <BaseStoreContext.Provider value={value}>{children}</BaseStoreContext.Provider>;
 }

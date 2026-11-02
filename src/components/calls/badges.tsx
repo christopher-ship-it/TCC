@@ -1,4 +1,5 @@
-import type { CallLogEntry } from '../../data/types';
+import { ThumbsDown, ThumbsUp } from 'lucide-react';
+import type { CallLogEntry, Lead, Priority } from '../../data/types';
 import { outcomeTone } from '../../lib/callStatus';
 import { sentimentBand } from '../../lib/analysis/model';
 import { Badge, type Tone } from '../../ui/primitives';
@@ -15,4 +16,32 @@ export function SentimentBadge({ score }: { score: number | null | undefined }) 
 
 export function OutcomeBadge({ call }: { call: CallLogEntry }) {
   return <Badge tone={outcomeTone(call)}>{call.outcome ? outcomeLabel(call.outcome) : call.status}</Badge>;
+}
+
+/** The agent's own positive / negative mark (not the sentiment the analysis measured). */
+/** How urgently a follow-up should be called: High red, Medium amber, Low grey. */
+export const PRIORITY_TONE: Record<Priority, Tone> = { High: 'danger', Medium: 'warn', Low: 'neutral' };
+
+/** Row colouring for the follow-up lists, so High-priority customers stand out. */
+export function priorityRowStyle(p: Priority | null | undefined): React.CSSProperties | undefined {
+  if (p === 'High') return { background: 'color-mix(in srgb, var(--danger) 9%, transparent)', boxShadow: 'inset 3px 0 0 var(--danger)' };
+  if (p === 'Medium') return { background: 'color-mix(in srgb, var(--warn) 8%, transparent)', boxShadow: 'inset 3px 0 0 var(--warn)' };
+  return undefined;
+}
+
+export function PriorityBadge({ priority }: { priority: Priority | null | undefined }) {
+  if (!priority) return null;
+  return <Badge tone={PRIORITY_TONE[priority]} dot>{priority}</Badge>;
+}
+
+export function LeadBadge({ lead, prefix }: { lead: Lead | null | undefined; prefix?: string }) {
+  if (!lead) return null;
+  const Icon = lead === 'positive' ? ThumbsUp : ThumbsDown;
+  const word = lead === 'positive' ? 'Positive' : 'Negative';
+  return (
+    <Badge tone={lead === 'positive' ? 'ok' : 'danger'} outline title="Marked by the agent after a call">
+      <Icon size={12} aria-hidden style={{ marginRight: 4, verticalAlign: '-1px' }} />
+      {prefix ? `${prefix} ${word.toLowerCase()}` : word}
+    </Badge>
+  );
 }

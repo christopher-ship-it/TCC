@@ -1,5 +1,7 @@
 import { defineConfig, loadEnv, type Plugin } from 'vite'
 import react from '@vitejs/plugin-react'
+import tailwindcss from '@tailwindcss/vite'
+import { fileURLToPath } from 'node:url'
 import { createApi } from './server/api.ts'
 import { readServerEnv } from './server/env.ts'
 import { BRANDS, brandKey } from './src/brand/profiles.ts'
@@ -15,9 +17,11 @@ function tccApi(): Plugin {
       api = createApi(readServerEnv(vars, config.root))
     },
     configureServer(server) {
+      api.startBackgroundJobs()
       server.middlewares.use((req, res, next) => void api(req, res, next))
     },
     configurePreviewServer(server) {
+      api.startBackgroundJobs()
       server.middlewares.use((req, res, next) => void api(req, res, next))
     },
   }
@@ -44,7 +48,8 @@ function brandHtml(): Plugin {
 
 // https://vite.dev/config/
 export default defineConfig({
-  plugins: [react(), tccApi(), brandHtml()],
+  plugins: [react(), tailwindcss(), tccApi(), brandHtml()],
+  resolve: { alias: { '@': fileURLToPath(new URL('./src', import.meta.url)) } },
   // Hosted (Railway) serves the built app with `vite preview`; its public hostname must be accepted.
   preview: { host: true, allowedHosts: true },
 })

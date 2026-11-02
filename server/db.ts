@@ -54,6 +54,158 @@ export const MIGRATIONS: { version: number; name: string; sql: string }[] = [
       );
     `,
   },
+  {
+    version: 2,
+    name: 'sign-in and sessions',
+    sql: `
+      create table logins (
+        agent_id text primary key,
+        username text unique not null,
+        password_hash text not null,
+        updated_at timestamptz not null default now()
+      );
+      create table sessions (
+        token_hash text primary key,
+        agent_id text not null,
+        created_at timestamptz not null default now(),
+        expires_at timestamptz not null
+      );
+      create index sessions_agent_idx on sessions (agent_id);
+      create index customers_updated_idx on customers (updated_at);
+      create index agents_updated_idx on agents (updated_at);
+      create index escalations_updated_idx on escalations (updated_at);
+    `,
+  },
+  {
+    version: 3,
+    name: 'super admin: events, inbox, last seen',
+    sql: `
+      create table events (
+        id bigserial primary key,
+        ts timestamptz not null,
+        level text not null,
+        source text not null,
+        message text not null,
+        agent_id text,
+        doc jsonb not null
+      );
+      create index events_ts_idx on events (ts desc);
+      create table notices (
+        id text primary key,
+        agent_id text not null,
+        kind text not null,
+        doc jsonb not null,
+        created_at timestamptz not null default now(),
+        done_at timestamptz
+      );
+      create index notices_agent_idx on notices (agent_id) where done_at is null;
+      alter table sessions add column last_seen_at timestamptz not null default now();
+    `,
+  },
+  {
+    version: 4,
+    name: 'notes for agents',
+    sql: `
+      create table notes (
+        id text primary key,
+        owner_id text not null,
+        audience text not null,
+        doc jsonb not null,
+        updated_at timestamptz not null default now()
+      );
+      create index notes_owner_idx on notes (owner_id);
+      create index notes_audience_idx on notes (audience);
+    `,
+  },
+  {
+    version: 5,
+    name: 'recordings announced by the carrier webhook',
+    sql: `
+      create table call_recordings (
+        file text primary key,
+        direction text,
+        remote text not null,
+        agent_user text,
+        started_at bigint not null,
+        talk_seconds int,
+        received_at timestamptz not null default now()
+      );
+      create index call_recordings_remote_idx on call_recordings (remote, started_at);
+    `,
+  },
+  {
+    version: 6,
+    name: 'languages: Others added, Bengali and English-for-customers retired',
+    sql: `
+      -- People who spoke Bengali now speak Hindi (order kept, no duplicates).
+      update agents set doc = jsonb_set(doc, '{languages}', (
+        select coalesce(jsonb_agg(v order by o), '[]'::jsonb)
+        from (select case when e = 'Bengali' then 'Hindi' else e end as v, min(ord) as o
+              from jsonb_array_elements_text(doc->'languages') with ordinality as t(e, ord) group by 1) s))
+      where doc->'languages' ? 'Bengali';
+      -- Customers are never called in English or Bengali: Bengali goes to Hindi, English to the state's language.
+      update customers set doc = jsonb_set(doc, '{language}', to_jsonb(case
+          when doc->>'language' = 'Bengali' then 'Hindi'
+          when coalesce(doc->>'effectiveState', 'Tamil Nadu') in ('Tamil Nadu', 'Puducherry') then 'Tamil'
+          when doc->>'effectiveState' = 'Kerala' then 'Malayalam'
+          when doc->>'effectiveState' = 'Karnataka' then 'Kannada'
+          when doc->>'effectiveState' in ('Andhra Pradesh', 'Telangana') then 'Telugu'
+          else 'Hindi' end::text))
+      where doc->>'language' in ('Bengali', 'English');
+    `,
+  },
+  {
+    version: 7,
+    name: 'call lists: No answer and Not reached, given to whoever calls new or follow-up customers',
+    sql: `
+      update agents set doc = jsonb_set(doc, '{queues}', (doc->'queues') || '["noanswer", "unreached"]'::jsonb)
+      where jsonb_typeof(doc->'queues') = 'array'
+        and (doc->'queues' ? 'new' or doc->'queues' ? 'followup')
+        and not doc->'queues' ? 'noanswer';
+    `,
+  },
+  {
+    version: 8,
+    name: 'log archives: old change-log entries and events move out of the live tables',
+    sql: `
+      create table audit_archive (
+        id text primary key,
+        ts timestamptz not null,
+        actor_id text not null,
+        action text not null,
+        doc jsonb not null
+      );
+      create index audit_archive_ts_idx on audit_archive (ts desc);
+      create table events_archive (
+        id bigserial primary key,
+        ts timestamptz not null,
+        level text not null,
+        source text not null,
+        message text not null,
+        agent_id text,
+        doc jsonb not null
+      );
+      create index events_archive_ts_idx on events_archive (ts desc);
+    `,
+  },
+  {
+    version: 9,
+    name: 'agents’ feedback on the AI’s call readings',
+    sql: `
+      create table ai_feedback (
+        id text primary key,
+        entry_id text not null,
+        app text not null,
+        agent_id text not null,
+        ts timestamptz not null default now(),
+        kind text not null,
+        verdict text not null,
+        doc jsonb not null
+      );
+      create index ai_feedback_ts_idx on ai_feedback (ts desc);
+      create index ai_feedback_app_idx on ai_feedback (app, ts desc);
+    `,
+  },
 ];
 
 export interface DbHealth {
@@ -66,7 +218,7 @@ export interface DbHealth {
   tables?: Record<string, number>;
 }
 
-const TABLES = ['agents', 'customers', 'escalations', 'audit_log', 'call_analyses', 'settings'] as const;
+const TABLES = ['agents', 'customers', 'escalations', 'audit_log', 'audit_archive', 'call_analyses', 'settings', 'logins', 'sessions', 'events', 'events_archive', 'ai_feedback', 'notices', 'notes', 'call_recordings'] as const;
 
 export function createDb(url: string | undefined) {
   let pool: pg.Pool | undefined;

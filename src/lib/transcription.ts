@@ -3,11 +3,12 @@
 // `npm run transcribe`) can still produce a bare transcript.
 
 import type { CallAnalysis, CallLogEntry, CustomerUser, Language } from '../data/types';
-import { TEST_NUMBER } from './telephony';
+import { TEST_NUMBER, isRealNumber } from './telephony';
+import { customerTypesFor } from '../data/products';
 
 export const TRANSCRIBE_URL = ((import.meta.env.VITE_TRANSCRIBE_URL as string | undefined)?.trim() || 'http://127.0.0.1:8787').replace(/\/$/, '');
 
-const LANGUAGE_CODES: Record<Language, string> = { Tamil: 'ta', Telugu: 'te', Kannada: 'kn', Malayalam: 'ml', Hindi: 'hi', Bengali: 'bn', English: 'en' };
+const LANGUAGE_CODES: Record<Language, string | undefined> = { Tamil: 'ta', Telugu: 'te', Kannada: 'kn', Malayalam: 'ml', Hindi: 'hi', Others: undefined, English: 'en' };
 
 /** The customer's language as a Whisper hint. Skipped in test mode, where the person on the phone is the tester, not the customer. */
 export function languageHint(language?: Language): string | undefined {
@@ -36,12 +37,14 @@ export function serverHealth(): Promise<ServerHealth | null> {
 async function viaServer(entry: CallLogEntry, user: CustomerUser): Promise<CallAnalysis> {
   const res = await fetch('/api/analyze', {
     method: 'POST',
+    signal: AbortSignal.timeout(300_000), // a request that hangs becomes an error with a retry button, not an endless spinner
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       file: entry.telephony?.recordingFile,
-      customer: TEST_NUMBER ? undefined : user.name,
-      business: TEST_NUMBER ? undefined : user.business,
+      customer: TEST_NUMBER && !isRealNumber(user) ? undefined : user.name,
+      business: TEST_NUMBER && !isRealNumber(user) ? undefined : user.business,
       app: user.app,
+      customerTypes: customerTypesFor(user.app),
       levels: entry.telephony?.levels,
     }),
   });

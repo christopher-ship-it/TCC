@@ -7,7 +7,8 @@ import { POSITIVE_OUTCOMES } from '../../data/types';
 import { APP_LOGOS } from '../../assets';
 import { inrLabel, fmtDay } from '../../lib/dates';
 import { agentScores, allCalls, callsByDay, DAY, isConnected, sentimentSummary } from '../../lib/metrics';
-import { BarList, ColumnChart, Legend } from '../../ui/charts';
+import { BarList } from '../../ui/charts';
+import { MetricChart } from '../../ui/MetricChart';
 import { Badge, Card, PageHead, Stat } from '../../ui/primitives';
 
 /** The owner's view across every app: customers, money, the calling funnel and service health. */
@@ -89,12 +90,8 @@ export default function Overview() {
       </div>
 
       <div className="grid-2">
-        <Card title="New sign-ups" sub="Customers registering per day, last 14 days">
-          <ColumnChart ariaLabel="New sign-ups per day" data={signups} series={[{ label: 'Sign-ups', color: 'var(--series-1)' }]} />
-        </Card>
-        <Card title="Calls per day" sub="Last 14 days" actions={<Legend items={[{ label: 'Connected', color: 'var(--series-1)' }, { label: 'Didn’t connect', color: 'var(--series-4)' }]} />}>
-          <ColumnChart ariaLabel="Calls per day" data={daily.map((d) => ({ label: d.label, values: [d.connected, d.missed] }))} series={[{ label: 'Connected', color: 'var(--series-1)' }, { label: 'Didn’t connect', color: 'var(--series-4)' }]} />
-        </Card>
+        <MetricChart title="New sign-ups" value={signups.reduce((n, d) => n + d.values[0], 0).toLocaleString('en-IN')} note="last 14 days" data={signups.map((d) => ({ label: d.label, value: d.values[0] }))} />
+        <MetricChart title="Calls per day" value={daily.reduce((n, d) => n + d.connected + d.missed, 0).toLocaleString('en-IN')} note={`${daily.reduce((n, d) => n + d.connected, 0)} connected, last 14 days`} data={daily.map((d) => ({ label: d.label, value: d.connected + d.missed }))} />
       </div>
 
       <div className="grid-3">

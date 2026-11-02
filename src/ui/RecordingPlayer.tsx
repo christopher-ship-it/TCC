@@ -41,6 +41,14 @@ export function RecordingPlayer({ src, durationHint, onTime, registerSeek, sampl
     setCurrent(0);
   }, [src]);
 
+  function retry() {
+    const el = audio.current;
+    setError(null);
+    if (!el) return;
+    el.load(); // asks the server again
+    void el.play().catch(() => undefined);
+  }
+
   async function toggle() {
     const el = audio.current;
     if (!el) return;
@@ -88,6 +96,7 @@ export function RecordingPlayer({ src, durationHint, onTime, registerSeek, sampl
       {error && (
         <span className="row" style={{ fontSize: 12.5, color: 'var(--danger)' }}>
           <AlertTriangle size={14} /> {error}
+          <Button variant="ghost" size="sm" icon={<RotateCcw size={13} />} onClick={retry}>Try again</Button>
         </span>
       )}
       {sample && <span className="muted" style={{ fontSize: 12.5 }}>Demo call — this plays a stand-in clip, not a real recording.</span>}

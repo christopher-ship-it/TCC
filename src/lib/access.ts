@@ -2,6 +2,7 @@
 // (capabilities), and — for calling — which queues, languages and states they work.
 
 import type { AgentAccount, AppId, Capability, Language, QueueKey, Role } from '../data/types';
+import { AGENT_LANGUAGES } from './languages.ts';
 
 export const ALL_APPS: AppId[] = ['realbroks', 'irondrobe', 'influnet', 'vehigo', 'vanmoh'];
 
@@ -66,11 +67,11 @@ export interface AccessTemplate {
 }
 
 export const ACCESS_TEMPLATES: AccessTemplate[] = [
-  { id: 'new-agent', label: 'New agent', help: 'New registrations and follow-ups. Calls are reviewed.', role: 'agent', queues: ['new', 'followup'], caps: ['call', 'tickets', 'recordings'], dailyTarget: 30, trainee: true },
-  { id: 'follow-up', label: 'Follow-up caller', help: 'Works warm leads through the weekly follow-up chain.', role: 'agent', queues: ['followup', 'inactive'], caps: ['call', 'tickets', 'recordings'], dailyTarget: 50 },
+  { id: 'new-agent', label: 'New agent', help: 'New registrations and follow-ups. Calls are reviewed.', role: 'agent', queues: ['new', 'followup', 'noanswer', 'unreached'], caps: ['call', 'tickets', 'recordings'], dailyTarget: 30, trainee: true },
+  { id: 'follow-up', label: 'Follow-up caller', help: 'Works warm leads through the weekly follow-up chain.', role: 'agent', queues: ['followup', 'inactive', 'noanswer', 'unreached'], caps: ['call', 'tickets', 'recordings'], dailyTarget: 50 },
   { id: 'payments', label: 'Payments desk', help: 'Dues, failed payments and drop-offs. Can mark dues paid.', role: 'agent', queues: ['payments', 'errors'], caps: ['call', 'tickets', 'recordings', 'payments'], dailyTarget: 50 },
   { id: 'support', label: 'Support desk', help: 'Tickets and app errors.', role: 'agent', queues: ['tickets', 'errors'], caps: ['call', 'tickets', 'recordings'], dailyTarget: 40 },
-  { id: 'supervisor', label: 'Supervisor', help: 'Every queue, team numbers, audits and access for agents.', role: 'supervisor', queues: ['new', 'tickets', 'payments', 'followup', 'errors', 'inactive'], caps: DEFAULT_CAPS.supervisor, dailyTarget: 0 },
+  { id: 'supervisor', label: 'Supervisor', help: 'Every queue, team numbers, audits and access for agents.', role: 'supervisor', queues: ['new', 'tickets', 'payments', 'followup', 'errors', 'inactive', 'noanswer', 'unreached'], caps: DEFAULT_CAPS.supervisor, dailyTarget: 0 },
   { id: 'admin', label: 'Admin', help: 'Full access to every app, person and number.', role: 'admin', queues: [], caps: DEFAULT_CAPS.admin, dailyTarget: 0 },
 ];
 
@@ -81,11 +82,11 @@ export const LANGUAGE_SCRIPT: Record<Language, string> = {
   Kannada: 'ಕನ್ನಡ',
   Malayalam: 'മലയാളം',
   Hindi: 'हिन्दी',
-  Bengali: 'বাংলা',
+  Others: 'Others',
   English: 'English',
 };
 
-export const ALL_LANGUAGES: Language[] = ['Tamil', 'Telugu', 'Kannada', 'Malayalam', 'Hindi', 'Bengali', 'English'];
+export const ALL_LANGUAGES: Language[] = AGENT_LANGUAGES;
 
 /** A plain-language sentence list describing a person's scope — shown while it is being edited. */
 export function describeScope(a: Pick<AgentAccount, 'role' | 'apps' | 'queues' | 'languages' | 'states' | 'capabilities'>, appName: (id: AppId) => string, queueLabel: (q: QueueKey) => string): { can: string[]; cannot: string[] } {

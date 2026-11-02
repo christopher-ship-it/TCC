@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
-import { ArrowRight, CircleDollarSign, Headset, Lock, PhoneOff, Ticket } from 'lucide-react';
+import { ArrowRight, CircleDollarSign, Headset, Lock, PhoneOff, ThumbsDown, ThumbsUp, Ticket, Trash2 } from 'lucide-react';
 import { useStore } from '../store/StoreContext';
 import { APPS } from '../data/seed';
 import { QUEUES } from '../data/types';
@@ -12,15 +12,20 @@ import { can, LANGUAGE_SCRIPT } from '../lib/access';
 import { customerJourney, durationLabel, isConnected, journeyVerdict } from '../lib/metrics';
 import { talkShare } from '../lib/analysis/speakers';
 import { whyInQueue } from '../lib/whyInQueue';
+import { AUTO_FOLLOWUP_DAYS, chainDay } from '../lib/followUps';
+import { daysAgoLabel, fmtDayTime } from '../lib/dates';
 import { formatDuration } from '../telephony';
-import { OutcomeBadge, SentimentBadge } from '../components/calls/badges';
+import { LeadBadge, OutcomeBadge, SentimentBadge } from '../components/calls/badges';
 import { analysisState } from '../lib/callStatus';
 import { TicketDialog } from '../components/agent/TicketDialog';
 import { ColumnChart, Legend, LineChart } from '../ui/charts';
-import { Badge, Button, Callout, Card, Empty, PageHead, Select, Stat } from '../ui/primitives';
+import { Badge, Button, Callout, Card, Empty, Field, PageHead, Select, Stat, Textarea } from '../ui/primitives';
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { DataSourceCard, OriginBadge } from '../components/customer/DataSource';
 import { useToast } from '../ui/toastContext';
 import './customer.css';
+import { FillDetailsButton, filledInNote } from '../components/customers/CustomerDetails';
+import { nameUnknown, placeLine } from '../lib/appSync';
 
 export default function CustomerPage() {
   const { id } = useParams<{ id: string }>();
@@ -30,6 +35,8 @@ export default function CustomerPage() {
   const agent = currentAgent!;
   const user = state.users.find((u) => u.id === id);
   const [ticket, setTicket] = useState(false);
+  const [removing, setRemoving] = useState(false);
+  const [reason, setReason] = useState('');
   const journey = useMemo(() => (user ? customerJourney(user) : []), [user]);
 
   if (!user) return <div className="page"><Empty title="Customer not found" action={<Link to="/" className="btn">Go home</Link>} /></div>;
@@ -49,6 +56,7 @@ export default function CustomerPage() {
   const answered = journey.filter((p) => p.talkSec > 0);
   const canCall = agent.role === 'agent' && can(agent, user.app, 'call');
   const manage = agent.role !== 'agent';
+  const gone = user.deleted;
   const reassignable = state.agents.filter((a) => a.role === 'agent' && a.apps.includes(user.app) && (a.status ?? 'active') === 'active');
 
   return (
@@ -57,16 +65,19 @@ export default function CustomerPage() {
         eyebrow={<button type="button" className="btn btn--link" onClick={() => navigate(-1)}>← Back</button>}
         title={
           <span className="row" style={{ gap: 12 }}>
-            {user.name}
+            {nameUnknown(user) ? 'Name not given' : user.name}
             <Badge tone={verdict.tone}>{verdict.label}</Badge>
+            <LeadBadge lead={user.lead} />
           </span>
         }
-        desc={`${user.business} · ${user.city}, ${user.effectiveState} · ${user.phone}`}
+        desc={user.manual ? [user.phone, user.business, user.city].filter((x) => x && x !== '—').join(' · ') : `${placeLine(user)} · ${user.phone}${filledInNote(user) ? ` · ${filledInNote(user)}` : ''}`}
         actions={
           <>
-            {canCall && <Button variant="primary" icon={<Headset size={16} />} onClick={() => navigate(`/work/${user.app}?${user.queue ? `queue=${user.queue}&` : ''}focus=${user.id}`)}>Call {user.name.split(' ')[0]}</Button>}
-            {can(agent, user.app, 'tickets') && <Button icon={<Ticket size={15} />} onClick={() => setTicket(true)}>Raise ticket</Button>}
-            {user.paymentDue && can(agent, user.app, 'payments') && (
+            {canCall && !gone && <Button variant="primary" icon={<Headset size={16} />} onClick={() => navigate(`/work/${user.app}?${user.queue ? `queue=${user.queue}&` : ''}focus=${user.id}`)}>{nameUnknown(user) ? 'Call' : `Call ${user.name.split(' ')[0]}`}</Button>}
+            {!gone && <FillDetailsButton user={user} size="md" />}
+            {!gone && <Button icon={<Trash2 size={15} />} onClick={() => setRemoving(true)}>Delete</Button>}
+            {can(agent, user.app, 'tickets') && !gone && <Button icon={<Ticket size={15} />} onClick={() => setTicket(true)}>Raise ticket</Button>}
+            {user.paymentDue && !gone && can(agent, user.app, 'payments') && (
               <Button icon={<CircleDollarSign size={15} />} onClick={() => { dispatch({ type: 'MARK_PAID', userId: user.id, actorId: agent.id }); toast('Marked as paid'); }}>
                 Mark ₹{user.paymentDue.amount.toLocaleString('en-IN')} paid
               </Button>
@@ -75,22 +86,34 @@ export default function CustomerPage() {
         }
       />
 
+      {gone && (
+        <Callout tone="danger">
+          <b>Deleted by {gone.byName}</b> on {gone.atLabel}. Reason: {gone.reason}
+          <br />They no longer appear in customers, search or queues. Their calls are kept. Adding this number again brings them back.
+        </Callout>
+      )}
+
       <div className="row" style={{ gap: 8 }}>
         <img src={APP_LOGOS[app.id]} alt={app.name} style={{ height: 18, width: 96, objectFit: 'contain', objectPosition: 'left center' }} />
         <Badge tone="accent"><span className="chip__script">{LANGUAGE_SCRIPT[user.language]}</span>{user.language !== 'English' ? ` · ${user.language}` : ''}</Badge>
-        <Badge tone={user.plan === 'Paid' ? 'ok' : 'neutral'}>{F ? (user.plan === 'Paid' ? F.paid : F.free) : `${user.plan} plan`}</Badge>
+        {!user.manual && <Badge tone={user.plan === 'Paid' ? 'ok' : 'neutral'}>{F ? (user.plan === 'Paid' ? F.paid : F.free) : `${user.plan} plan`}</Badge>}
         {user.queue && <Badge>In {QUEUES.find((q) => q.key === user.queue)?.label}</Badge>}
         <OriginBadge user={user} />
         <span className="mono muted" style={{ fontSize: 12.5 }}>{user.shopCode}</span>
       </div>
 
-      {whyInQueue(user) && <Callout tone="warn">{whyInQueue(user)}</Callout>}
+      {!user.manual && whyInQueue(user) && <Callout tone="warn">{whyInQueue(user)}</Callout>}
+      {user.note && <Callout tone="accent">{user.note}</Callout>}
 
       <div className="stats">
         <Stat label="Calls" value={user.callHistory.length} note={`${connectedCalls.length} connected`} />
         <Stat label="Talk time" value={durationLabel(talk)} note={connectedCalls.length ? `${formatDuration(Math.round(talk / Math.max(1, connectedCalls.length)))} average` : 'Not reached yet'} />
         <Stat label="Average sentiment" value={avg ?? '—'} tone={avg === null ? undefined : avg >= 60 ? 'ok' : avg <= 40 ? 'danger' : undefined} note={trend === null ? `${scored.length} analysed call${scored.length === 1 ? '' : 's'}` : `${trend >= 0 ? '+' : ''}${trend} since first analysed call`} />
-        <Stat label="Conversion score" value={user.conversionScore} note="Out of 100, from app activity" />
+        {user.manual ? (
+          <Stat label="Last call" value={user.callHistory[0]?.atLabel.split(' · ')[0] ?? '—'} note={user.callHistory[0] ? (user.callHistory[0].outcome ? outcomeLabel(user.callHistory[0].outcome) : user.callHistory[0].status) : `Added ${user.registeredAtLabel}`} />
+        ) : (
+          <Stat label="Conversion score" value={user.conversionScore} note="Out of 100, from app activity" />
+        )}
       </div>
 
       <div className="grid-2">
@@ -159,6 +182,7 @@ export default function CustomerPage() {
                       <div className="row" style={{ justifyContent: 'space-between' }}>
                         <span className="muted" style={{ fontSize: 13 }}>{c.atLabel} · {c.agentName}{c.telephony?.durationSec ? ` · ${formatDuration(c.telephony.durationSec)}` : ''}</span>
                         <span className="row" style={{ gap: 6 }}>
+                          <LeadBadge lead={c.lead} prefix="Marked" />
                           <SentimentBadge score={c.analysis?.sentiment} />
                           <OutcomeBadge call={c} />
                         </span>
@@ -189,7 +213,17 @@ export default function CustomerPage() {
 
         <div className="stack" style={{ gap: 16 }}>
           <Card title="Profile">
-            {F ? (
+            {user.manual ? (
+              <>
+                <div className="kv"><span>Product</span><span>{app.name}</span></div>
+                <div className="kv"><span>Mobile</span><span className="mono">{user.phone}</span></div>
+                <div className="kv"><span>Type</span><span>{user.customerType ?? '—'}</span></div>
+                <div className="kv"><span>Language</span><span>{user.language}</span></div>
+                <div className="kv"><span>Heard about the app via</span><span>{user.source ?? '—'}</span></div>
+                {user.city !== '—' && <div className="kv"><span>City</span><span>{user.city}</span></div>}
+                <div className="kv"><span>Added</span><span>{user.registeredAtLabel}</span></div>
+              </>
+            ) : F ? (
               <>
                 <div className="kv"><span>{F.app}</span><span>{app.name}</span></div>
                 <div className="kv"><span>{F.registered}</span><span>{user.registeredAtLabel} · {user.registeredDaysAgo}d ago</span></div>
@@ -206,13 +240,47 @@ export default function CustomerPage() {
                 <div className="kv"><span>Plan</span><span>{user.plan}{user.planNote ? ` · ${user.planNote}` : ''}</span></div>
                 <div className="kv"><span>{user.app === 'realbroks' ? 'Listings' : 'Orders'}</span><span className="mono">{user.listings}</span></div>
                 {user.app === 'realbroks' && <div className="kv"><span>Buyers added</span><span className="mono">{user.buyers}</span></div>}
+                {user.app === 'irondrobe' && user.sync && <div className="kv"><span>End customers</span><span className="mono">{user.buyers}</span></div>}
                 <div className="kv"><span>Last opened app</span><span>{user.lastOpenLabel}</span></div>
                 <div className="kv"><span>App version</span><span>{user.appVersion}</span></div>
                 {user.mrr ? <div className="kv"><span>Pays</span><span className="mono">₹{user.mrr.toLocaleString('en-IN')} / mo</span></div> : null}
               </>
             )}
+            {user.sync && (
+              <>
+                <div className="kv"><span>Setup reached</span><span>{user.sync.stageLabel ?? '—'}{user.sync.onboardingCompleted ? ' · done' : ''}</span></div>
+                {user.sync.lastActiveTs ? <div className="kv"><span>Last active</span><span>{daysAgoLabel(user.sync.lastActiveTs, Date.now())}</span></div> : null}
+                {user.sync.lastError ? <div className="kv"><span>Last error</span><span>{user.sync.lastError.message}</span></div> : null}
+                {user.sync.platform ? <div className="kv"><span>Phone</span><span>{user.sync.platform === 'ios' ? 'iPhone' : user.sync.platform === 'android' ? 'Android' : user.sync.platform}</span></div> : null}
+                {user.sync.email ? <div className="kv"><span>Email</span><span>{user.sync.email}</span></div> : null}
+                {user.sync.accountStatus !== 'active' ? <div className="kv"><span>Account</span><span>{user.sync.accountStatus === 'deleted' ? 'Deleted in the app' : 'Blocked in the app'}</span></div> : null}
+                <div className="kv"><span>From {app.name}</span><span className="muted">updated {fmtDayTime(user.sync.syncedAt)}</span></div>
+              </>
+            )}
           </Card>
           <DataSourceCard user={user} />
+          {!gone && (
+            <Card title="Positive or negative" sub="Your own call on this customer, separate from what they said">
+              <div className="row" style={{ gap: 8 }} role="group" aria-label="Positive or negative">
+                {(['positive', 'negative'] as const).map((l) => (
+                  <Button
+                    key={l}
+                    size="sm"
+                    variant={user.lead === l ? 'primary' : 'secondary'}
+                    aria-pressed={user.lead === l}
+                    icon={l === 'positive' ? <ThumbsUp size={14} /> : <ThumbsDown size={14} />}
+                    onClick={() => {
+                      const next = user.lead === l ? null : l;
+                      dispatch({ type: 'SET_LEAD', userId: user.id, lead: next });
+                      toast(next ? `Marked ${next}` : 'Mark cleared');
+                    }}
+                  >
+                    {l === 'positive' ? 'Positive' : 'Negative'}
+                  </Button>
+                ))}
+              </div>
+            </Card>
+          )}
           <Card title="Owner">
             <div className="stack" style={{ gap: 10 }}>
               <span>{owner ? <><b>{owner.name}</b> <span className="muted">· {owner.languages.join(', ')}</span></> : <span className="muted">No owner — the queue decides who calls next.</span>}</span>
@@ -238,6 +306,13 @@ export default function CustomerPage() {
               <div className="kv"><span>Status</span><Badge tone={user.paymentDue.status === 'upcoming' ? 'neutral' : 'warn'}>{user.paymentDue.status}</Badge></div>
             </Card>
           )}
+          {user.callback && !gone && (
+            <Card title="Next call">
+              <div className="kv"><span>Call on</span><span>{new Date(user.callback.dueTs).toLocaleDateString('en-IN', { weekday: 'short', day: 'numeric', month: 'short' })}</span></div>
+              <div className="kv"><span>Set by</span><span>{user.callback.auto ? 'Automatic follow-up' : 'An agent'}</span></div>
+              {user.autoFollowUp && <div className="kv"><span>Automatic calls</span><span>Day {chainDay(user.autoFollowUp)} of {AUTO_FOLLOWUP_DAYS}, until they answer</span></div>}
+            </Card>
+          )}
           {user.followUp && (
             <Card title="Follow-up chain">
               <div className="kv"><span>Week</span><span className="mono">{user.followUp.weekNumber}</span></div>
@@ -253,6 +328,21 @@ export default function CustomerPage() {
         </div>
       </div>
       {ticket && <TicketDialog user={user} onClose={() => setTicket(false)} />}
+      <Dialog open={removing} onOpenChange={(o) => { if (!o) { setRemoving(false); setReason(''); } }}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Delete {user.name}?</DialogTitle>
+            <DialogDescription>They disappear from customers, search and queues. Say why — for example “test customer” or “duplicate”. The reason is shown on their page and kept in the super admin’s log.</DialogDescription>
+          </DialogHeader>
+          <Field label="Reason" htmlFor="del-reason">
+            <Textarea id="del-reason" autoFocus value={reason} onChange={(e) => setReason(e.target.value)} placeholder="Test customer" />
+          </Field>
+          <div className="row" style={{ justifyContent: 'flex-end', gap: 8 }}>
+            <Button onClick={() => { setRemoving(false); setReason(''); }}>Cancel</Button>
+            <Button variant="primary" disabled={!reason.trim()} onClick={() => { dispatch({ type: 'DELETE_CUSTOMER', userId: user.id, actorId: agent.id, reason }); setRemoving(false); setReason(''); toast('Customer deleted'); }}>Delete customer</Button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
