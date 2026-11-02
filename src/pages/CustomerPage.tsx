@@ -18,6 +18,7 @@ import { analysisState } from '../lib/callStatus';
 import { TicketDialog } from '../components/agent/TicketDialog';
 import { ColumnChart, Legend, LineChart } from '../ui/charts';
 import { Badge, Button, Callout, Card, Empty, PageHead, Select, Stat } from '../ui/primitives';
+import { DataSourceCard, OriginBadge } from '../components/customer/DataSource';
 import { useToast } from '../ui/toastContext';
 import './customer.css';
 
@@ -79,6 +80,7 @@ export default function CustomerPage() {
         <Badge tone="accent"><span className="chip__script">{LANGUAGE_SCRIPT[user.language]}</span>{user.language !== 'English' ? ` · ${user.language}` : ''}</Badge>
         <Badge tone={user.plan === 'Paid' ? 'ok' : 'neutral'}>{F ? (user.plan === 'Paid' ? F.paid : F.free) : `${user.plan} plan`}</Badge>
         {user.queue && <Badge>In {QUEUES.find((q) => q.key === user.queue)?.label}</Badge>}
+        <OriginBadge user={user} />
         <span className="mono muted" style={{ fontSize: 12.5 }}>{user.shopCode}</span>
       </div>
 
@@ -210,6 +212,7 @@ export default function CustomerPage() {
               </>
             )}
           </Card>
+          <DataSourceCard user={user} />
           <Card title="Owner">
             <div className="stack" style={{ gap: 10 }}>
               <span>{owner ? <><b>{owner.name}</b> <span className="muted">· {owner.languages.join(', ')}</span></> : <span className="muted">No owner — the queue decides who calls next.</span>}</span>

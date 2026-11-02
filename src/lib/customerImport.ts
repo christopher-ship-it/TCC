@@ -49,6 +49,8 @@ export interface ImportRowError {
 export interface ParsedCustomerImport {
   customers: CustomerUser[];
   errors: ImportRowError[];
+  /** Rows that were imported, but with something changed (e.g. a named owner who can't be given real customers). */
+  warnings: ImportRowError[];
 }
 
 /**
@@ -57,10 +59,11 @@ export interface ParsedCustomerImport {
  * customer unless it fails validation, in which case it's skipped and reported in `errors` — the
  * whole import never fails for one bad row.
  */
-export function parseCustomerCsv(text: string, stateDefs: StateCatalogEntry[]): ParsedCustomerImport {
+export function parseCustomerCsv(text: string, stateDefs: StateCatalogEntry[], ownerIds?: ReadonlySet<string>): ParsedCustomerImport {
   const lines = text.split(/\r\n|\r|\n/).filter((l) => l.trim().length > 0);
   const errors: ImportRowError[] = [];
-  if (lines.length === 0) return { customers: [], errors: [{ row: 0, message: 'File is empty.' }] };
+  const warnings: ImportRowError[] = [];
+  if (lines.length === 0) return { customers: [], errors: [{ row: 0, message: 'File is empty.' }], warnings };
 
   const header = parseCsvLine(lines[0]).map((h) => h.trim().toLowerCase());
   const col = (name: string) => header.indexOf(name);
@@ -71,7 +74,7 @@ export function parseCustomerCsv(text: string, stateDefs: StateCatalogEntry[]): 
     ownerAgentId: col('owner_agent_id'),
   };
   if (idx.app === -1 || idx.name === -1 || idx.phone === -1) {
-    return { customers: [], errors: [{ row: 1, message: 'Header must include at least: app, name, phone.' }] };
+    return { customers: [], errors: [{ row: 1, message: 'Header must include at least: app, name, phone.' }], warnings };
   }
 
   const customers: CustomerUser[] = [];
@@ -117,10 +120,14 @@ export function parseCustomerCsv(text: string, stateDefs: StateCatalogEntry[]): 
 
     const listings = Number(get(idx.listings)) || 0;
     const buyers = Number(get(idx.buyers)) || 0;
-    const ownerAgentId = get(idx.ownerAgentId) || null;
+    // `ownerIds` is who may own a real customer (active, non-demo people). Anyone else named in the file is dropped.
+    const namedOwner = get(idx.ownerAgentId) || null;
+    const ownerAgentId = namedOwner && ownerIds && !ownerIds.has(namedOwner) ? null : namedOwner;
+    if (namedOwner && !ownerAgentId) warnings.push({ row: rowNum, message: `Owner "${namedOwner}" is not an active, non-demo person — imported without an owner.` });
 
     customers.push({
       id,
+      origin: 'app',
       shopCode: `TS${id.slice(5, 15).padStart(10, '0')}`,
       name,
       business: get(idx.business) || name,
@@ -150,5 +157,5 @@ export function parseCustomerCsv(text: string, stateDefs: StateCatalogEntry[]): 
     });
   }
 
-  return { customers, errors };
+  return { customers, errors, warnings };
 }

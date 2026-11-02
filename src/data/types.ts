@@ -85,6 +85,11 @@ export interface AgentAccount {
   telecmiUserId?: string;
   /** Suspended people cannot sign in. Missing on older records = active. */
   status?: AccountStatus;
+  /**
+   * A practice account, set by an admin. Demo accounts only ever see demo customers (origin 'sample'), never get real
+   * customers assigned, never count in real numbers, and their calls only ring the test line (src/lib/world.ts).
+   */
+  demo?: boolean;
   /** Per-app capabilities. Missing for an app = the role's defaults (src/lib/access.ts). */
   capabilities?: Partial<Record<AppId, Capability[]>>;
   phone?: string;
@@ -190,6 +195,8 @@ export interface AuditEntry {
   ts: number;
   actorId: string;
   actorName: string;
+  /** Done by a demo account — kept out of the real change log. */
+  demo?: boolean;
   action: AuditAction;
   /** Who or what was changed (a person, a customer, a list). */
   target?: string;
@@ -238,8 +245,20 @@ export interface EscalationRecord {
   clearMinutes?: number;
 }
 
+/**
+ * Where a customer record came from.
+ *  - 'app'    — the real customer: it came from the product's own data (RealBroks, IronDrobe, …) via the admin import
+ *               (a CSV export today; the same stamp will mark a live sync).
+ *  - 'tcc'    — made inside TCC: a number an agent dialled that isn't a customer yet.
+ *  - 'sample' — demo data: generated, or made by a demo account. Never a real person.
+ * Records saved before this field existed are classified by `originOf()` (src/lib/world.ts).
+ */
+export type Origin = 'app' | 'tcc' | 'sample';
+
 export interface CustomerUser {
   id: string;
+  /** See `Origin`. Read it through `originOf()`, which also classifies older records. */
+  origin?: Origin;
   shopCode: string;
   name: string;
   business: string;

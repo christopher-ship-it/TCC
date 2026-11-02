@@ -1,6 +1,9 @@
 import type { AgentAccount, AppId, CustomerUser, QueueKey } from '../data/types';
+import { sameWorld } from './world.ts';
 
-export function isReachable(agent: AgentAccount, user: CustomerUser): boolean {
+export function isReachable(agent: Pick<AgentAccount, 'apps' | 'languages' | 'states' | 'demo'>, user: CustomerUser): boolean {
+  // A demo account is only ever served demo customers, and a real one only real customers — whatever else it covers.
+  if (!sameWorld(agent, user)) return false;
   if (!agent.apps.includes(user.app)) return false;
   const stateOk = agent.states.includes(user.effectiveState);
   const langOk = user.state === null ? true : agent.languages.includes(user.language);
@@ -68,11 +71,10 @@ export function nextTask(agent: AgentAccount, users: CustomerUser[], appId: AppI
 }
 
 /** Customers in queues that someone with this scope could be served (apps × states × languages). */
-export function reachableCount(scope: Pick<AgentAccount, 'apps' | 'languages' | 'states'>, users: CustomerUser[]): number {
+export function reachableCount(scope: Pick<AgentAccount, 'apps' | 'languages' | 'states' | 'demo'>, users: CustomerUser[]): number {
   let n = 0;
   for (const u of users) {
-    if (!u.queue || !scope.apps.includes(u.app) || !scope.states.includes(u.effectiveState)) continue;
-    if (u.state !== null && !scope.languages.includes(u.language)) continue;
+    if (!u.queue || !isReachable(scope, u)) continue;
     n++;
   }
   return n;

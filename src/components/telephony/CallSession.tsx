@@ -7,7 +7,7 @@ import { TelephonyProvider, useTelephony, type CallResult } from '../../telephon
 import { useStore } from '../../store/StoreContext';
 import type { CustomerUser } from '../../data/types';
 import { hasRealRecording } from '../../lib/attachRecording';
-import { DEFAULT_COUNTRY_CODE, LIVE_DIAL_BLOCKED, callMeta, dialNumberFor, telephonyProvider } from '../../lib/telephony';
+import { DEFAULT_COUNTRY_CODE, callMeta, dialPlanFor, telephonyProvider } from '../../lib/telephony';
 import { analyzeCall, AnalysisUnavailable } from '../../lib/transcription';
 import { CallSessionContext, type CallSessionValue } from './callSessionContext';
 
@@ -95,9 +95,10 @@ function Session({ children }: { children: ReactNode }) {
   const dial = useCallback(
     (user: CustomerUser) => {
       if (!currentAgent) return { ok: false as const, message: 'Sign in first.' };
-      if (LIVE_DIAL_BLOCKED && !user.adHoc) return { ok: false as const, message: 'Live dialling is off while customer numbers are sample data.' };
+      const plan = dialPlanFor(user, currentAgent);
+      if (plan.mode === 'blocked') return { ok: false as const, message: plan.reason };
       if (wrapRef.current) return { ok: false as const, message: 'Log the last call before starting another.' };
-      const r = controller.dial(dialNumberFor(user), callMeta(user, currentAgent));
+      const r = controller.dial(plan.number, callMeta(user, currentAgent, plan));
       return r.ok ? { ok: true as const } : { ok: false as const, message: DIAL_ERROR[r.reason] };
     },
     [controller, currentAgent],

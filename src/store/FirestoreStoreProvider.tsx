@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   addDoc,
   deleteField,
+  documentId,
   getDoc,
   limit,
   onSnapshot,
@@ -9,6 +10,7 @@ import {
   query,
   setDoc,
   updateDoc,
+  where,
   writeBatch,
 } from 'firebase/firestore';
 import type { User } from 'firebase/auth';
@@ -20,6 +22,7 @@ import type { AgentAccount, AuditAction, AuditEntry, CustomerOverlay, CustomerUs
 import { NEGATIVE_OUTCOMES } from '../data/types';
 import { fmtDay, fmtDayTime } from '../lib/dates';
 import { isReachable } from '../lib/queue';
+import { isRealOrigin, originOf, scopeFor } from '../lib/world';
 import { attachRecording, withAnalysis } from '../lib/attachRecording';
 import { buildCallLogEntry } from '../lib/callLog';
 import { recordingUrlFor } from '../lib/telephony';
@@ -27,9 +30,10 @@ import { auditEntry, StoreContext, type AccountResult, type Action, type State }
 
 const DAY_MS = 86400000;
 
-// Sample fallback only — used until an admin imports real customers (People/admin › Customers),
-// at which point customersMasterRef() is non-empty and wins. Agents and everything an agent does to
-// a customer record — call logs, tickets, follow-ups, escalations — is live Firestore data either way.
+// The demo sandbox: generated customers that only demo accounts ever see (src/lib/world.ts). They live in memory, are
+// never written to the customer list, and stay available after real customers are imported. Real customers come from
+// customersMasterRef() (admin › Customers). Everything an agent does to a customer — call logs, tickets, follow-ups,
+// escalations — is live Firestore data in either world.
 const sampleSeed = generateSeed();
 
 export function FirestoreStoreProvider({ children }: { children: React.ReactNode }) {
@@ -46,13 +50,9 @@ export function FirestoreStoreProvider({ children }: { children: React.ReactNode
   const [accessProblem, setAccessProblem] = useState<string | null>(null);
   const signedInLogged = useRef(false);
 
-  // Numbers dialled directly are master docs too, but they must not switch the sample set off.
-  const importedCustomers = useMemo(() => (masterCustomers ?? []).filter((u) => !u.adHoc), [masterCustomers]);
-  const customerSource: 'sample' | 'imported' = importedCustomers.length > 0 ? 'imported' : 'sample';
-  const master = useMemo(
-    () => [...(customerSource === 'imported' ? importedCustomers : sampleSeed.users), ...(masterCustomers ?? []).filter((u) => u.adHoc)],
-    [customerSource, importedCustomers, masterCustomers],
-  );
+  // Numbers dialled directly are master docs too, but they are not "loaded real customers".
+  const customerSource: 'sample' | 'imported' = (masterCustomers ?? []).some((u) => originOf(u) === 'app') ? 'imported' : 'sample';
+  const master = useMemo(() => [...(masterCustomers ?? []), ...sampleSeed.users], [masterCustomers]);
 
   const users: CustomerUser[] = useMemo(
     () => master.map((u) => (overlayMap[u.id] ? { ...u, ...overlayMap[u.id] } : u)),
@@ -128,27 +128,46 @@ export function FirestoreStoreProvider({ children }: { children: React.ReactNode
         setAccessProblem('Your access has been turned off. Ask your admin.');
         void signOutOfFirebase();
       }),
-      onSnapshot(customersMasterRef(), (snap) => {
-        setMasterCustomers(snap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<CustomerUser, 'id'>) })));
-      }, (err) => console.error('customersMaster snapshot error', err)),
-      onSnapshot(overlayRef(), (snap) => {
-        const map: Record<string, CustomerOverlay> = {};
-        snap.forEach((d) => { map[d.id] = d.data() as CustomerOverlay; });
-        setOverlayMap(map);
-      }, (err) => console.error('overlay snapshot error', err)),
       onSnapshot(query(escalationsRef(), orderBy('raisedTs', 'desc')), (snap) => {
         setEscalations(snap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<EscalationRecord, 'id'>) })));
       }, (err) => console.error('escalations snapshot error', err)),
       onSnapshot(query(clearedEscalationsRef(), orderBy('resolvedTs', 'desc'), limit(20)), (snap) => {
         setClearedEscalations(snap.docs.map((d) => {
           const data = d.data() as any;
-          return { id: d.id, atLabel: data.atLabel, name: data.name, action: data.action, result: data.result, minutes: data.minutes };
+          return { id: d.id, atLabel: data.atLabel, name: data.name, action: data.action, result: data.result, minutes: data.minutes, demo: data.demo as boolean | undefined };
         }));
       }, (err) => console.error('clearedEscalations snapshot error', err)),
     ];
     return () => unsubs.forEach((u) => u());
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [listening, currentAgentId]);
+
+  // Customers. A demo account's browser never downloads a real customer: it asks only for demo records.
+  const iAmDemo = !!(agents ?? []).find((a) => a.id === currentAgentId)?.demo;
+  const knowsWho = agents !== null;
+  useEffect(() => {
+    if (!listening || !knowsWho) return;
+    const masterQuery = iAmDemo ? query(customersMasterRef(), where('origin', '==', 'sample')) : customersMasterRef();
+    // Demo records are the generated ids (u-…) and numbers dialled by demo accounts (demo-adhoc-…).
+    const range = (prefix: string) => query(overlayRef(), where(documentId(), '>=', prefix), where(documentId(), '<', `${prefix.slice(0, -1)}${String.fromCharCode(prefix.charCodeAt(prefix.length - 1) + 1)}`));
+    const overlayFeeds = iAmDemo ? [range('u-'), range('demo-adhoc-')] : [overlayRef()];
+    const overlays: Record<string, CustomerOverlay>[] = overlayFeeds.map(() => ({}));
+    const publish = () => setOverlayMap(Object.assign({}, ...overlays));
+    const unsubs = [
+      onSnapshot(masterQuery, (snap) => {
+        setMasterCustomers(snap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<CustomerUser, 'id'>) })));
+      }, (err) => console.error('customersMaster snapshot error', err)),
+      ...overlayFeeds.map((feed, i) =>
+        onSnapshot(feed, (snap) => {
+          const map: Record<string, CustomerOverlay> = {};
+          snap.forEach((d) => { map[d.id] = d.data() as CustomerOverlay; });
+          overlays[i] = map;
+          publish();
+        }, (err) => console.error('overlay snapshot error', err)),
+      ),
+    ];
+    return () => unsubs.forEach((u) => u());
+  }, [listening, knowsWho, iAmDemo]);
 
   // The change log is for supervisors and admins (firestore.rules); agents never ask for it.
   const myRole = (agents ?? []).find((a) => a.id === currentAgentId)?.role;
@@ -280,7 +299,9 @@ export function FirestoreStoreProvider({ children }: { children: React.ReactNode
         }
         writeOverlay(esc.userId, overlayPatch);
 
+        const actorIsDemo = !!agentsRefLive.current?.find((a) => a.id === action.actorId)?.demo;
         await addDoc(clearedEscalationsRef(), stripUndefined({
+          ...(actorIsDemo ? { demo: true } : {}),
           atLabel: fmtDayTime(Date.now()).split(' · ')[1],
           resolvedTs: Date.now(),
           name: esc.userName,
@@ -294,7 +315,21 @@ export function FirestoreStoreProvider({ children }: { children: React.ReactNode
       case 'UPDATE_AGENT': {
         const target = agentsRefLive.current?.find((a) => a.id === action.agentId);
         await updateDoc(agentDoc(action.agentId), stripUndefined(action.patch as Record<string, unknown>));
-        writeAudit(action.actorId, action.auditAction ?? 'access_changed', target?.name, action.detail);
+        // Turning someone into a demo account takes the real customers they own back, so a real agent can be served them.
+        const owned = action.patch.demo && !target?.demo && db ? usersRef.current.filter((u) => u.ownerAgentId === action.agentId && isRealOrigin(originOf(u))) : [];
+        if (owned.length && db) {
+          let batch = writeBatch(db);
+          let n = 0;
+          for (const u of owned) {
+            batch.set(overlayDoc(u.id), { ownerAgentId: null }, { merge: true });
+            if (++n % 400 === 0) {
+              await batch.commit();
+              batch = writeBatch(db);
+            }
+          }
+          if (n % 400 !== 0) await batch.commit();
+        }
+        writeAudit(action.actorId, action.auditAction ?? 'access_changed', target?.name, owned.length ? `${action.detail} · ${owned.length} real customer${owned.length === 1 ? '' : 's'} released from them` : action.detail);
         return;
       }
       case 'REASSIGN_OWNER': {
@@ -327,7 +362,7 @@ export function FirestoreStoreProvider({ children }: { children: React.ReactNode
         let count = 0;
         for (const u of action.customers) {
           const { id, ...rest } = u;
-          batch.set(customerMasterDoc(id), stripUndefined(rest));
+          batch.set(customerMasterDoc(id), stripUndefined({ ...rest, origin: 'app' as const }));
           count += 1;
           if (count % 400 === 0) {
             await batch.commit();
@@ -428,11 +463,9 @@ export function FirestoreStoreProvider({ children }: { children: React.ReactNode
   const ready = authUser === null || (authUser !== undefined && currentAgentId !== undefined && (currentAgentId === null || agents !== null));
 
   const state: State = {
-    agents: agents ?? [],
-    users,
-    escalations,
-    clearedEscalations,
-    audit,
+    ...scopeFor(currentAgent, { agents: agents ?? [], users, escalations, clearedEscalations, audit }),
+    allAgents: agents ?? [],
+    allUsers: users,
     apps: sampleSeed.apps,
     states: sampleSeed.states,
     currentAgentId: currentAgentId ?? null,

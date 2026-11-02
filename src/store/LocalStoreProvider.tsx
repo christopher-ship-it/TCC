@@ -7,17 +7,33 @@ import { isReachable } from '../lib/queue';
 import { attachRecording, cleanLegacyCallData, withAnalysis } from '../lib/attachRecording';
 import { buildCallLogEntry } from '../lib/callLog';
 import { recordingUrlFor } from '../lib/telephony';
-import { auditEntry, StoreContext, type Action, type State } from './context';
+import { isRealOrigin, originOf, scopeFor } from '../lib/world';
+import { auditEntry, StoreContext, type Action, type RawState } from './context';
 
 const STORAGE_KEY = 'tcc-store-v1';
 const DAY_MS = 86400000;
 
-function loadInitial(): State {
+/**
+ * Browsers that saved their data before demo accounts existed hold only the generated roster and customers, so all of
+ * it is demo: flag it, otherwise the new rules would hide every customer from every account.
+ */
+function markLegacyAsDemo(s: RawState): RawState {
+  if (s.agents.some((a) => a.demo !== undefined)) return s;
+  return {
+    ...s,
+    agents: s.agents.map((a) => ({ ...a, demo: true })),
+    audit: s.audit.map((e) => ({ ...e, demo: true })),
+    clearedEscalations: s.clearedEscalations.map((c) => ({ ...c, demo: true })),
+    users: s.users.map((u) => (u.origin ? u : { ...u, origin: originOf(u) })),
+  };
+}
+
+function loadInitial(): RawState {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (raw) {
-      const parsed = JSON.parse(raw) as State;
-      if (parsed.users && parsed.agents) return { ...parsed, audit: parsed.audit ?? [], users: cleanLegacyCallData(parsed.users), customerSource: parsed.customerSource ?? 'sample' };
+      const parsed = JSON.parse(raw) as RawState;
+      if (parsed.users && parsed.agents) return markLegacyAsDemo({ ...parsed, audit: parsed.audit ?? [], users: cleanLegacyCallData(parsed.users), customerSource: parsed.customerSource ?? 'sample' });
     }
   } catch {
     // fall through to fresh seed
@@ -28,11 +44,11 @@ function loadInitial(): State {
 
 const MAX_AUDIT = 2000;
 
-function withAudit(state: State, entry: ReturnType<typeof auditEntry>): State {
+function withAudit(state: RawState, entry: ReturnType<typeof auditEntry>): RawState {
   return { ...state, audit: [entry, ...state.audit].slice(0, MAX_AUDIT) };
 }
 
-function reducer(state: State, action: Action): State {
+function reducer(state: RawState, action: Action): RawState {
   switch (action.type) {
     case 'LOGIN':
       return withAudit({ ...state, currentAgentId: action.agentId }, auditEntry(state.agents, action.agentId, 'signed_in', undefined, 'Signed in'));
@@ -166,8 +182,9 @@ function reducer(state: State, action: Action): State {
         }
         return { ...u, ownerAgentId: action.reassignAgentId ?? u.ownerAgentId, hasActiveEscalation: stillPending };
       });
+      const demo = !!state.agents.find((a) => a.id === action.actorId)?.demo;
       const clearedEscalations = [
-        { id: `cleared-${Date.now()}`, atLabel: fmtDayTime(Date.now()).split(' · ')[1], name: esc.userName, action: esc.type === 'reroute' ? `Reroute → ${esc.targetLanguage}` : `Escalation → ${esc.reason}`, result: 'Approved · reassigned', minutes: Math.round((Date.now() - esc.raisedTs) / 60000) || 5 },
+        { id: `cleared-${Date.now()}`, atLabel: fmtDayTime(Date.now()).split(' · ')[1], name: esc.userName, action: esc.type === 'reroute' ? `Reroute → ${esc.targetLanguage}` : `Escalation → ${esc.reason}`, result: 'Approved · reassigned', minutes: Math.round((Date.now() - esc.raisedTs) / 60000) || 5, ...(demo ? { demo } : {}) },
         ...state.clearedEscalations,
       ];
       return withAudit({ ...state, escalations, users, clearedEscalations }, auditEntry(state.agents, action.actorId, 'escalation_approved', esc.userName, `${clearedEscalations[0].action} · ${action.resolutionNote || 'approved'}`));
@@ -181,8 +198,9 @@ function reducer(state: State, action: Action): State {
         const stillPending = escalations.some((e) => e.userId === u.id && e.status === 'pending');
         return { ...u, hasActiveEscalation: stillPending };
       });
+      const demo = !!state.agents.find((a) => a.id === action.actorId)?.demo;
       const clearedEscalations = [
-        { id: `cleared-${Date.now()}`, atLabel: fmtDayTime(Date.now()).split(' · ')[1], name: esc.userName, action: esc.type === 'reroute' ? `Reroute → ${esc.targetLanguage}` : `Escalation → ${esc.reason}`, result: 'Declined · kept with agent', minutes: Math.round((Date.now() - esc.raisedTs) / 60000) || 5 },
+        { id: `cleared-${Date.now()}`, atLabel: fmtDayTime(Date.now()).split(' · ')[1], name: esc.userName, action: esc.type === 'reroute' ? `Reroute → ${esc.targetLanguage}` : `Escalation → ${esc.reason}`, result: 'Declined · kept with agent', minutes: Math.round((Date.now() - esc.raisedTs) / 60000) || 5, ...(demo ? { demo } : {}) },
         ...state.clearedEscalations,
       ];
       return withAudit({ ...state, escalations, users, clearedEscalations }, auditEntry(state.agents, action.actorId, 'escalation_declined', esc.userName, `${clearedEscalations[0].action} · ${action.resolutionNote || 'declined'}`));
@@ -196,7 +214,11 @@ function reducer(state: State, action: Action): State {
       const target = state.agents.find((a) => a.id === action.agentId);
       if (!target) return state;
       const agents = state.agents.map((a) => (a.id === action.agentId ? { ...a, ...action.patch } : a));
-      return withAudit({ ...state, agents }, auditEntry(state.agents, action.actorId, action.auditAction ?? 'access_changed', target.name, action.detail));
+      // Turning someone into a demo account takes the real customers they own back, so they can be served by a real agent.
+      const released = action.patch.demo && !target.demo ? state.users.filter((u) => u.ownerAgentId === target.id && isRealOrigin(originOf(u))).length : 0;
+      const users = released ? state.users.map((u) => (u.ownerAgentId === target.id && isRealOrigin(originOf(u)) ? { ...u, ownerAgentId: null } : u)) : state.users;
+      const detail = released ? `${action.detail} · ${released} real customer${released === 1 ? '' : 's'} released from them` : action.detail;
+      return withAudit({ ...state, agents, users }, auditEntry(state.agents, action.actorId, action.auditAction ?? 'access_changed', target.name, detail));
     }
     case 'REASSIGN_OWNER': {
       const user = state.users.find((u) => u.id === action.userId);
@@ -222,13 +244,17 @@ function reducer(state: State, action: Action): State {
       // Keep whatever an agent has already done (call history, tickets, follow-ups, ownership) for
       // any customer id that reappears in the new file; everything else comes in fresh.
       const existingById = new Map(state.users.map((u) => [u.id, u]));
-      const users = action.customers.map((u) => {
+      const imported = action.customers.map((u) => {
         const prev = existingById.get(u.id);
-        return prev ? { ...u, ...overlayFromUser(prev) } : u;
+        const real = { ...u, origin: 'app' as const };
+        return prev ? { ...real, ...overlayFromUser(prev) } : real;
       });
+      // The demo sandbox (generated customers, numbers dialled by demo accounts) stays; only the real list is replaced.
+      const kept = state.users.filter((u) => originOf(u) !== 'app');
+      const users = [...imported, ...kept];
       return withAudit(
         { ...state, users, customerSource: 'imported' },
-        auditEntry(state.agents, action.actorId, 'customers_imported', undefined, `Imported ${users.length} real customers (CSV)`),
+        auditEntry(state.agents, action.actorId, 'customers_imported', undefined, `Imported ${imported.length} real customers (CSV)`),
       );
     }
     case 'CLOSE_FOLLOWUP':
@@ -245,6 +271,7 @@ function reducer(state: State, action: Action): State {
         } : u)),
       };
     case 'AUTO_DISTRIBUTE': {
+      // isReachable keeps the worlds apart: a demo agent is never made the owner of a real customer, nor a real agent of a demo one.
       const users = state.users.map((u) => {
         if (u.ownerAgentId || !u.queue) return u;
         const owner = state.agents.find((a) => a.role === 'agent' && (a.status ?? 'active') === 'active' && a.queues.includes(u.queue as QueueKey) && isReachable(a, u));
@@ -267,13 +294,14 @@ function reducer(state: State, action: Action): State {
 // lives in this browser's localStorage. This is what the published single-file
 // artifact preview runs on, and it's the zero-setup path for local dev.
 export function LocalStoreProvider({ children }: { children: React.ReactNode }) {
-  const [state, dispatch] = useReducer(reducer, undefined, loadInitial);
+  const [raw, dispatch] = useReducer(reducer, undefined, loadInitial);
 
   useEffect(() => {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
-  }, [state]);
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(raw));
+  }, [raw]);
 
-  const currentAgent = useMemo(() => state.agents.find((a) => a.id === state.currentAgentId) ?? null, [state.agents, state.currentAgentId]);
+  const currentAgent = useMemo(() => raw.agents.find((a) => a.id === raw.currentAgentId) ?? null, [raw.agents, raw.currentAgentId]);
+  const state = useMemo(() => ({ ...scopeFor(currentAgent, raw), allAgents: raw.agents, allUsers: raw.users }), [raw, currentAgent]);
   const createAgent = useMemo(
     () => async (agent: AgentAccount, actorId: string) => {
       dispatch({ type: 'CREATE_AGENT', agent, actorId });

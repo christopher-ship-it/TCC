@@ -87,3 +87,18 @@ test('the downloadable template parses back with zero errors', () => {
   assert.deepEqual(errors, []);
   assert.equal(customers.length, 1);
 });
+
+test('every imported row is stamped as real data from the app', () => {
+  const csv = `${HEADER}\nrealbroks,A,9876543210,,,,,,,,,\nirondrobe,B,9876543211,,,,,,,,,`;
+  assert.deepEqual(parse(csv).customers.map((c) => c.origin), ['app', 'app']);
+});
+
+test('an owner who may not hold real customers (a demo or unknown person) is dropped with a warning', () => {
+  const csv = `${HEADER}\nrealbroks,A,9876543210,,,,,,,,,ravi-s\nrealbroks,B,9876543211,,,,,,,,,demo-dev\nrealbroks,C,9876543212,,,,,,,,,`;
+  const { customers, errors, warnings } = parseCustomerCsv(csv, STATES, new Set(['ravi-s']));
+  assert.deepEqual(errors, []);
+  assert.deepEqual(customers.map((c) => c.ownerAgentId), ['ravi-s', null, null]);
+  assert.equal(warnings.length, 1);
+  assert.equal(warnings[0].row, 3);
+  assert.match(warnings[0].message, /demo-dev/);
+});

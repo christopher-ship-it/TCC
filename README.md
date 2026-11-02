@@ -45,7 +45,8 @@ attention, red = risk). Tokens live in `src/styles/tokens.css`, components in `s
 - **Admins** — an overview across every app (customers, revenue, sign-ups, the sign-up-to-paying
   funnel, service health) and a geography map.
 
-Sign-in is a demo until accounts move to a server: the password is not checked.
+Sign-in on the local demo build is cosmetic (the password is not checked). With Firebase configured, everyone signs
+in with their own login — see `docs/AUTH.md`.
 
 ## Data backend
 
@@ -59,13 +60,30 @@ The app runs on one of two backends, chosen automatically:
   and updates live across every browser signed into it (`src/store/FirestoreStoreProvider.tsx`).
 
 Either way, **customer master data** (name, phone, city, plan, registration date — the fields that
-belong to the actual RealBroks/IronDrobe apps) is still the generated sample set
-(`src/data/seed.ts`). It hasn't been wired to the real app database yet; that's a separate,
-pending integration once its connection details are available. The split is deliberate:
+belong to the actual RealBroks/IronDrobe apps) comes from an admin's CSV import (admin › Customers).
+There is **no live API sync from RealBroks/IronDrobe yet** — the import is the only way real customers
+get in; a future sync would stamp its records the same way. The split is deliberate:
 `CustomerOverlay` (`src/data/types.ts`) is exactly the subset of a customer record TCC itself
-owns and writes — everything else on `CustomerUser` is master data. Swapping the master data
-source later means replacing `generateSeed()`'s customer generation with a real fetch; nothing in
-the overlay/store/UI layer needs to change.
+owns and writes (calls, tickets, follow-ups, owner) — everything else on `CustomerUser` is master data.
+
+### Real data, demo data, and demo accounts
+
+Two worlds share one database and never mix (`src/lib/world.ts` is the one place the rules live):
+
+- **Where a customer came from** — every customer is stamped with an `origin`:
+  `app` (imported from RealBroks/IronDrobe — real), `tcc` (a number an agent dialled that isn't a customer yet — real),
+  or `sample` (generated demo data, or made by a demo account). Customer pages, the call workspace and
+  **admin › Go-live check** show it; call logs, tickets, follow-ups and owners are always TCC's own, on top of either.
+- **Demo accounts** — an admin switches **Demo account** on for a person (People & access › Details). A demo account
+  only ever sees demo customers; it is never given a real customer (queues, allocation, the CSV owner column and
+  *Give unowned customers an owner* all skip it); its calls, tickets and change-log lines stay out of real numbers; and
+  its calls can only ring the test number (`VITE_TELEPHONY_TEST_NUMBER`), never a customer. Switching someone to demo
+  releases the real customers they own. The generated demo customers stay available after a real import, so demo
+  accounts keep working.
+- This separation is enforced in the app (and, for demo browsers, by what they ask Firestore for). Firestore rules
+  still treat every signed-in, active person as able to read — see "Known limits" in `docs/AUTH.md`.
+- The built-in sample roster (Ravi S, …) are demo accounts. On the local single-browser build everyone is therefore
+  in the demo world; real data needs the Firebase build.
 
 ### Firebase setup
 
@@ -89,19 +107,24 @@ TCC integrates with TeleCMI (`piopiyjs`) to provide an in-browser WebRTC softpho
 
 ### Safe Dialling Modes
 
-Because TCC's default customer database contains generated sample users (`src/data/seed.ts`) with randomly generated phone numbers, clicking **"Call"** would ring random strangers across India if dialled live.
-
-To protect developers and avoid toll charges, TCC enforces three dialling safety modes in [`src/lib/telephony.ts`](src/lib/telephony.ts):
+Demo customers (`src/data/seed.ts`) have randomly generated phone numbers, so they must never be dialled for real.
+Whether a call goes out, and to which number, is decided **per call** by [`src/lib/dialPolicy.ts`](src/lib/dialPolicy.ts):
+a demo account only ever rings the test number (or is blocked if none is set), and a demo customer is never dialled
+for real by anyone. For real accounts and real customers, three deployment modes apply
+([`src/lib/telephony.ts`](src/lib/telephony.ts)):
 
 | Mode | Configuration in `.env.local` | Behavior |
 | :--- | :--- | :--- |
 | **1. Test Redirect Mode** *(Default in Dev)* | `VITE_TELEPHONY_TEST_NUMBER=8270942966` | Every click-to-call action redirects to this specific mobile phone, regardless of which customer is being viewed. A yellow banner warns the agent: *"Test mode — every call rings 8270942966"*. |
 | **2. Production Live Mode** | `VITE_TELEPHONY_LIVE=true`<br>`# VITE_TELEPHONY_TEST_NUMBER=` (leave unset) | **Production mode.** Dials each customer's real individual number (`user.phone`) directly from your TeleCMI trunk. The yellow banner disappears. |
-| **3. Safety Lock** | Both unset / empty | Calling is disabled. A protective banner informs the agent that live dialling is locked to prevent ringing mock numbers. |
+| **3. Safety Lock** | Both unset / empty | Calling is disabled for customers. A banner tells the agent live dialling is locked. (A number typed into **Dial a number** is still dialled as typed.) |
+
+Check which mode a deployment is in, and everything else that has to be true before real clients use it, under
+**admin › Go-live check**.
 
 ### How to Switch to Production Calling
 
-When connecting TCC to real customer data (Firestore, Postgres, or your CRM API):
+Once real customers have been imported (admin › Customers):
 
 1. **Update `.env` (or production environment variables)**:
    ```bash

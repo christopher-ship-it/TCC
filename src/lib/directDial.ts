@@ -1,18 +1,20 @@
 // "Dial a number": a call to a number that is not in the customer list. It still needs a customer record to hang
 // the call log, recording and analysis on, so the number gets a minimal one (flagged `adHoc`, in no queue).
 import { normalizePhone } from '../telephony/core/phone-number.ts';
-import type { AppId, CustomerUser } from '../data/types.ts';
+import type { AppId, CustomerUser, Origin } from '../data/types.ts';
 
-export const adHocId = (digits: string) => `adhoc-${digits}`;
+/** A demo account's numbers are kept apart from real ones, so the same number can exist in both worlds. */
+export const adHocId = (digits: string, demo = false) => `${demo ? 'demo-' : ''}adhoc-${digits}`;
 
 /** E.164 digits for what the agent typed, or null when it can't be a phone number. */
 export function directDialDigits(raw: string, countryCode: string): string | null {
   return normalizePhone(raw, { defaultCountryCode: countryCode });
 }
 
-export function adHocCustomer(digits: string, app: AppId, now = Date.now()): CustomerUser {
+export function adHocCustomer(digits: string, app: AppId, now = Date.now(), origin: Origin = 'tcc'): CustomerUser {
   return {
-    id: adHocId(digits),
+    id: adHocId(digits, origin === 'sample'),
+    origin,
     shopCode: `DD${digits.slice(-10).padStart(10, '0')}`,
     name: `+${digits}`,
     business: 'Direct call',

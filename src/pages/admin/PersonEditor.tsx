@@ -6,6 +6,7 @@ import { BRAND, WHITE_LABEL } from '../../brand';
 import { QUEUES, type AgentAccount, type AppId, type Capability, type Language, type QueueKey, type Role } from '../../data/types';
 import { ACCESS_TEMPLATES, ALL_LANGUAGES, CAPABILITIES, LANGUAGE_SCRIPT, ROLE_INFO, canManage, capsFor, describeScope, isActive } from '../../lib/access';
 import { reachableCount } from '../../lib/queue';
+import { originOf } from '../../lib/world';
 import { fmtDayTime } from '../../lib/dates';
 import { Avatar, Badge, Button, Callout, CheckBox, Chip, Field, Input, Sheet, Tabs, Toggle } from '../../ui/primitives';
 import { useToast } from '../../ui/toastContext';
@@ -19,6 +20,7 @@ interface Draft {
   phone: string;
   role: Role;
   trainee: boolean;
+  demo: boolean;
   apps: AppId[];
   capabilities: Partial<Record<AppId, Capability[]>>;
   queues: QueueKey[];
@@ -35,11 +37,11 @@ const queueLabel = (q: QueueKey) => QUEUES.find((x) => x.key === q)?.label ?? q;
 function toDraft(a?: AgentAccount): Draft {
   if (!a) {
     const t = ACCESS_TEMPLATES[0];
-    return { name: '', username: '', email: '', phone: '', role: t.role, trainee: !!t.trainee, apps: [APPS[0].id], capabilities: { [APPS[0].id]: t.caps }, queues: t.queues, languages: ['Tamil'], states: ['Tamil Nadu'], dailyTarget: t.dailyTarget, clickToDial: true, telecmiUserId: '' };
+    return { name: '', username: '', email: '', phone: '', role: t.role, trainee: !!t.trainee, demo: false, apps: [APPS[0].id], capabilities: { [APPS[0].id]: t.caps }, queues: t.queues, languages: ['Tamil'], states: ['Tamil Nadu'], dailyTarget: t.dailyTarget, clickToDial: true, telecmiUserId: '' };
   }
   const caps: Partial<Record<AppId, Capability[]>> = {};
   for (const app of a.apps) caps[app] = capsFor(a, app);
-  return { name: a.name, username: a.username, email: a.email ?? '', phone: a.phone ?? '', role: a.role, trainee: !!a.trainee, apps: a.apps, capabilities: caps, queues: a.queues, languages: a.languages, states: a.states, dailyTarget: a.dailyTarget, clickToDial: a.clickToDial, telecmiUserId: a.telecmiUserId ?? '' };
+  return { name: a.name, username: a.username, email: a.email ?? '', phone: a.phone ?? '', role: a.role, trainee: !!a.trainee, demo: !!a.demo, apps: a.apps, capabilities: caps, queues: a.queues, languages: a.languages, states: a.states, dailyTarget: a.dailyTarget, clickToDial: a.clickToDial, telecmiUserId: a.telecmiUserId ?? '' };
 }
 
 const list = (xs: string[]) => (xs.length ? xs.join(', ') : 'none');
@@ -50,6 +52,7 @@ function diff(before: Draft, after: Draft): string[] {
   if (before.name !== after.name) out.push(`Name: ${after.name}`);
   if (before.role !== after.role) out.push(`Role: ${ROLE_INFO[before.role].label} → ${ROLE_INFO[after.role].label}`);
   if (before.trainee !== after.trainee) out.push(after.trainee ? 'Marked trainee' : 'No longer a trainee');
+  if (before.demo !== after.demo) out.push(after.demo ? 'Made a demo account' : 'Made a real account');
   const addApps = after.apps.filter((x) => !before.apps.includes(x));
   const delApps = before.apps.filter((x) => !after.apps.includes(x));
   if (addApps.length) out.push(`Added to ${list(addApps.map(appName))}`);
@@ -94,8 +97,9 @@ export function PersonEditor({ person, onClose }: { person?: AgentAccount; onClo
   const liveApps = APPS.filter((a) => a.live || d.role === 'admin');
   const changes = creating ? [] : diff(initial, d);
   const scope = describeScope(d, appName, queueLabel);
-  const reach = reachableCount(d, state.users);
-  const usernameTaken = state.agents.some((a) => a.username.toLowerCase() === d.username.trim().toLowerCase() && a.id !== person?.id);
+  const reach = reachableCount(d, state.allUsers);
+  const realOwned = person && !person.demo ? state.allUsers.filter((u) => u.ownerAgentId === person.id && originOf(u) !== 'sample').length : 0;
+  const usernameTaken = state.allAgents.some((a) => a.username.toLowerCase() === d.username.trim().toLowerCase() && a.id !== person?.id);
   const errors = {
     name: !d.name.trim() ? 'Enter their name.' : null,
     username: !/^[a-z0-9._-]{3,}$/.test(d.username.trim()) ? 'Use 3+ lowercase letters, numbers, dots or dashes.' : usernameTaken ? 'Someone already has this username.' : null,
@@ -149,6 +153,9 @@ export function PersonEditor({ person, onClose }: { person?: AgentAccount; onClo
       phone: d.phone.trim() || undefined,
       role: d.role,
       trainee: d.trainee || undefined,
+      // Written as an explicit true/false so switching it off actually clears it.
+      // Someone added from a demo account is a demo account too, or they would vanish from the list that made them.
+      demo: actor.demo ? true : d.demo,
       apps: d.role === 'admin' ? APPS.map((a) => a.id) : d.apps,
       capabilities: d.role === 'admin' ? undefined : d.capabilities,
       queues: d.role === 'admin' ? [] : d.queues,
@@ -287,6 +294,24 @@ export function PersonEditor({ person, onClose }: { person?: AgentAccount; onClo
                 </div>
               </div>
               {d.role === 'agent' && <Toggle checked={d.trainee} onChange={(v) => set('trainee', v)} label="Trainee" help="Supervisors see a trainee badge and review their calls first." />}
+              {actor.role === 'admin' && !actor.demo && (
+                <div className="stack" style={{ gap: 8 }}>
+                  <Toggle
+                    checked={d.demo}
+                    onChange={(v) => set('demo', v)}
+                    disabled={self}
+                    label="Demo account"
+                    help="For practice and training. They only see demo customers, are never given real ones, don’t count in real numbers, and their calls ring the test line only."
+                  />
+                  {self && <span className="muted" style={{ fontSize: 13 }}>You can’t make your own account a demo account.</span>}
+                  {!creating && d.demo && !person?.demo && (
+                    <Callout tone="warn">
+                      Saving makes {person?.name} a demo account.
+                      {realOwned > 0 ? ` The ${realOwned.toLocaleString('en-IN')} real customer${realOwned === 1 ? '' : 's'} they own will be released so another agent can take them.` : ' They own no real customers.'}
+                    </Callout>
+                  )}
+                </div>
+              )}
             </>
           )}
 

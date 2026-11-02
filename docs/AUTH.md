@@ -49,3 +49,7 @@ npm run test:rules                          # the Firestore rules, against the e
 - Admins cannot set another person's password; people reset their own from the sign-in page.
 - If creating the login succeeds but linking it fails, the login is orphaned; link it by hand in the console.
 - Overlay writes (call logs, tickets) are open to every active person; the rules only guard ownership changes.
+- Demo accounts (see README › "Real data, demo data, and demo accounts") are separated from real data by the app, not
+  by Firestore rules: the rules let every active person read customers, so a determined demo user with a developer
+  console could read real records. Their browsers only ask for demo records, and only admins can set the demo flag,
+  but treat demo accounts as staff you trust, not as outsiders.

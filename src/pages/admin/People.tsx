@@ -19,16 +19,18 @@ export default function People() {
   const [showSuspended, setShowSuspended] = useState(false);
   const [q, setQ] = useState('');
   const editId = params.get('edit');
-  const editing = editId === 'new' ? 'new' : state.agents.find((a) => a.id === editId);
+  const editing = editId === 'new' ? 'new' : (actor.demo ? state.agents : state.allAgents).find((a) => a.id === editId);
 
   const startOfToday = new Date().setHours(0, 0, 0, 0);
   const callsToday = useMemo(() => {
     const m = new Map<string, number>();
-    for (const u of state.users) for (const c of u.callHistory) if (c.atTs >= startOfToday) m.set(c.agentName, (m.get(c.agentName) ?? 0) + 1);
+    for (const u of state.allUsers) for (const c of u.callHistory) if (c.atTs >= startOfToday) m.set(c.agentName, (m.get(c.agentName) ?? 0) + 1);
     return m;
-  }, [state.users, startOfToday]);
+  }, [state.allUsers, startOfToday]);
 
-  const visible = state.agents.filter((a) => (actor.role === 'admin' ? true : a.role === 'agent' || a.id === actor.id));
+  // Real admins manage everyone, demo accounts included (that is where the demo switch is). A demo account only sees demo people.
+  const roster = actor.demo ? state.agents : state.allAgents;
+  const visible = roster.filter((a) => (actor.role === 'admin' ? true : a.role === 'agent' || a.id === actor.id));
   const people = visible
     .filter((a) => role === 'all' || a.role === role)
     .filter((a) => showSuspended || isActive(a))
@@ -89,6 +91,7 @@ export default function People() {
                   <td>
                     {ROLE_INFO[a.role].label}
                     {a.trainee && <> <Badge tone="accent">Trainee</Badge></>}
+                    {a.demo && <> <Badge tone="warn" title="Practice account — sees demo customers only, never real ones">Demo</Badge></>}
                   </td>
                   <td>
                     <span className="people-apps">

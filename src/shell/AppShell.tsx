@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
-import { BarChart3, ChevronDown, ClipboardList, Database, Flag, Headset, History, Home, LogOut, Map, Phone, RotateCcw, Search, Shuffle, Users, UsersRound } from 'lucide-react';
+import { BarChart3, ChevronDown, ClipboardList, Database, Flag, Headset, History, Home, ListChecks, LogOut, Map, Phone, RotateCcw, Search, Shuffle, Users, UsersRound } from 'lucide-react';
 import { BRAND_MARK } from '../assets';
 import { APPS } from '../data/seed';
 import type { AppId, Role } from '../data/types';
@@ -41,7 +41,10 @@ function navFor(role: Role, pendingEscalations: number, firstApp: AppId | undefi
   ];
   const people: NavItem[] = [{ to: '/people', label: 'People & access', icon: <UsersRound size={s} /> }];
   if (canExportOrAudit) people.push({ to: '/audit', label: 'Change log', icon: <ClipboardList size={s} /> });
-  if (role === 'admin') people.push({ to: '/customers-import', label: 'Customers', icon: <Database size={s} /> });
+  if (role === 'admin') {
+    people.push({ to: '/customers-import', label: 'Customers', icon: <Database size={s} /> });
+    people.push({ to: '/readiness', label: 'Go-live check', icon: <ListChecks size={s} /> });
+  }
   if (role === 'supervisor') return [{ title: 'Team', items: team }, { title: 'Admin', items: people }];
   return [
     { title: 'Business', items: [{ to: '/overview', label: 'Overview', icon: <Home size={s} /> }, { to: '/geography', label: 'Geography', icon: <Map size={s} /> }] },
@@ -182,11 +185,16 @@ export default function AppShell() {
   const pending = state.escalations.filter((e) => e.status === 'pending' && visibleApps.includes(e.app)).length;
   const firstLiveApp = visibleApps.find((id) => APPS.find((a) => a.id === id)?.live);
   const nav = navFor(currentAgent.role, pending, firstLiveApp, canAnywhere(currentAgent, 'export') || currentAgent.role !== 'agent');
-  const showScope = currentAgent.role !== 'agent' && visibleApps.length > 1 && !location.pathname.startsWith('/people') && !location.pathname.startsWith('/audit') && !location.pathname.startsWith('/customers');
+  const showScope = currentAgent.role !== 'agent' && visibleApps.length > 1 && !location.pathname.startsWith('/people') && !location.pathname.startsWith('/audit') && !location.pathname.startsWith('/customers') && !location.pathname.startsWith('/readiness');
 
   return (
     <ScopeContext.Provider value={scope}>
       <div className="shell">
+        {currentAgent.demo && (
+          <div className="shell-demo" role="status">
+            <b>Demo account</b> — practice customers only. Nothing here is a real customer, and calls only ring the test line.
+          </div>
+        )}
         <header className="shell-header">
           <div className="shell-header__row">
             <button type="button" className="shell-brand" onClick={() => navigate('/')} aria-label="Command Center home">
